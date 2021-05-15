@@ -1,0 +1,4 @@
+# Node.js & npm
+node_modules
+*.log
+*.tgz

@@ -1,0 +1,28 @@
+{
+  "name": "zanjerito",
+  "version": "1.0.0",
+  "description": "A little irrigation controller.",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PixnBits/zanjerito.git"
+  },
+  "keywords": [
+    "irrigation",
+    "zanjero",
+    "valve",
+    "drip",
+    "water",
+    "raspberry",
+    "pi"
+  ],
+  "author": "PixnBits <i@pixnbits.org>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/PixnBits/zanjerito/issues"
+  },
+  "homepage": "https://github.com/PixnBits/zanjerito#readme"
+}
