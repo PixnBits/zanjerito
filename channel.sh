@@ -1,7 +1,4 @@
 # 21-25, 27-29
-# 21 Front West
-# 23 Drip line
-# 24 Front South
 
 CHANNEL=$1
 DURATION=$2
