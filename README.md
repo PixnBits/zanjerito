@@ -6,3 +6,16 @@ A little irrigation controller.
 https://www.srpnet.com/water/canals/azfallstour/Zanjero.aspx
 
 I had a name-brand commercial drip irrigation system controller, but first the WiFi system stopped working and then it stopped turning on valves. Raspberry Pis are easy to switch out, and Open-Source Software is great for fixing usability issues. Here's an attempt to do it "right".
+
+## Developing
+```shell
+$ git clone https://github.com/PixnBits/zanjerito.git
+$ cd zanjerito
+$ nvm use 14
+$ npm ci
+$ npm run build:server -- --watch
+# in another terminal
+$ ./node_modules/.bin/nodemon
+# open browser to http://localhost:3000/graphiql
+# or, in a chromebook, http://penguin.linux.test:3000/graphiql
+```
