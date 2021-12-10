@@ -81,18 +81,18 @@ export default async function setup(stations: StationList, power: Station) {
         id: ID!
         title: String!
         notes: String
-        starts: [ScheduleStart]
-        itinerary: [ItineraryItem]
+        starts: [ScheduleStart]!
+        itinerary: [ItineraryItem]!
       }
 
       type ScheduleStart {
-        definition: String
+        definition: String!
         nextInvocation: String
       }
 
       type ItineraryItem {
-        station: Station
-        duration: String
+        station: Station!
+        duration: String!
       }
     `,
     {

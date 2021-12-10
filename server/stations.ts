@@ -1,6 +1,6 @@
 import { promise as gpio } from 'rpi-gpio';
 
-import { addToSchema } from './schema';
+import { addToSchema, subscriptionEmitter } from './schema';
 
 interface StationConfiguration {
   channel: number,
@@ -48,6 +48,8 @@ const powerEnableConfiguration = {
   notes: '24VAC',
 };
 
+const STATION_TOGGLED_TOPIC = 'STATION_TOGGLED';
+
 /*
 function buildStation(station) {
   const { channel } = station;
@@ -80,17 +82,40 @@ export default async function setup() {
 }
 /*/
 export default async function setup() {
-  await Promise.resolve();
-
-  function buildStation(station: StationConfiguration) {
-    const { channel } = station;
-    return {
-      title: station.title,
-      notes: station.notes,
+  function buildStation(stationConfiguration: StationConfiguration) {
+    const { channel } = stationConfiguration;
+    const station = {
+      title: stationConfiguration.title,
+      notes: stationConfiguration.notes,
       // currentlyOn: undefined,
-      on: async () => console.log(`GPIO ${channel} true`),
-      off: async () => console.log(`GPIO ${channel} false`),
+      on: async () => {
+        console.log(`GPIO ${channel} true`);
+        subscriptionEmitter.emit({
+          topic: STATION_TOGGLED_TOPIC,
+          payload: {
+            stationToggled: {
+              when: new Date().toISOString(),
+              station,
+              nowOn: true,
+            }
+          }
+        });
+      },
+      off: async () => {
+        console.log(`GPIO ${channel} false`);
+        subscriptionEmitter.emit({
+          topic: STATION_TOGGLED_TOPIC,
+          payload: {
+            stationToggled: {
+              when: new Date().toISOString(),
+              station,
+              nowOn: false,
+            }
+          }
+        });
+      },
     };
+    return station;
   }
 
   const stations: StationList = Object.assign(
@@ -118,6 +143,18 @@ export default async function setup() {
         title: String!
         notes: String
       }
+
+      extend type Subscription {
+        # not necessarily the desired interface, more to prove out this can work
+        stationToggled: StationEvent
+      }
+
+      type StationEvent {
+        station: Station!
+        when: String # Date Time
+        # should be part of the Station state?
+        nowOn: Boolean
+      }
     `,
     {
       Query: {
@@ -126,12 +163,35 @@ export default async function setup() {
         },
       },
       Station: {
+        // potentially hot path, measure to see and maybe change the data structure a bit to save CPU?
         id(station) { return Buffer.from(`$Station::${stations.indexOf(station)}`, 'utf8').toString('base64'); }
+      },
+      Subscription: {
+        stationToggled: {
+          subscribe(root, args, { pubsub }) {
+            return pubsub.subscribe(STATION_TOGGLED_TOPIC);
+          }
+        }
       }
     }
   );
 
-  // TODO: change this to an EventEmitter so that changes can be subscribed to
+  // need to write functional tests instead, but until then
+  if (process.env.NODE_ENV === 'development') {
+    [
+      // [0, 4.5e3],
+      [1, 4e3],
+      // [2, 3e3],
+    ].forEach(([index, interval]) => {
+      let toggle = false;
+      setInterval(() => {
+        toggle = !toggle;
+        stations[index][toggle ? 'on' : 'off']();
+      }, interval);
+    });
+  }
+
+  // TODO: change this to an EventEmitter? so that changes can be subscribed to
   return { stations, power };
 }
 //*/

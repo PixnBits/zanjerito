@@ -11,7 +11,7 @@ import { listen } from './server';
     validateEnvVars();
     const { stations, power } = await setupStations();
     await setupSchedules(stations, power);
-    listen();
+    await listen();
   } catch (err) {
     process.exitCode = 1;
     console.error('Uknown error thrown: ', err);

@@ -1,17 +1,9 @@
 import fastify from 'fastify';
 import mercurius from 'mercurius';
 
-// import loadSchema from './schema';
 import { getSchema } from './schema';
 
-interface IGraphQLQuerystring {
-  query: string;
-}
-
-interface IGraphQLHeaders {
-}
-
-export function listen() {
+export async function listen() {
   const app = fastify({
     logger: true,
   });
@@ -27,5 +19,5 @@ export function listen() {
       .send({ hello: 'world' })
   });
 
-  app.listen(process.env.HTTP_PORT as string, '0.0.0.0');
+  return app.listen(process.env.HTTP_PORT as string, '0.0.0.0');
 }
