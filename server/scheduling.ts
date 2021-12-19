@@ -19,9 +19,9 @@ const schedulesConfiguration = [
     starts: [
       '00 23 07 * * 0-5', // 7:23am Sun through Fri
       '00 17 20 * * 6-7,0-4', // 8:17pm Sat through Thurs
-      // runs during development
+    ].concat(process.env.NODE_ENV === 'development' ? [
       `00 ${(new Date()).getMinutes() + 1} ${(new Date()).getHours()} * * *`,
-    ],
+    ] : []),
     itinerary: [
       {
         index: 0,
