@@ -13,9 +13,7 @@ $ git clone https://github.com/PixnBits/zanjerito.git
 $ cd zanjerito
 $ nvm use 14
 $ npm ci
-$ npm run build:server -- --watch
-# in another terminal
-$ ./node_modules/.bin/nodemon
-# open browser to http://localhost:3000/graphiql
+$ npm start
+# open browser to http://localhost:3000/ or http://localhost:3000/graphiql
 # or, in a chromebook, http://penguin.linux.test:3000/graphiql
 ```
