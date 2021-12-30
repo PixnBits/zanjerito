@@ -35,10 +35,16 @@ export default function Stations() {
 
   const [stationChangeResponse] = useSubscription(
     { query: anyStationChange },
-    (stationStates = {}, response) => ({
-      ...stationStates,
-      [response.stationToggled.station.id]: response.stationToggled.nowOn,
-    })
+    (stationStates = {}, response) => {
+      if (!response) {
+        // connection broken, empty response
+        return stationStates;
+      }
+      return {
+        ...stationStates,
+        [response.stationToggled.station.id]: response.stationToggled.nowOn,
+      };
+    }
   );
 
   return (
