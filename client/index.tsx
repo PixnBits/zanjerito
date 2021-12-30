@@ -2,14 +2,15 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import { Provider as URQLProvider } from 'urql';
 
-import { client } from './urql'
+import { client, subscriptionClient } from './urql'
 import Stations from './stations'
+import ConnectionStatus from './ConnectionStatus'
 
 function App() {
   return (
     <>
       <h1>Zanjerito!</h1>
-      <p>Running interactively.</p>
+      <ConnectionStatus client={subscriptionClient} />
       <Stations />
     </>
   )

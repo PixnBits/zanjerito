@@ -1,8 +1,7 @@
 import { createClient, defaultExchanges, subscriptionExchange } from 'urql';
 import { createClient as createWSClient } from 'graphql-ws';
 
-
-const wsClient = createWSClient({
+export const subscriptionClient = createWSClient({
   url: (function(){
     const u = new URL(window.location.href);
     u.protocol = 'ws:';
@@ -18,7 +17,7 @@ export const client = createClient({
     subscriptionExchange({
       forwardSubscription: (operation) => ({
         subscribe: (sink) => ({
-          unsubscribe: wsClient.subscribe(operation, sink),
+          unsubscribe: subscriptionClient.subscribe(operation, sink),
         }),
       }),
     })
