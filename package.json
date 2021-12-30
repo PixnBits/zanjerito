@@ -10,7 +10,7 @@
     "prebuild": "npm run clean",
     "build": "npm run build:server && npm run build:client",
     "start:server": "nodemon --watch lib/server --delay 2",
-    "start": "concurrently \"npm:build:server -- --watch\" \"npm:build:client -- --watch\" \"npm:start:server\"",
+    "start": "concurrently \"npm:build:server -- --watch --preserveWatchOutput\" \"npm:build:client -- --watch\" \"npm:start:server\"",
     "test": "jest"
   },
   "repository": {
