@@ -3,7 +3,7 @@ import * as ReactDOM from 'react-dom';
 import { Provider as URQLProvider } from 'urql';
 
 import { client, subscriptionClient } from './urql'
-import Stations from './stations'
+import Stations from './Stations'
 import ConnectionStatus from './ConnectionStatus'
 
 function App() {
