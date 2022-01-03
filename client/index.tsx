@@ -3,8 +3,9 @@ import * as ReactDOM from 'react-dom';
 import { Provider as URQLProvider } from 'urql';
 
 import { client, subscriptionClient } from './urql'
-import Stations from './Stations'
 import ConnectionStatus from './ConnectionStatus'
+import Stations from './Stations'
+import Schedules from './Schedules'
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
       <h1>Zanjerito!</h1>
       <ConnectionStatus client={subscriptionClient} />
       <Stations />
+      <Schedules />
     </>
   )
 }
