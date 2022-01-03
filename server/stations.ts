@@ -164,7 +164,10 @@ export default async function setup() {
       },
       Station: {
         // potentially hot path, measure to see and maybe change the data structure a bit to save CPU?
-        id(station) { return Buffer.from(`$Station::${stations.indexOf(station)}`, 'utf8').toString('base64'); }
+        id(station) {
+          const index = station === power ? 'power' : stations.indexOf(station);
+          return Buffer.from(`$Station::${index}`, 'utf8').toString('base64');
+        }
       },
       Subscription: {
         stationToggled: {
