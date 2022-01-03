@@ -49,39 +49,25 @@ const powerEnableConfiguration = {
 };
 
 const STATION_TOGGLED_TOPIC = 'STATION_TOGGLED';
-
-/*
-function buildStation(station) {
-  const { channel } = station;
-  return {
-    title: station.title,
-    notes: station.notes,
-    on: () => gpio.write(channel, true),
-    off: () => gpio.write(channel, false),
-  };
-}
+const IS_DEV = process.env.NODE_ENV === 'development' ? true : false;
 
 export default async function setup() {
-  await Promise.all([
-    // power enable
-    gpio.setup(powerEnableConfiguration.channel, gpio.DIR_OUT)
-      // disable power ASAP
-      .then(() => {
-        gpio.write(powerEnableConfiguration.channel, false)
-      }),
-    // all the stations
-    ...stationsConfiguration.map(
-      ({ channel }) => gpio.setup(channel, gpio.DIR_OUT)
-    ),
-  ]);
+  // using gpio on a non-Raspberry Pi device fails, making development difficult
+  if (!IS_DEV) {
+    await Promise.all([
+      // power enable
+      gpio.setup(powerEnableConfiguration.channel, gpio.DIR_OUT)
+        // disable power ASAP
+        .then(() => {
+          gpio.write(powerEnableConfiguration.channel, false)
+        }),
+      // all the stations
+      ...stationsConfiguration.map(
+        ({ channel }) => gpio.setup(channel, gpio.DIR_OUT)
+      ),
+    ]);
+  }
 
-  return {
-    stations: stationsConfiguration.map(buildStation),
-    power: buildStation(powerEnableConfiguration),
-  };
-}
-/*/
-export default async function setup() {
   function buildStation(stationConfiguration: StationConfiguration) {
     const { channel } = stationConfiguration;
     const station = {
@@ -90,6 +76,9 @@ export default async function setup() {
       // currentlyOn: undefined,
       on: async () => {
         console.log(`GPIO ${channel} true`);
+        if (!IS_DEV) {
+          gpio.write(channel, true);
+        }
         subscriptionEmitter.emit({
           topic: STATION_TOGGLED_TOPIC,
           payload: {
@@ -103,6 +92,9 @@ export default async function setup() {
       },
       off: async () => {
         console.log(`GPIO ${channel} false`);
+        if (!IS_DEV) {
+          gpio.write(channel, false);
+        }
         subscriptionEmitter.emit({
           topic: STATION_TOGGLED_TOPIC,
           payload: {
@@ -183,7 +175,7 @@ export default async function setup() {
   if (process.env.NODE_ENV === 'development') {
     [
       // [0, 4.5e3],
-      [1, 4e3],
+      [1, 10e3],
       // [2, 3e3],
     ].forEach(([index, interval]) => {
       let toggle = false;
@@ -197,4 +189,3 @@ export default async function setup() {
   // TODO: change this to an EventEmitter? so that changes can be subscribed to
   return { stations, power };
 }
-//*/
