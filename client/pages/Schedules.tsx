@@ -4,6 +4,32 @@ import { Link } from 'react-router';
 import * as durationFns from 'duration-fns';
 import cronstrue from 'cronstrue';
 
+// TODO: generate off of the schema
+interface Schedule {
+  id: string;
+  title: string;
+  notes: string;
+  starts: [ScheduleStart];
+  itinerary: [ScheduleAction]
+}
+
+interface ScheduleStart {
+  definition: string;
+  nextInvocation: string;
+}
+
+interface ScheduleAction {
+  station: Station;
+  duration: string;
+}
+
+// TODO: generate off of the schema
+interface Station {
+  title: string;
+  id: string;
+  // notes: string;
+}
+
 const query = `
   query {
     schedules {
@@ -68,14 +94,14 @@ export default function Schedules() {
         ) : error ? (
           <li>Error loading: <pre>{error.message}</pre></li>
         ) : data.schedules.length > 0 ? (
-          data.schedules.map(({ id, title, notes, starts, itinerary }: any) => (
+          data.schedules.map(({ id, title, notes, starts, itinerary }: Schedule) => (
             <li key={id}>
               <strong>{title}</strong> {notes}
               <br />
               Start times:
               <ul>
                 {starts.length > 0 ? (
-                  starts.map(({ definition, nextInvocation }: any, index: number) => (
+                  starts.map(({ definition, nextInvocation }: ScheduleStart, index: number) => (
                     <li key={index}>
                       <span title={definition}>
                         {friendlyCron(definition)} 
@@ -92,7 +118,7 @@ export default function Schedules() {
               Itinerary:
               <ol>
                 {itinerary.length > 0 ? (
-                  itinerary.map(({ station, duration }: any, index: number) => (
+                  itinerary.map(({ station, duration }: ScheduleAction, index: number) => (
                     <li key={index} title={`${station.id} for ${duration}`}>
                       {station.title}, {friendlyDuration(duration)}
                     </li>

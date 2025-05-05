@@ -8,6 +8,7 @@ export const subscriptionClient = createWSClient({
     u.pathname = '/graphql';
     return u.toString();
   }()),
+  reconnect: true,
 });
 
 export const client = createClient({
