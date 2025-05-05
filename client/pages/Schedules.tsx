@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useQuery } from 'urql';
 import { Link } from 'react-router';
 import * as durationFns from 'duration-fns';
+import cronstrue from 'cronstrue';
 
 const query = `
   query {
@@ -44,6 +45,14 @@ function friendlyDuration(str: string) {
   return friendlyMsDiff(durationFns.toMilliseconds(durationFns.parse(str)));
 }
 
+function friendlyCron(cron: string) {
+  try {
+    return cronstrue.toString(cron);
+  } catch {
+    return `Advanced: ${cron}`
+  }
+}
+
 export default function Schedules() {
   const [{ data, fetching, error }] = useQuery({ query });
 
@@ -68,7 +77,9 @@ export default function Schedules() {
                 {starts.length > 0 ? (
                   starts.map(({ definition, nextInvocation }: any, index: number) => (
                     <li key={index}>
-                      {definition},{' '}
+                      <span title={definition}>
+                        {friendlyCron(definition)} 
+                      </span>,{' '}
                       <span title={new Date(nextInvocation).toString()}>
                         next invocation in {friendlyMsDiff(new Date(nextInvocation).valueOf() - now)}
                       </span>

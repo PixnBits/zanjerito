@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useQuery, useMutation } from 'urql';
+import cronstrue from 'cronstrue';
+import * as durationFns from 'duration-fns';
 
 const scheduleQuery = `
   query ($id: ID!) {
@@ -35,6 +37,46 @@ const saveScheduleMutation = `
     }
   }
 `;
+
+function friendlyCron(cron: string) {
+  try {
+    return cronstrue.toString(cron);
+  } catch {
+    return 'Invalid cron expression';
+  }
+}
+
+function friendlyDuration(isoDuration: string) {
+  try {
+    const duration = durationFns.parse(isoDuration);
+    const parts: string[] = [];
+    if (duration.days) parts.push(`${duration.days} day(s)`);
+    if (duration.hours) parts.push(`${duration.hours} hour(s)`);
+    if (duration.minutes) parts.push(`${duration.minutes} minute(s)`);
+    if (duration.seconds) parts.push(`${duration.seconds} second(s)`);
+    return parts.join(', ') || '0 seconds';
+  } catch {
+    return 'Invalid duration';
+  }
+}
+
+function isValidCron(cron: string) {
+  try {
+    cronstrue.toString(cron);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidDuration(isoDuration: string) {
+  try {
+    durationFns.parse(isoDuration);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export default function EditSchedule() {
   const { id } = useParams();
@@ -89,8 +131,62 @@ export default function EditSchedule() {
     });
   };
 
+  const addStartTime = () => {
+    setSchedule((prev) => ({
+      ...prev,
+      starts: [...prev.starts, ''],
+    }));
+  };
+
+  const removeStartTime = (index: number) => {
+    setSchedule((prev) => {
+      const starts = [...prev.starts];
+      starts.splice(index, 1);
+      return { ...prev, starts };
+    });
+  };
+
+  const addItineraryEntry = () => {
+    setSchedule((prev) => ({
+      ...prev,
+      itinerary: [...prev.itinerary, { stationId: '', duration: '' }],
+    }));
+  };
+
+  const removeItineraryEntry = (index: number) => {
+    setSchedule((prev) => {
+      const itinerary = [...prev.itinerary];
+      itinerary.splice(index, 1);
+      return { ...prev, itinerary };
+    });
+  };
+
+  const moveItineraryEntry = (fromIndex: number, toIndex: number) => {
+    setSchedule((prev) => {
+      const itinerary = [...prev.itinerary];
+      const [movedItem] = itinerary.splice(fromIndex, 1);
+      itinerary.splice(toIndex, 0, movedItem);
+      return { ...prev, itinerary };
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate starts
+    const invalidStarts = schedule.starts.some((start) => !isValidCron(start));
+    if (invalidStarts) {
+      alert('One or more start times are invalid. Please fix them before saving.');
+      return;
+    }
+
+    // Validate itinerary durations
+    const invalidDurations = schedule.itinerary.some((item) => !isValidDuration(item.duration));
+    if (invalidDurations) {
+      alert('One or more itinerary durations are invalid. Please fix them before saving.');
+      return;
+    }
+
     await saveSchedule({
       id,
       title: schedule.title,
@@ -142,8 +238,13 @@ export default function EditSchedule() {
                 value={start}
                 onChange={(e) => handleStartsChange(index, e.target.value)}
               />
+              <span style={{ marginLeft: '10px', fontStyle: 'italic', color: isValidCron(start) ? 'inherit' : 'red' }}>
+                {friendlyCron(start)}
+              </span>
+              <button type="button" onClick={() => removeStartTime(index)}>Remove</button>
             </div>
           ))}
+          <button type="button" onClick={addStartTime}>Add Start Time</button>
         </div>
         <div>
           <label>Itinerary:</label>
@@ -166,8 +267,19 @@ export default function EditSchedule() {
                 value={item.duration}
                 onChange={(e) => handleItineraryChange(index, 'duration', e.target.value)}
               />
+              <span style={{ marginLeft: '10px', fontStyle: 'italic', color: isValidDuration(item.duration) ? 'inherit' : 'red' }}>
+                {friendlyDuration(item.duration)}
+              </span>
+              <button type="button" onClick={() => removeItineraryEntry(index)}>Remove</button>
+              {index > 0 && (
+                <button type="button" onClick={() => moveItineraryEntry(index, index - 1)}>Move Up</button>
+              )}
+              {index < schedule.itinerary.length - 1 && (
+                <button type="button" onClick={() => moveItineraryEntry(index, index + 1)}>Move Down</button>
+              )}
             </div>
           ))}
+          <button type="button" onClick={addItineraryEntry}>Add Itinerary Entry</button>
         </div>
         <button type="submit">Save</button>
         <button type="button" onClick={() => navigate('/schedules')}>
