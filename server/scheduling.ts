@@ -147,6 +147,22 @@ export default async function setup(stations: StationList, power: Station) {
     `
       extend type Query {
         schedules: [Schedule]!
+        schedule(id: ID!): Schedule
+      }
+
+      extend type Mutation {
+        saveSchedule(
+          id: ID,
+          title: String!,
+          notes: String,
+          starts: [String!]!,
+          itinerary: [ItineraryInput!]!
+        ): Schedule
+      }
+
+      input ItineraryInput {
+        stationId: ID!
+        duration: String!
       }
 
       type Schedule {
@@ -170,6 +186,62 @@ export default async function setup(stations: StationList, power: Station) {
     {
       Query: {
         schedules() { return schedules; },
+        schedule(_, { id }) {
+          const decodedId = Buffer.from(id, 'base64').toString('utf8');
+          const index = parseInt(decodedId.split('::')[1], 10);
+          return schedules[index];
+        },
+      },
+      Mutation: {
+        saveSchedule(_, { id, title, notes, starts, itinerary }: { id: string, title: string, notes: string, starts: string[], itinerary: { stationId: string, duration: string }[] }) {
+          if (id && id !== 'new') {
+            const decodedId = Buffer.from(id, 'base64').toString('utf8');
+            const index = parseInt(decodedId.split('::')[1], 10);
+            console.log('saveSchedule', { id, decodedId, index }, index >= 0, index < schedules.length);
+            if (index >= 0 && index < schedules.length) {
+              const schedule = schedules[index];
+              Object.assign(schedule, {
+                title,
+                notes,
+                starts,
+                itinerary: itinerary.map(({ stationId, duration }) => {
+                  const decodedId = Buffer.from(stationId, 'base64').toString('utf8');
+                  const stationIndex = parseInt(decodedId.split('::')[1], 10);
+                  return {
+                    index: stationIndex,
+                    duration,
+                  };
+                }),
+              });
+              return schedule;
+            } else {
+              throw new Error('Schedule not found.');
+            }
+          } else {
+            const newSchedule = {
+              title,
+              notes,
+              starts,
+              itinerary : itinerary.map(({ stationId, duration }) => {
+                const decodedId = Buffer.from(stationId, 'base64').toString('utf8');
+                const stationIndex = parseInt(decodedId.split('::')[1], 10);
+
+                if (stationIndex < 0 || stationIndex >= stations.length || isNaN(stationIndex)) {
+                  console.warn(`Station ${stationId} not found.`, stationIndex, decodedId);
+                  throw new Error(`Station ${stationId} not found.`);
+                }
+
+                return {
+                  index: stationIndex,
+                  duration,
+                };
+              }),
+              jobs: [],
+            };
+            schedules.push(newSchedule);
+            return newSchedule;
+          }
+        },
       },
       Schedule: {
         id(schedule) { return Buffer.from(`$Schedule::${schedules.indexOf(schedule)}`, 'utf8').toString('base64'); },
@@ -182,7 +254,12 @@ export default async function setup(stations: StationList, power: Station) {
         }
       },
       ItineraryItem: {
-        station({ index }) { return stations[index]; }
+        station({ index }) {
+          if (index < 0 || index >= stations.length || !stations[index]) {
+            throw new Error(`Station with index ${index} not found.`);
+          }
+          return stations[index];
+        }
       }
     }
   );

@@ -16,7 +16,12 @@ export async function listen() {
     graphiql: true,
   });
 
-  app.register(staticContent, { root: path.resolve(__dirname, '../public')})
+  app.register(staticContent, { root: path.resolve(__dirname, '../public') });
+
+  // Serve index.html for all unmatched routes
+  app.setNotFoundHandler((request, reply) => {
+    reply.sendFile('index.html');
+  });
 
   return app.listen({
     port: parseInt(process.env.HTTP_PORT as string, 10),

@@ -8,7 +8,7 @@ interface Resolvers {
 
 const schemas: string[] = [
   'type Query',
-  // 'type Mutation',
+  'type Mutation',
   'type Subscription',
 ];
 

@@ -152,6 +152,11 @@ export default async function setup() {
     `
       extend type Query {
         stations: [Station]!
+        station(id: ID!): Station
+      }
+
+      extend type Mutation {
+        saveStation(id: ID, title: String!, notes: String): Station
       }
 
       type Station {
@@ -175,7 +180,44 @@ export default async function setup() {
     {
       Query: {
         stations() {
-          return stations
+          return stations;
+        },
+        station(_, { id }) {
+          const decodedId = Buffer.from(id, 'base64').toString('utf8');
+          const index = decodedId.split('::')[1];
+          if (index === 'power') return power;
+          return stations[parseInt(index, 10)];
+        },
+      },
+      Mutation: {
+        saveStation(_, { id, title, notes }) {
+          if (id) {
+            const decodedId = Buffer.from(id, 'base64').toString('utf8');
+            const index = decodedId.split('::')[1];
+            if (index === 'power') {
+              throw new Error('Cannot modify the power station.');
+            }
+            const stationIndex = parseInt(index, 10);
+            if (stationIndex >= 0 && stationIndex < stations.length) {
+              Object.assign(stations[stationIndex], { title, notes });
+              return stations[stationIndex];
+            } else {
+              throw new Error('Station not found.');
+            }
+          } else {
+            const newStation = {
+              title,
+              notes,
+              on: async () => {
+                console.log(`GPIO new station on`);
+              },
+              off: async () => {
+                console.log(`GPIO new station off`);
+              },
+            };
+            stations.push(newStation);
+            return newStation;
+          }
         },
       },
       Station: {
