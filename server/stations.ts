@@ -1,4 +1,5 @@
-import { promise as gpio } from 'rpi-gpio';
+// import { promise as gpio } from 'rpi-gpio';
+import { promise as gpio } from './fake-rpi-gpio';
 
 import { addToSchema, subscriptionEmitter } from './schema';
 
@@ -100,7 +101,7 @@ export default async function setup() {
       on: async () => {
         console.log(`GPIO ${channel} on (false)`);
         if (!IS_DEV) {
-          gpio.write(channel, false);
+          gpio.write(channel, gpio.DIR_LOW);
         }
         subscriptionEmitter.emit({
           topic: STATION_TOGGLED_TOPIC,
@@ -116,7 +117,7 @@ export default async function setup() {
       off: async () => {
         console.log(`GPIO ${channel} off (true)`);
         if (!IS_DEV) {
-          gpio.write(channel, true);
+          gpio.write(channel, gpio.DIR_HIGH);
         }
         subscriptionEmitter.emit({
           topic: STATION_TOGGLED_TOPIC,
