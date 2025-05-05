@@ -32,6 +32,9 @@
     "url": "https://github.com/PixnBits/zanjerito/issues"
   },
   "homepage": "https://github.com/PixnBits/zanjerito#readme",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "@americanexpress/env-config-utils": "^2.0.2",
     "duration-fns": "^2.1.0",
