@@ -1,0 +1,7 @@
+# Node.js & npm
+node_modules
+*.log
+*.tgz
+
+# build/compile
+lib
