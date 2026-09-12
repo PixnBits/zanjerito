@@ -15,7 +15,7 @@ const (
 	SequenceIsolate SequencingMode = "isolate"
 )
 
-// Config is the runtime pin map + safety knobs (atomic JSON later owns persistence).
+// Config is the runtime pin map + safety knobs. Persistence is internal/store (atomic JSON).
 type Config struct {
 	Chip       string          `json:"chip"`
 	ActiveLow  *bool           `json:"active_low"` // pointer: missing is invalid
@@ -32,9 +32,12 @@ type SequencingConfig struct {
 }
 
 type StationConfig struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	BCM   int    `json:"bcm"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Color    string `json:"color,omitempty"`
+	BCM      int    `json:"bcm"`
+	Physical int    `json:"physical,omitempty"`
+	WiringPi int    `json:"wiringPi,omitempty"`
 }
 
 // LoadConfig reads JSON and validates Architect rules (refuse active_low missing/false).
