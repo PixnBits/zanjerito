@@ -7,6 +7,19 @@ https://www.srpnet.com/water/canals/azfallstour/Zanjero.aspx
 
 I had a name-brand commercial drip irrigation system controller, but first the WiFi system stopped working and then it stopped turning on valves. Raspberry Pis are easy to switch out, and Open-Source Software is great for fixing usability issues. Here's an attempt to do it "right".
 
+## Rewrite (v2)
+
+Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rewrite/vision`:
+
+- [docs/prd.md](docs/prd.md) — product vision / PRD
+- [docs/decisions.md](docs/decisions.md) — prioritized decisions
+- [docs/architecture.md](docs/architecture.md) — runtime layers, state machine, API sketch
+- [docs/pin-map.md](docs/pin-map.md) — this hardware’s pin table + example config
+- [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected)
+
+Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
+
+
 ## Developing
 ```shell
 $ git clone https://github.com/PixnBits/zanjerito.git
