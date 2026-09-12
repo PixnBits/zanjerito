@@ -190,3 +190,39 @@ func TestApplyAndSaveIdle(t *testing.T) {
 		t.Fatalf("tz %q", got.Timezone)
 	}
 }
+
+func TestApplyAndSaveKeepsSchedules(t *testing.T) {
+	cfg := validCfg()
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	f := File{
+		Config:    cfg,
+		Schedules: []Schedule{{ID: "dawn", Enabled: true, Note: "keep me"}},
+	}
+	if err := Save(path, f); err != nil {
+		t.Fatal(err)
+	}
+	e, err := engine.New(cfg, gpio.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	cfg2 := validCfg()
+	cfg2.Timezone = "UTC"
+	cfg2.MaxOnSec = 0 // should persist engine default, not wipe schedules
+	if err := ApplyAndSave(e, path, cfg2); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Timezone != "UTC" {
+		t.Fatalf("tz %q", got.Timezone)
+	}
+	if got.MaxOnSec != 900 {
+		t.Fatalf("max_on_sec want 900 (normalized), got %d", got.MaxOnSec)
+	}
+	if len(got.Schedules) != 1 || got.Schedules[0].ID != "dawn" || !got.Schedules[0].Enabled {
+		t.Fatalf("schedules wiped: %+v", got.Schedules)
+	}
+}

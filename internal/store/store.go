@@ -54,12 +54,25 @@ func SaveConfig(path string, cfg engine.Config) error {
 }
 
 // ApplyAndSave replaces engine config only when Idle, then persists.
+// Existing schedules are load-merged so an Idle pin-map apply does not wipe them.
+// SaveConfig stays the no-schedule helper and is not used here.
 // Busy watering returns engine.ErrBusy and does not write the file.
 func ApplyAndSave(e *engine.Engine, path string, cfg engine.Config) error {
+	existing, err := Load(path)
+	var schedules []Schedule
+	if err == nil {
+		schedules = existing.Schedules
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	if err := e.ApplyConfig(cfg); err != nil {
 		return err
 	}
-	return SaveConfig(path, cfg)
+	// Persist the engine-normalized copy (defaults like max_on_sec), not the raw caller cfg.
+	if err := cfg.NormalizeAndValidate(); err != nil {
+		return err
+	}
+	return Save(path, File{Config: cfg, Schedules: schedules})
 }
 
 func atomicWriteJSON(path string, v any) error {
