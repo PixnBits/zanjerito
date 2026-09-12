@@ -9,13 +9,16 @@ I had a name-brand commercial drip irrigation system controller, but first the W
 
 ## Rewrite (v2)
 
-Vision and planning for the Go/Rust rewrite (Pi-efficient runtime, new UI) live on branch `rewrite/vision`:
+Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rewrite/vision`:
 
 - [docs/prd.md](docs/prd.md) — product vision / PRD
-- [docs/decisions.md](docs/decisions.md) — prioritized open decisions
-- [docs/ui-directions.md](docs/ui-directions.md) — UI options for stakeholder review
+- [docs/decisions.md](docs/decisions.md) — prioritized decisions
+- [docs/architecture.md](docs/architecture.md) — runtime layers, state machine, API sketch
+- [docs/pin-map.md](docs/pin-map.md) — this hardware’s pin table + example config
+- [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected)
 
 Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
+
 
 ## Developing
 ```shell
