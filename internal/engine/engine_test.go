@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -141,4 +142,30 @@ func TestBusySecondRun(t *testing.T) {
 		t.Fatalf("got %v want ErrBusy", err)
 	}
 	cancel()
+}
+
+func TestCancelContextAllOff(t *testing.T) {
+	cfg := testConfig(t)
+	drv := gpio.NewFake()
+	e, err := New(cfg, drv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- e.RunItinerary(ctx, []Step{{StationID: "front-west", Duration: 2 * time.Second}})
+	}()
+	time.Sleep(30 * time.Millisecond)
+	cancel() // parent cancel — must not leave valves on
+	err = <-done
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v want canceled", err)
+	}
+	st := gpio.StateForTest(drv)
+	if st["front-west"] != gpio.Off || st["psu"] != gpio.Off {
+		t.Fatalf("cancel must all-off, got %#v", st)
+	}
 }

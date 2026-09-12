@@ -114,6 +114,18 @@ func (e *Engine) ApplyConfig(cfg Config) error {
 	return nil
 }
 
+// ClearFault resets PhaseFault after operator ack; always all-off first.
+func (e *Engine) ClearFault() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if err := e.allOffLocked(); err != nil {
+		return err
+	}
+	e.lastErr = nil
+	e.phase = PhaseIdle
+	return nil
+}
+
 // Stop cancels an active run and forces all-off.
 func (e *Engine) Stop() error {
 	e.mu.Lock()
@@ -175,14 +187,26 @@ func (e *Engine) RunItinerary(ctx context.Context, steps []Step) error {
 	}()
 
 	err := e.run(runCtx, steps)
-	if err != nil && !errors.Is(err, context.Canceled) {
+	if err != nil {
+		// Fail-safe: any exit including context.Canceled must all-off (CISO #5).
+		// Stop() also cancels; all-off here is idempotent.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			e.mu.Lock()
+			offErr := e.allOffLocked()
+			e.phase = PhaseIdle
+			e.mu.Unlock()
+			if offErr != nil {
+				return errors.Join(err, offErr)
+			}
+			return err
+		}
 		_ = e.fault(err)
 		return err
 	}
 	e.mu.Lock()
 	e.phase = PhaseIdle
 	e.mu.Unlock()
-	return err
+	return nil
 }
 
 func (e *Engine) run(ctx context.Context, steps []Step) error {
