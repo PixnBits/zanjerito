@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
 )
 
@@ -17,23 +18,31 @@ func main() {
 	driverName := flag.String("driver", "fake", "gpio driver: fake|lockout|gpiocdev")
 	flag.Parse()
 
-	log.Printf("zanjerito starting (driver=%s config=%s)", *driverName, *configPath)
-
+	cfg, err := engine.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 	drv, err := gpio.New(*driverName)
 	if err != nil {
 		log.Fatalf("gpio driver: %v", err)
 	}
+	eng, err := engine.New(cfg, drv)
+	if err != nil {
+		_ = drv.Close()
+		log.Fatalf("engine: %v", err)
+	}
 	defer func() {
-		if err := drv.Close(); err != nil {
-			log.Printf("gpio close: %v", err)
+		if err := eng.Close(); err != nil {
+			log.Printf("engine close: %v", err)
 		}
 	}()
 
+	log.Printf("zanjerito engine ready (driver=%s phase=%s)", *driverName, eng.Status().Phase)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	// Skeleton: prove process lifecycle + fail-safe close. Engine/API land in follow-up PRs.
 	<-ctx.Done()
-	log.Printf("shutdown signal: ensuring driver close (fail-safe)")
+	log.Printf("shutdown: Stop + Close")
+	_ = eng.Stop()
 	fmt.Fprintln(os.Stderr, "zanjerito stopped")
 }
