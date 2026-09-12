@@ -1,6 +1,6 @@
 # Zanjerito — Product Requirements Document
 
-**Status:** Draft v0.2 · 2026-09-12  
+**Status:** Draft v0.3 · 2026-09-12  
 **Repo:** [PixnBits/zanjerito](https://github.com/PixnBits/zanjerito)  
 **Working branch for this rewrite:** `rewrite/vision` (keeps `fancy-vibes` / `mvp-bash` intact as reference)  
 **Companions:** [decisions.md](./decisions.md) · [architecture.md](./architecture.md) · [pin-map.md](./pin-map.md) · [ui-directions.md](./ui-directions.md)  
@@ -62,6 +62,7 @@ The Node/`fancy-vibes` stack was the right trade for **human** authoring before 
 - Document install: cross-compile for arm/arm64 matching `uname -m`, systemd unit, dry-run / lockout mode.
 - Prove **parity** with today’s `front.sh` stations + durations (Front West 4 / Front North 8 / Front South 8) before retiring bash as primary. Parity is **not** bash dead-time between stations.
 - Dual-run with bash (daemon logs intent; bash actuates) before flip (D9).
+- Schedule collision: if a second schedule fires while watering, **skip + log** (D13); manual preempt keeps its warning dialog.
 
 ### Goals — v1 (after MVP)
 

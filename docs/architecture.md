@@ -1,6 +1,6 @@
 # Zanjerito — Architecture (v2)
 
-**Status:** Draft v0.2 · 2026-09-12  
+**Status:** Draft v0.3 · 2026-09-12  
 **Companions:** [prd.md](./prd.md) · [decisions.md](./decisions.md) · [pin-map.md](./pin-map.md)
 
 ## Layers
@@ -85,7 +85,7 @@ One run-queue globally. Never two programs on GPIO at once.
 
 | Event | Policy |
 |---|---|
-| Second schedule fires while one is running | Queue or skip + log. Do not interleave itineraries. |
+| Second schedule fires while one is running | **Skip + log** (D13). Do not interleave itineraries. Optional single-slot queue later if we miss programs. |
 | Manual run while a schedule is watering | Warning dialog, then abort remaining itinerary and start the manual run. |
 | STOP | Immediate all-off + PSU off. No confirm if already watering. |
 

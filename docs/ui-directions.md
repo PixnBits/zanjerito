@@ -1,8 +1,8 @@
 # Zanjerito — UI directions (for stakeholder feedback)
 
-**Status:** Draft v0.2 · 2026-09-12  
+**Status:** Draft v0.3 · 2026-09-12  
 **Companion:** [prd.md](./prd.md) · [decisions.md](./decisions.md)  
-**Selected (proposed):** **Direction D — hybrid strip** (Nick, 2026-09-12)
+**Selected (decided):** **Direction D — hybrid strip** (Nick, 2026-09-12)
 
 The `fancy-vibes` React UI was a learning prototype (stations list, schedules, GraphiQL). It is a reference for *capabilities*, not layout or brand.
 
