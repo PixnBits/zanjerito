@@ -16,6 +16,7 @@ Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rew
 - [docs/architecture.md](docs/architecture.md) — runtime layers, state machine, API sketch
 - [docs/pin-map.md](docs/pin-map.md) — this hardware’s pin table + example config
 - [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected)
+- [docs/impl-plan.md](docs/impl-plan.md) — scoped PR implementation plan
 
 Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
 

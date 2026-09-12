@@ -5,3 +5,10 @@ node_modules
 
 # build/compile
 lib
+
+# Go rewrite
+/bin/
+/dist/
+*.exe
+/zanjerito
+/cmd/zanjerito/zanjerito

@@ -1,0 +1,14 @@
+{
+  "chip": "gpiochip0",
+  "active_low": true,
+  "timezone": "America/Phoenix",
+  "max_on_sec": 900,
+  "sequencing": { "mode": "overlap", "overlap_ms": 2000 },
+  "power": { "id": "psu", "title": "Station PSU", "bcm": 21, "physical": 40, "wiringPi": 29 },
+  "stations": [
+    { "id": "front-west",  "title": "Front West",  "color": "red",    "bcm": 5,  "physical": 29, "wiringPi": 21 },
+    { "id": "front-north", "title": "Front North", "color": "yellow", "bcm": 6,  "physical": 31, "wiringPi": 22 },
+    { "id": "drip",        "title": "Drip Line",   "color": "blue",   "bcm": 13, "physical": 33, "wiringPi": 23 },
+    { "id": "front-south", "title": "Front South", "color": "green",  "bcm": 19, "physical": 35, "wiringPi": 24 }
+  ]
+}
