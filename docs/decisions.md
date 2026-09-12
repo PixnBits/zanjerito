@@ -1,6 +1,6 @@
 # Zanjerito — Open decisions (prioritized)
 
-**Status:** Draft v0.3 · 2026-09-12  
+**Status:** Draft v0.4 · 2026-09-12  
 **Companion:** [prd.md](./prd.md) · [architecture.md](./architecture.md) · [pin-map.md](./pin-map.md)
 
 Decisions are ordered by **how much they unblock**. Mark each: `open` | `proposed` | `decided`.  
@@ -52,6 +52,16 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 - **Manual preempt** remains separate: warning dialog, then abort remaining itinerary and start the manual run (D6).
 - **Later:** optional single-slot queue if we miss programs in practice.
 - **Unblocks:** engine run-queue behavior.
+
+### D14. Architect Approve follow-ups (non-blocking)
+- **Status:** decided → fold into architecture (2026-09-12)
+- **From:** System Architect Approve on PR #3
+- **Choice:**
+  1. Fault → all-off is a numbered invariant (not only stop/signals).
+  2. Reject or defer config writes while watering.
+  3. Overlap hard ceiling: ≤2 stations ON.
+  4. PRD UI section: Direction D is **decided** (not proposed).
+- **Unblocks:** skeleton implementation checklist.
 
 ---
 
@@ -106,3 +116,4 @@ Seasonal date windows (winter grass in October) are **not** P2 — they are v1 s
 | D8 | systemd + static binary + ExecStop force-off | 2026-09-12 | decided; install path / update story still open |
 | D9 | dual-run then flip | 2026-09-12 | decided |
 | D13 | schedule collision → skip + log | 2026-09-12 | decided; manual preempt unchanged |
+| D14 | Architect follow-ups | 2026-09-12 | decided; fault all-off, config-while-watering, ≤2 ON, PRD §10 decided |

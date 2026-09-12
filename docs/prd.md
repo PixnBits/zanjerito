@@ -1,6 +1,6 @@
 # Zanjerito — Product Requirements Document
 
-**Status:** Draft v0.3 · 2026-09-12  
+**Status:** Draft v0.4 · 2026-09-12  
 **Repo:** [PixnBits/zanjerito](https://github.com/PixnBits/zanjerito)  
 **Working branch for this rewrite:** `rewrite/vision` (keeps `fancy-vibes` / `mvp-bash` intact as reference)  
 **Companions:** [decisions.md](./decisions.md) · [architecture.md](./architecture.md) · [pin-map.md](./pin-map.md) · [ui-directions.md](./ui-directions.md)  
@@ -156,7 +156,7 @@ Open / proposed choices live in [decisions.md](./decisions.md).
 
 ## 10. UI direction
 
-**Chosen (proposed):** Direction D — hybrid strip. Details in [ui-directions.md](./ui-directions.md).
+**Chosen (decided):** Direction D — hybrid strip. Details in [ui-directions.md](./ui-directions.md).
 
 - Always-visible **STOP** on phone and (later) wall.
 - Manual run may preempt a schedule **with an explicit warning**.

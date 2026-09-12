@@ -1,6 +1,6 @@
 # Zanjerito — Architecture (v2)
 
-**Status:** Draft v0.3 · 2026-09-12  
+**Status:** Draft v0.4 · 2026-09-12  
 **Companions:** [prd.md](./prd.md) · [decisions.md](./decisions.md) · [pin-map.md](./pin-map.md)
 
 ## Layers
@@ -66,14 +66,17 @@ Invariants:
 2. Power enable is first-class, not another station.
 3. Polarity lives in config (`active_low: true`).
 4. Start / SIGTERM / SIGINT / panic / systemd stop → all stations off, then PSU off.
-5. Line request uses inactive-on-release so process death de-energizes.
-6. Independent `max_on_sec` cap (default 900, matching bash's 15 min).
-7. PSU on only while a station is on or inside the documented overlap/settle window.
-8. Dry-run / lockout is a driver mode.
+5. **Fault → all-off:** any engine fault path (GPIO error, invalid transition, watchdog trip, unhandled panic recovery) → all stations off, then PSU off — same as stop/signals.
+6. Line request uses inactive-on-release so process death de-energizes.
+7. Independent `max_on_sec` cap (default 900, matching bash's 15 min).
+8. PSU on only while a station is on or inside the documented overlap/settle window.
+9. Dry-run / lockout is a driver mode.
+10. **Overlap ceiling:** at most **two** stations ON at once (current + previous during `overlap_ms`). Never three.
+11. **Config while watering:** reject or defer pin-map / station / schedule writes that would change the active run; return a clear error (or queue until Idle). Read APIs stay allowed.
 
 ## Sequencing (D2)
 
-Default `overlap` (anti-hammer): keep 24VAC up for the itinerary; open next station, then close previous; `overlap_ms` default 2000. If duration < overlap, shrink overlap.
+Default `overlap` (anti-hammer): keep 24VAC up for the itinerary; open next station, then close previous; `overlap_ms` default 2000. If duration < overlap, shrink overlap. **Hard ceiling: ≤2 stations ON** (invariant 10).
 
 Alternate `isolate` (bash-like): drop 24VAC, all off, raise 24VAC, one station. For commissioning or a weak transformer.
 
@@ -87,7 +90,9 @@ One run-queue globally. Never two programs on GPIO at once.
 |---|---|
 | Second schedule fires while one is running | **Skip + log** (D13). Do not interleave itineraries. Optional single-slot queue later if we miss programs. |
 | Manual run while a schedule is watering | Warning dialog, then abort remaining itinerary and start the manual run. |
+| Config write (pin map / station / schedule) while watering | **Reject or defer** until Idle; clear error to client. Reads OK. |
 | STOP | Immediate all-off + PSU off. No confirm if already watering. |
+| Fault | All stations off, then PSU off (invariant 5). |
 
 ## Store
 
