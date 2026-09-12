@@ -16,7 +16,7 @@
 
 | # | Scope | Branch (suggested) | Reviewers |
 |---|---|---|---|
-| 1 | Go module, `cmd/zanjerito`, `internal/gpio` iface + fake/lockout, example pinmap, tests | `rewrite/go` | Architect, Tester |
+| 1 | Go module, `cmd/zanjerito`, `internal/gpio` iface + fake/lockout, example pinmap, tests | `rewrite/go` **merged** | Architect, Tester |
 | 2 | Engine state machine + safety invariants (Fault→all-off, ≤2 ON, config-while-watering) | `rewrite/go-engine` | Architect, CISO |
 | 3 | Atomic JSON store (load/save pin map, stations, schedules) | `rewrite/go-store` | Coder, Tester |
 | 4 | Scheduler + Front West 4 / North 8 / South 8 fixture; skip+log collision | `rewrite/go-schedule` | Architect, Tester |
