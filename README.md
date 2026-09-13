@@ -18,6 +18,19 @@ Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rew
 - [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected)
 - [docs/impl-plan.md](docs/impl-plan.md) — scoped PR implementation plan
 
+### Go binary + systemd
+
+See [docs/deploy.md](docs/deploy.md). Lean path is `/opt/zanjerito`.
+
+```sh
+make build          # static; arch from uname -m (or GOARCH=arm64)
+sudo make install   # binary + copy-once config/env + unit
+sudo systemctl enable --now zanjerito
+# phone: http://<pi-lan>:8080/   (set LISTEN in /opt/zanjerito/zanjerito.env)
+```
+
+`systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. Dual-run with bash is the next PR.
+
 Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
 
 
