@@ -17,7 +17,7 @@ func TestUIHomeEmbedded(t *testing.T) {
 		t.Fatalf("want html, ct=%q", ct)
 	}
 	body := rr.Body.String()
-	for _, need := range []string{"STOP", "Stations", "Schedules", "[1, 5, 10]", "America/Phoenix", "Start anyway"} {
+	for _, need := range []string{"STOP", "Stations", "Schedules", "[1, 5, 10]", "America/Phoenix", "Start anyway", "esc("} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
 		}

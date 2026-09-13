@@ -84,6 +84,9 @@
       state.kiosk = true;
     }
     const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
     async function j(url, opt) {
       const r = await fetch(url, opt);
       const t = await r.text();
@@ -133,13 +136,13 @@
         const days = new Set(sch.weekdays || []);
         const steps = (sch.steps || []).map((s, i) =>
           `<label>Step ${i+1} minutes
-            <input data-step="${i}" type="number" min="1" max="30" value="${s.minutes || 0}">
-            <span>${s.station_id}</span>
+            <input data-step="${i}" type="number" min="1" max="30" value="${esc(s.minutes || 0)}">
+            <span>${esc(s.station_id)}</span>
           </label>`).join("");
         el.innerHTML = `
-          <strong>${sch.id}</strong>
+          <strong>${esc(sch.id)}</strong>
           <label><input type="checkbox" data-en ${sch.enabled ? "checked" : ""}> On</label>
-          <label>Start <input type="time" data-start value="${sch.start || "06:00"}"></label>
+          <label>Start <input type="time" data-start value="${esc(sch.start || "06:00")}"></label>
           <div class="days">${DAYS.map(d => `<button type="button" data-day="${d}" class="${days.has(d) || days.size===0 ? "on" : ""}">${d.slice(0,2)}</button>`).join("")}</div>
           ${steps}
           <button type="button" class="go edit" data-save>Save</button>`;
