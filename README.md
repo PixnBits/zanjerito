@@ -5,11 +5,13 @@ A little irrigation controller.
 
 https://www.srpnet.com/water/canals/azfallstour/Zanjero.aspx
 
-I had a name-brand commercial drip irrigation system controller, but first the WiFi system stopped working and then it stopped turning on valves. Raspberry Pis are easy to switch out, and Open-Source Software is great for fixing usability issues. Here's an attempt to do it "right".
+The commercial box failed as an update channel: the Wi-Fi daughter board could not be replaced, so software died with the manufacturer's hardware. Raspberry Pis and relay boards are easy to switch out. Open-source software is updated on a channel that is not "buy their next board."
+
+Household-first, copyable guts. Prove it on this Phoenix drip system; pin map is config so someone else can point it at their board.
 
 ## Rewrite (v2)
 
-Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rewrite/vision`:
+Vision lives on `rewrite/vision` (see also [#12](https://github.com/PixnBits/zanjerito/issues/12)):
 
 - [docs/prd.md](docs/prd.md) — product vision / PRD
 - [docs/decisions.md](docs/decisions.md) — prioritized decisions
@@ -17,16 +19,18 @@ Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rew
 - [docs/pin-map.md](docs/pin-map.md) — this hardware’s pin table + example config
 - [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected)
 
-Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
+Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination. The Go runtime is on `rewrite/go*`.
 
+Do not run Node on the Pi for production.
 
-## Developing
+## Developing the reference Node app (`fancy-vibes` only)
+
 ```shell
 $ git clone https://github.com/PixnBits/zanjerito.git
+$ git checkout fancy-vibes
 $ cd zanjerito
 $ nvm use 14
 $ npm ci
 $ npm start
-# open browser to http://localhost:3000/ or http://localhost:3000/graphiql
-# or, in a chromebook, http://penguin.linux.test:3000/graphiql
+# http://localhost:3000/ — GraphiQL is reference-only, not a product surface
 ```
