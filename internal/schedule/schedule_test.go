@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,5 +134,92 @@ func TestTickSkipsWhenBusy(t *testing.T) {
 	<-errCh
 	if !strings.Contains(buf.String(), "busy") {
 		t.Fatalf("want D13 busy skip, log=%q", buf.String())
+	}
+}
+
+type muBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (m *muBuf) Write(p []byte) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.b.Write(p)
+}
+
+func (m *muBuf) String() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.b.String()
+}
+
+func TestTickLogsStart(t *testing.T) {
+	loc, err := time.LoadLocation(Phoenix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := frontCfg()
+	e, err := engine.New(cfg, gpio.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	sch := store.Schedule{
+		ID: "probe", Enabled: true, Weekdays: []string{"mon"}, Start: "06:00",
+		Steps: []store.Step{{StationID: "front-west", Minutes: 1}},
+	}
+	if err := store.Save(path, store.File{Config: cfg, Schedules: []store.Schedule{sch}}); err != nil {
+		t.Fatal(err)
+	}
+	var buf muBuf
+	r := &Runner{
+		Eng: e, Path: path, Loc: loc,
+		Now: fixedClock{t: time.Date(2026, 9, 14, 6, 0, 0, 0, loc)},
+		Log: log.New(&buf, "", 0), lastFired: map[string]string{},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = r.Tick(ctx) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(buf.String(), "start probe at 06:00 Phoenix") {
+			_ = e.Stop()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = e.Stop()
+	t.Fatalf("missing start log: %s", buf.String())
+}
+
+func TestLoopStopsOnCancel(t *testing.T) {
+	cfg := frontCfg()
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	if err := store.Save(path, store.File{Config: cfg}); err != nil {
+		t.Fatal(err)
+	}
+	e, err := engine.New(cfg, gpio.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	r, err := NewRunner(e, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		r.Loop(ctx, 20*time.Millisecond)
+		close(done)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Loop did not return after cancel")
 	}
 }
