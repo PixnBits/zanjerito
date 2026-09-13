@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/PixnBits/zanjerito/internal/api"
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
 )
@@ -16,6 +18,7 @@ import (
 func main() {
 	configPath := flag.String("config", "config/pinmap.example.json", "path to config JSON")
 	driverName := flag.String("driver", "fake", "gpio driver: fake|lockout|gpiocdev")
+	listen := flag.String("listen", "", "LAN bind for REST+SSE (empty = engine only, e.g. 0.0.0.0:8080)")
 	flag.Parse()
 
 	cfg, err := engine.LoadConfig(*configPath)
@@ -38,6 +41,18 @@ func main() {
 	}()
 
 	log.Printf("zanjerito engine ready (driver=%s phase=%s)", *driverName, eng.Status().Phase)
+
+	if *listen != "" {
+		srv := api.New(eng, *configPath)
+		httpSrv := &http.Server{Addr: *listen, Handler: srv}
+		go func() {
+			log.Printf("api listening on %s (LAN trust, D7)", *listen)
+			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("api: %v", err)
+			}
+		}()
+		defer func() { _ = httpSrv.Close() }()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
