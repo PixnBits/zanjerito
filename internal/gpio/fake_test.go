@@ -1,6 +1,9 @@
 package gpio
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFakeSetupSetAllOff(t *testing.T) {
 	d := NewFake()
@@ -60,5 +63,15 @@ func TestDualrunLogsIntentLeavesOff(t *testing.T) {
 func TestUnknownDriver(t *testing.T) {
 	if _, err := New("nope"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestGpiocdevErrMentionsDualrun(t *testing.T) {
+	_, err := New("gpiocdev")
+	if err == nil {
+		t.Fatal("gpiocdev stub must fail closed")
+	}
+	if !strings.Contains(err.Error(), "dualrun") {
+		t.Fatalf("err should name dualrun, got %v", err)
 	}
 }

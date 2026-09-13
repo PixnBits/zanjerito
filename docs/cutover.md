@@ -22,6 +22,8 @@ Set in `/opt/zanjerito/zanjerito.env` (copy-once). Restart: `sudo systemctl rest
 3. Confirm `journalctl -u zanjerito` shows `gpio/dualrun: intended Set … (bash still actuates)` and **no** `/dev/gpiochip` claims.
 4. Phone UI may show watering; that is engine intent, not Go-driven valves.
 
+**STOP / `systemctl stop` in dual-run only clears the Go engine shadow** (`engine.Stop()` / journal `AllOff`). **Bash keeps watering.** Do not treat the red STOP or a unit stop as a valve-off while `DRIVER=dualrun`.
+
 ## Front 4/8/8 parity
 
 Golden program: Front West **4** / North **8** / South **8** (`config/front-schedule.example.json`, `schedule.FrontParity()`). Minutes are itinerary time, not bash dead-time.
