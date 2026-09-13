@@ -17,11 +17,22 @@ type File struct {
 	Schedules []Schedule `json:"schedules,omitempty"`
 }
 
-// Schedule is a minimal placeholder until the scheduler PR.
+// Step is one station run in a schedule itinerary (minutes, not bash dead-time).
+type Step struct {
+	StationID string `json:"station_id"`
+	Minutes   int    `json:"minutes"`
+}
+
+// Schedule is a wall-clock program (America/Phoenix). Seasonal windows optional.
 type Schedule struct {
-	ID      string `json:"id"`
-	Enabled bool   `json:"enabled"`
-	Note    string `json:"note,omitempty"`
+	ID       string   `json:"id"`
+	Enabled  bool     `json:"enabled"`
+	Note     string   `json:"note,omitempty"`
+	Weekdays []string `json:"weekdays,omitempty"` // mon..sun; empty = every day
+	Start    string   `json:"start,omitempty"`    // HH:MM local
+	Steps    []Step   `json:"steps,omitempty"`
+	StartsOn string   `json:"starts_on,omitempty"` // YYYY-MM-DD optional
+	EndsOn   string   `json:"ends_on,omitempty"`
 }
 
 // Load reads path, validates via engine (active_low required and true).
