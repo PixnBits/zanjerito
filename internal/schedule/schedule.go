@@ -52,7 +52,8 @@ func NewRunner(e *engine.Engine, path string) (*Runner, error) {
 	}, nil
 }
 
-// FrontParity is the Front West 4 / North 8 / South 8 fixture (not bash dead-time).
+// FrontParity is the example Front West 4 / North 8 / South 8 fixture (not bash dead-time).
+// Live bash/front.sh on the Pi may differ (e.g. 2/3/3 at 08:23); the file on disk wins.
 func FrontParity() store.Schedule {
 	return store.Schedule{
 		ID:       "front-parity",
@@ -178,6 +179,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 			r.Log.Printf("skip %s: %v", sch.ID, err)
 			continue
 		}
+		r.Log.Printf("start %s at %s Phoenix (%d steps)", sch.ID, now.Format("15:04"), len(steps))
 		err = r.Eng.RunItinerary(ctx, steps)
 		if errors.Is(err, engine.ErrBusy) {
 			r.Log.Printf("skip %s: busy (D13)", sch.ID)
@@ -188,6 +190,32 @@ func (r *Runner) Tick(ctx context.Context) error {
 			continue
 		}
 		r.markFired(sch.ID, now)
+		r.Log.Printf("done %s", sch.ID)
 	}
 	return nil
+}
+
+// Loop Ticks until ctx is cancelled. interval defaults to 1s.
+func (r *Runner) Loop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Second
+	}
+	if r.Log == nil {
+		r.Log = log.New(os.Stderr, "schedule: ", log.LstdFlags)
+	}
+	tick := time.NewTicker(interval)
+	defer tick.Stop()
+	if err := r.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		r.Log.Printf("tick: %v", err)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if err := r.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				r.Log.Printf("tick: %v", err)
+			}
+		}
+	}
 }

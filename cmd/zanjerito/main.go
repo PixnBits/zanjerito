@@ -14,6 +14,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/api"
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
+	"github.com/PixnBits/zanjerito/internal/schedule"
 )
 
 func main() {
@@ -43,6 +44,16 @@ func main() {
 
 	log.Printf("zanjerito engine ready (driver=%s phase=%s)", *driverName, eng.Status().Phase)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	runner, err := schedule.NewRunner(eng, *configPath)
+	if err != nil {
+		log.Fatalf("schedule: %v", err)
+	}
+	go runner.Loop(ctx, time.Second)
+	log.Printf("schedule runner ticking (America/Phoenix, %s)", *configPath)
+
 	if *listen != "" {
 		srv := api.New(eng, *configPath)
 		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
@@ -55,8 +66,6 @@ func main() {
 		defer func() { _ = httpSrv.Close() }()
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	<-ctx.Done()
 	log.Printf("shutdown: Stop + Close")
 	_ = eng.Stop()
