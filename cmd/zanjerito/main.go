@@ -18,7 +18,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config/pinmap.example.json", "path to config JSON")
-	driverName := flag.String("driver", "fake", "gpio driver: fake|lockout|gpiocdev")
+	driverName := flag.String("driver", "fake", "gpio driver: fake|dualrun|lockout|gpiocdev")
 	listen := flag.String("listen", "", "LAN bind for REST+SSE (empty = engine only, e.g. 192.168.1.8:8080)")
 	flag.Parse()
 

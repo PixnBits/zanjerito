@@ -38,7 +38,7 @@ Writes:
 | `/opt/zanjerito/zanjerito.env` | from `deploy/zanjerito.env.example` | **kept** |
 | `/etc/systemd/system/zanjerito.service` | unit | replaced |
 
-Edit `zanjerito.env` — set `LISTEN` to **this Pi’s LAN address** (not `0.0.0.0`), e.g. `192.168.1.8:8080`. `DRIVER=fake` until real lines are wired.
+Edit `zanjerito.env` — set `LISTEN` to **this Pi’s LAN address** (not `0.0.0.0`), e.g. `192.168.1.8:8080`. `DRIVER=dualrun` while bash still actuates (D9). `fake` for laptop. `gpiocdev` is not wired yet — see [cutover.md](./cutover.md).
 
 ## Enable + LAN UI
 
@@ -57,4 +57,4 @@ journalctl -u zanjerito -f
 sudo systemctl stop zanjerito   # ExecStop → SIGTERM → engine.Stop()
 ```
 
-If the process is wedged, systemd SIGKILLs after `TimeoutStopSec=15`. Inactive-on-release for real GPIO lands with `gpiocdev`, not this PR.
+If the process is wedged, systemd SIGKILLs after `TimeoutStopSec=15`. Inactive-on-release for real GPIO lands with `gpiocdev` (leftover). Dual-run / rollback: [cutover.md](./cutover.md).

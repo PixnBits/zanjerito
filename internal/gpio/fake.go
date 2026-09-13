@@ -32,6 +32,15 @@ func NewLockout() Driver {
 	}
 }
 
+// NewDualrun logs intended GPIO (D9) and never claims hardware. Bash still actuates.
+func NewDualrun() Driver {
+	return &fakeDriver{
+		lines: make(map[string]Line),
+		state: make(map[string]Level),
+		name:  "dualrun",
+	}
+}
+
 func (d *fakeDriver) Setup(chip string, lines []Line, activeLow bool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -53,8 +62,12 @@ func (d *fakeDriver) Set(id string, level Level) error {
 	if _, ok := d.lines[id]; !ok {
 		return fmt.Errorf("%s: unknown line %q", d.name, id)
 	}
-	if d.name == "lockout" {
-		log.Printf("gpio/lockout: refuse Set %s=%v", id, level)
+	if d.name == "lockout" || d.name == "dualrun" {
+		if d.name == "dualrun" {
+			log.Printf("gpio/dualrun: intended Set %s=%v (bash still actuates)", id, level)
+		} else {
+			log.Printf("gpio/lockout: refuse Set %s=%v", id, level)
+		}
 		return nil
 	}
 	d.state[id] = level

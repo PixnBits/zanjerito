@@ -42,6 +42,21 @@ func TestLockoutRefusesEnergize(t *testing.T) {
 	}
 }
 
+func TestDualrunLogsIntentLeavesOff(t *testing.T) {
+	d, err := New("dualrun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Setup("gpiochip0", []Line{{ID: "front-west", BCM: 5}}, true)
+	if err := d.Set("front-west", On); err != nil {
+		t.Fatal(err)
+	}
+	st := StateForTest(d)
+	if st["front-west"] != Off {
+		t.Fatalf("dualrun must not energize, got %v", st["front-west"])
+	}
+}
+
 func TestUnknownDriver(t *testing.T) {
 	if _, err := New("nope"); err == nil {
 		t.Fatal("expected error")

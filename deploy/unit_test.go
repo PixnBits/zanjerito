@@ -37,7 +37,7 @@ func TestEnvExampleIsLAN(t *testing.T) {
 	if strings.Contains(s, "0.0.0.0") {
 		t.Fatal("do not advertise 0.0.0.0")
 	}
-	if !strings.Contains(s, "LISTEN=") || !strings.Contains(s, "DRIVER=fake") {
+	if !strings.Contains(s, "LISTEN=") || !strings.Contains(s, "DRIVER=dualrun") {
 		t.Fatal("env example incomplete")
 	}
 }
