@@ -178,10 +178,56 @@ func (s *Server) handleStationRun(w http.ResponseWriter, r *http.Request) {
 		_ = s.Eng.Stop()
 	}
 	step := engine.Step{StationID: id, Duration: time.Duration(body.DurationSec) * time.Second}
-	go func() {
-		_ = s.Eng.RunItinerary(context.Background(), []engine.Step{step})
-	}()
+	if err := s.startRun(step, body.Preempt); err != nil {
+		writeErr(w, busyCode(err), err)
+		return
+	}
 	writeJSON(w, http.StatusAccepted, s.Eng.Status())
+}
+
+// startRun launches RunItinerary and returns only after it is accepted
+// (or fails). retryBusy waits out a just-stopped itinerary still holding running.
+func (s *Server) startRun(step engine.Step, retryBusy bool) error {
+	deadline := time.Now().Add(2 * time.Second)
+	var last error
+	for {
+		last = s.tryStart(step)
+		if last == nil || !retryBusy || !errors.Is(last, engine.ErrBusy) {
+			return last
+		}
+		if !time.Now().Before(deadline) {
+			return last
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func (s *Server) tryStart(step engine.Step) error {
+	errc := make(chan error, 1)
+	go func() {
+		errc <- s.Eng.RunItinerary(context.Background(), []engine.Step{step})
+	}()
+	// ErrBusy / validation return immediately. Do not treat leftover
+	// Phase!=Idle from the prior run as acceptance.
+	timer := time.NewTimer(50 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case err := <-errc:
+		return err
+	case <-timer.C:
+		if s.Eng.Status().Phase != engine.PhaseIdle {
+			return nil
+		}
+		select {
+		case err := <-errc:
+			return err
+		case <-time.After(200 * time.Millisecond):
+			if s.Eng.Status().Phase != engine.PhaseIdle {
+				return nil
+			}
+			return fmt.Errorf("%w: run did not start", engine.ErrBusy)
+		}
+	}
 }
 
 func (s *Server) handleCancel(w http.ResponseWriter, _ *http.Request) {

@@ -27,6 +27,7 @@ func validCfg() engine.Config {
 		Power:     engine.StationConfig{ID: "psu", BCM: 21},
 		Stations: []engine.StationConfig{
 			{ID: "front-north", Title: "Front North", BCM: 6},
+			{ID: "front-south", Title: "Front South", BCM: 5},
 		},
 	}
 }
@@ -147,6 +148,55 @@ func TestRunCancelAndBusyReject(t *testing.T) {
 	rr = doJSON(t, s, http.MethodPost, "/api/run/cancel", nil)
 	if rr.Code != 200 {
 		t.Fatalf("cancel %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestPreempt202OnlyWhenRunStarts(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 5})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("first run %d %s", rr.Code, rr.Body.String())
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if s.Eng.Status().Phase != engine.PhaseIdle {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s.Eng.Status().Phase == engine.PhaseIdle {
+		t.Fatal("first run never left Idle")
+	}
+	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-south/run", map[string]any{
+		"durationSec": 3, "preempt": true,
+	})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("preempt want 202 after start, got %d %s", rr.Code, rr.Body.String())
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	gotSouth := false
+	for time.Now().Before(deadline) {
+		st := s.Eng.Status()
+		if st.Phase == engine.PhaseIdle {
+			t.Fatalf("202 but engine idle (swallowed start): %+v", st)
+		}
+		for _, id := range st.StationsOn {
+			if id == "front-south" {
+				gotSouth = true
+			}
+		}
+		if st.CurrentStation == "front-south" || gotSouth {
+			gotSouth = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !gotSouth {
+		t.Fatalf("202 but new run did not start (status %+v)", s.Eng.Status())
+	}
+	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("non-preempt during new run want 409, got %d %s", rr.Code, rr.Body.String())
 	}
 }
 
