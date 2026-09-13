@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Zanjerito</title>
+  <style>
+    :root {
+      --bg: #1a1f18; --card: #262c22; --ink: #f3f6ee; --muted: #a8b39a;
+      --stop: #c43c2e; --go: #3d7a3a; --chip: #32392d; --on: #e8c04a;
+    }
+    .kiosk { font-size: 22px; }
+    .kiosk .edit, .kiosk #page-schedules { display: none; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink);
+      padding: 12px 12px 96px; max-width: 480px; margin-inline: auto; }
+    h1 { font-size: 1.1rem; margin: 0 0 8px; font-weight: 650; }
+    .status { background: var(--card); border-radius: 16px; padding: 16px; min-height: 7rem; }
+    .status .phase { font-size: 1.7rem; font-weight: 700; }
+    .status .sub { color: var(--muted); margin-top: 4px; }
+    .fault { color: #ffb4a8; }
+    .strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+    .chip { background: var(--chip); border: 0; color: var(--ink); border-radius: 999px;
+      padding: 12px 16px; font-size: 1rem; min-height: 44px; }
+    .chip.on { outline: 3px solid var(--on); }
+    .nav { display: flex; gap: 8px; margin: 8px 0 14px; }
+    .nav button { flex: 1; min-height: 44px; border-radius: 12px; border: 0; background: var(--chip); color: var(--ink); }
+    .nav button.active { background: #3a4634; }
+    .stop { position: fixed; left: 12px; right: 12px; bottom: 16px; max-width: 456px; margin-inline: auto;
+      background: var(--stop); color: #fff; border: 0; border-radius: 16px; min-height: 56px;
+      font-size: 1.25rem; font-weight: 800; letter-spacing: .04em; }
+    dialog { border: 0; border-radius: 16px; padding: 18px; width: min(92vw, 360px); background: var(--card); color: var(--ink); }
+    dialog menu { display: flex; gap: 8px; padding: 0; margin: 16px 0 0; justify-content: flex-end; }
+    dialog button { min-height: 44px; border: 0; border-radius: 10px; padding: 0 14px; }
+    .go { background: var(--go); color: #fff; }
+    .ghost { background: var(--chip); color: var(--ink); }
+    .sched { background: var(--card); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+    .days { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .days button { min-width: 40px; min-height: 40px; border-radius: 10px; border: 0; background: var(--chip); color: var(--ink); }
+    .days button.on { background: #4a6b38; }
+    label { display: block; color: var(--muted); font-size: .85rem; margin-top: 8px; }
+    input, select { font-size: 1rem; padding: 8px; border-radius: 8px; border: 0; width: 100%; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <button type="button" id="tab-home" class="active">Home</button>
+    <button type="button" id="tab-sched" class="edit">Schedules</button>
+  </nav>
+  <section id="page-home">
+    <div class="status" id="status">
+      <div class="phase" id="phase">…</div>
+      <div class="sub" id="sub"></div>
+    </div>
+    <h1>Stations</h1>
+    <div class="strip" id="stations"></div>
+  </section>
+  <section id="page-schedules" class="hidden">
+    <h1>Schedules</h1>
+    <p class="sub">Clock, weekdays, and minutes. America/Phoenix.</p>
+    <div id="schedules"></div>
+  </section>
+  <button type="button" class="stop" id="stop">STOP</button>
+  <dialog id="run-dlg">
+    <p id="run-msg"></p>
+    <div class="strip" id="durs"></div>
+    <menu>
+      <button type="button" class="ghost" id="run-cancel">Cancel</button>
+    </menu>
+  </dialog>
+  <dialog id="warn-dlg">
+    <p id="warn-msg">A station is already watering. Stop it and start this manual run?</p>
+    <menu>
+      <button type="button" class="ghost" id="warn-no">Keep going</button>
+      <button type="button" class="go" id="warn-yes">Start anyway</button>
+    </menu>
+  </dialog>
+  <script>
+    const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
+    const state = { status: { phase: "Idle", stations_on: [] }, stations: [], schedules: [], pick: null, kiosk: false };
+    if (new URLSearchParams(location.search).get("mode") === "kiosk") {
+      document.documentElement.classList.add("kiosk");
+      state.kiosk = true;
+    }
+    const $ = (id) => document.getElementById(id);
+    async function j(url, opt) {
+      const r = await fetch(url, opt);
+      const t = await r.text();
+      let body = null;
+      try { body = t ? JSON.parse(t) : null; } catch { body = { error: t }; }
+      if (!r.ok) throw new Error((body && body.error) || r.statusText);
+      return body;
+    }
+    function watering() {
+      const p = state.status.phase || "";
+      return p && p !== "Idle";
+    }
+    function paintStatus() {
+      const s = state.status;
+      $("phase").textContent = s.phase || "—";
+      const bits = [];
+      if (s.current_station) bits.push("Now: " + s.current_station);
+      if (s.now) bits.push(s.now.replace("T", " ").slice(0, 16));
+      if (s.last_error) bits.push(s.last_error);
+      $("sub").textContent = bits.join(" · ") || "Phoenix";
+      $("sub").classList.toggle("fault", !!s.last_error);
+      document.querySelectorAll("#stations .chip").forEach((el) => {
+        const on = (s.stations_on || []).includes(el.dataset.id) || s.current_station === el.dataset.id;
+        el.classList.toggle("on", on);
+      });
+    }
+    function paintStations() {
+      $("stations").innerHTML = "";
+      (state.stations || []).forEach((st) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip";
+        b.dataset.id = st.id;
+        b.textContent = st.title || st.id;
+        if (st.color) b.style.background = st.color;
+        b.addEventListener("click", () => openRun(st));
+        $("stations").appendChild(b);
+      });
+      paintStatus();
+    }
+    function paintSchedules() {
+      const box = $("schedules");
+      box.innerHTML = "";
+      (state.schedules || []).forEach((sch) => {
+        const el = document.createElement("article");
+        el.className = "sched";
+        const days = new Set(sch.weekdays || []);
+        const steps = (sch.steps || []).map((s, i) =>
+          `<label>Step ${i+1} minutes
+            <input data-step="${i}" type="number" min="1" max="30" value="${s.minutes || 0}">
+            <span>${s.station_id}</span>
+          </label>`).join("");
+        el.innerHTML = `
+          <strong>${sch.id}</strong>
+          <label><input type="checkbox" data-en ${sch.enabled ? "checked" : ""}> On</label>
+          <label>Start <input type="time" data-start value="${sch.start || "06:00"}"></label>
+          <div class="days">${DAYS.map(d => `<button type="button" data-day="${d}" class="${days.has(d) || days.size===0 ? "on" : ""}">${d.slice(0,2)}</button>`).join("")}</div>
+          ${steps}
+          <button type="button" class="go edit" data-save>Save</button>`;
+        el.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
+        el.querySelector("[data-save]").addEventListener("click", () => saveSched(sch, el));
+        box.appendChild(el);
+      });
+    }
+    async function saveSched(sch, el) {
+      const weekdays = [...el.querySelectorAll("[data-day].on")].map((b) => b.dataset.day);
+      const steps = (sch.steps || []).map((s, i) => {
+        const inp = el.querySelector(`[data-step="${i}"]`);
+        return { station_id: s.station_id, minutes: Number(inp && inp.value) || s.minutes };
+      });
+      await j("/api/schedules/" + encodeURIComponent(sch.id), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: sch.id,
+          enabled: el.querySelector("[data-en]").checked,
+          note: sch.note || "",
+          weekdays,
+          start: el.querySelector("[data-start]").value,
+          steps,
+          starts_on: sch.starts_on || "",
+          ends_on: sch.ends_on || "",
+        }),
+      });
+      await loadSchedules();
+    }
+    function openRun(st) {
+      state.pick = st;
+      $("run-msg").textContent = "Run " + (st.title || st.id) + " for…";
+      const durs = $("durs");
+      durs.innerHTML = "";
+      [1, 5, 10].forEach((m) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip go";
+        b.textContent = m + " min";
+        b.addEventListener("click", () => confirmRun(st, m * 60));
+        durs.appendChild(b);
+      });
+      $("run-dlg").showModal();
+    }
+    function confirmRun(st, sec) {
+      $("run-dlg").close();
+      if (watering()) {
+        $("warn-msg").textContent = (state.status.current_station || "A station") +
+          " is watering. Stop it and run " + (st.title || st.id) + "?";
+        $("warn-dlg").dataset.sec = String(sec);
+        $("warn-dlg").dataset.id = st.id;
+        $("warn-dlg").showModal();
+        return;
+      }
+      startRun(st.id, sec, false);
+    }
+    async function startRun(id, sec, preempt) {
+      await j("/api/stations/" + encodeURIComponent(id) + "/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ durationSec: sec, preempt }),
+      });
+    }
+    $("run-cancel").addEventListener("click", () => $("run-dlg").close());
+    $("warn-no").addEventListener("click", () => $("warn-dlg").close());
+    $("warn-yes").addEventListener("click", () => {
+      const d = $("warn-dlg");
+      d.close();
+      startRun(d.dataset.id, Number(d.dataset.sec), true);
+    });
+    $("stop").addEventListener("click", () => {
+      j("/api/run/cancel", { method: "POST" }).catch((e) => alert(e.message));
+    });
+    $("tab-home").addEventListener("click", () => {
+      $("page-home").classList.remove("hidden");
+      $("page-schedules").classList.add("hidden");
+      $("tab-home").classList.add("active");
+      $("tab-sched").classList.remove("active");
+    });
+    $("tab-sched").addEventListener("click", () => {
+      $("page-home").classList.add("hidden");
+      $("page-schedules").classList.remove("hidden");
+      $("tab-home").classList.remove("active");
+      $("tab-sched").classList.add("active");
+    });
+    async function loadStations() {
+      const d = await j("/api/stations");
+      state.stations = d.stations || [];
+      paintStations();
+    }
+    async function loadSchedules() {
+      const d = await j("/api/schedules");
+      state.schedules = d.schedules || [];
+      paintSchedules();
+    }
+    async function loadStatus() {
+      state.status = await j("/api/status");
+      paintStatus();
+    }
+    function hookSSE() {
+      try {
+        const es = new EventSource("/api/events");
+        es.addEventListener("status", (ev) => {
+          try { Object.assign(state.status, JSON.parse(ev.data)); paintStatus(); } catch (e) {}
+        });
+      } catch (e) {}
+    }
+    loadStatus();
+    loadStations();
+    loadSchedules();
+    hookSSE();
+    setInterval(loadStatus, 4000);
+  </script>
+</body>
+</html>

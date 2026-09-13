@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -12,6 +14,9 @@ import (
 	"github.com/PixnBits/zanjerito/internal/schedule"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
+
+//go:embed ui/*
+var uiFS embed.FS
 
 // Server is the LAN REST+JSON+SSE surface (D5/D7). No GraphQL.
 type Server struct {
@@ -32,7 +37,18 @@ func New(e *engine.Engine, path string) *Server {
 	s.mux.HandleFunc("GET /api/schedules/{id}", s.handleScheduleGet)
 	s.mux.HandleFunc("PUT /api/schedules/{id}", s.handleSchedulePut)
 	s.mux.HandleFunc("GET /api/events", s.handleEvents)
+	mountUI(s.mux)
 	return s
+}
+
+func mountUI(mux *http.ServeMux) {
+	sub, err := fs.Sub(uiFS, "ui")
+	if err != nil {
+		return
+	}
+	h := http.FileServer(http.FS(sub))
+	mux.Handle("GET /{$}", h)
+	mux.Handle("GET /index.html", h)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
