@@ -31,18 +31,21 @@ type Line struct {
 }
 
 // New returns a driver by name.
-//   - fake: logs only (dev / CI)
-//   - lockout: like fake but Set/AllOff are no-ops that still log lockout (safe Pi bring-up)
-//   - gpiocdev: real character-device driver (wired in a follow-up PR; stub rejects for now if unfinished)
+//   - fake: in-process log + shadow state (dev / CI)
+//   - dualrun: log intended Set (D9); never claims hardware — bash still actuates
+//   - lockout: same no-hardware rule, wording is "refuse" (safe bring-up)
+//   - gpiocdev: real character-device driver (follow-up; stub fails closed)
 func New(name string) (Driver, error) {
 	switch name {
 	case "fake":
 		return NewFake(), nil
+	case "dualrun":
+		return NewDualrun(), nil
 	case "lockout":
 		return NewLockout(), nil
 	case "gpiocdev":
 		return NewGpiocdev()
 	default:
-		return nil, fmt.Errorf("unknown gpio driver %q (want fake|lockout|gpiocdev)", name)
+		return nil, fmt.Errorf("unknown gpio driver %q (want fake|dualrun|lockout|gpiocdev)", name)
 	}
 }
