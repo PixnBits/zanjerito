@@ -34,7 +34,7 @@ type Line struct {
 //   - fake: in-process log + shadow state (dev / CI)
 //   - dualrun: log intended Set (D9); never claims hardware — bash still actuates
 //   - lockout: same no-hardware rule, wording is "refuse" (safe bring-up)
-//   - gpiocdev: real character-device driver (follow-up; stub fails closed)
+//   - gpiocdev: real /dev/gpiochip* via go-gpiocdev (inactive-on-release, active-low)
 func New(name string) (Driver, error) {
 	switch name {
 	case "fake":
