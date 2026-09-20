@@ -30,7 +30,7 @@ sudo systemctl enable --now zanjerito
 # phone: http://<pi-lan>:8080/   (set LISTEN in /opt/zanjerito/zanjerito.env)
 ```
 
-`systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. Dual-run with bash is the next PR.
+`systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. Dual-run (`DRIVER=dualrun`) is live on the Pi until cutover — see [docs/cutover.md](docs/cutover.md).
 
 Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
 
