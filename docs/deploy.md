@@ -20,7 +20,7 @@ make build GOARCH=arm64          # 64-bit Pi
 make build GOARCH=arm GOARM=7    # 32-bit Pi
 ```
 
-`CGO_ENABLED=0` — static binary, no libc GPIO yet (`-driver=fake` or `lockout`). `gpiocdev` is still an unwired stub.
+`CGO_ENABLED=0` — static binary. `go-gpiocdev` is pure Go (ioctl); no CGO. Use `-driver=dualrun` until cutover; `-driver=gpiocdev` after flip.
 
 ## Install (copy-once config)
 
@@ -38,7 +38,7 @@ Writes:
 | `/opt/zanjerito/zanjerito.env` | from `deploy/zanjerito.env.example` | **kept** |
 | `/etc/systemd/system/zanjerito.service` | unit | replaced |
 
-Edit `zanjerito.env` — set `LISTEN` to **this Pi’s LAN address** (not `0.0.0.0`), e.g. `192.168.1.8:8080`. `DRIVER=dualrun` while bash still actuates (D9). `fake` for laptop. `gpiocdev` is not wired yet — see [cutover.md](./cutover.md).
+Edit `zanjerito.env` — set `LISTEN` to **this Pi’s LAN address** (not `0.0.0.0`), e.g. `192.168.1.8:8080`. `DRIVER=dualrun` while bash still actuates (D9). `fake` for laptop. `gpiocdev` is wired (do **not** flip DRIVER until cutover checklist). See [cutover.md](./cutover.md).
 
 ## Enable + LAN UI
 
@@ -57,4 +57,4 @@ journalctl -u zanjerito -f
 sudo systemctl stop zanjerito   # ExecStop → SIGTERM → engine.Stop()
 ```
 
-If the process is wedged, systemd SIGKILLs after `TimeoutStopSec=15`. Inactive-on-release for real GPIO lands with `gpiocdev` (leftover). Dual-run / rollback: [cutover.md](./cutover.md).
+If the process is wedged, systemd SIGKILLs after `TimeoutStopSec=15`. Inactive-on-release: `gpiocdev` requests AsOutput(inactive)+AsActiveLow so Close/release de-energizes. Dual-run / rollback: [cutover.md](./cutover.md).
