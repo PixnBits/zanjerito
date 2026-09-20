@@ -39,7 +39,28 @@ On a scheduled morning (America/Phoenix):
 
 Repeat until **N good scheduled days** (default **7**, or whatever Nick names). A skip-because-busy (D13) day does not count as good.
 
+## gpiocdev dry smoke (pre-cutover)
+
+`-dry` is **only meaningful with** `-driver=gpiocdev`. Setup still opens `gpiochip0` and requests lines AsOutput(inactive)+AsActiveLow (permissions + pin map). `Set(On)` is a no-op that logs `gpio/gpiocdev-dry: refuse energize …`. AllOff/Close still release cleanly.
+
+**Quiet window required:** character-device line claim conflicts with bash GPIO. Pause the bash Front cron / do not run `channel.sh` while smoking, then restore bash before leaving dual-run.
+
+```sh
+# pause bash Front cron first (same line you will later disable for flip)
+crontab -l | sed '/front\.sh/s/^/# /' | crontab -
+
+# one-shot smoke (do not change zanjerito.env DRIVER=)
+sudo /opt/zanjerito/zanjerito -config /opt/zanjerito/config.json -driver=gpiocdev -dry -listen ''
+# Ctrl-C after journal shows setup + any refuse energize lines; Close releases
+
+# restore bash cron
+crontab -l | sed '/front\.sh/s/^# //' | crontab -
+```
+
+Do **not** set `DRIVER=gpiocdev` in `zanjerito.env` for this smoke.
+
 ## Pre-flip gate
+
 
 All of:
 

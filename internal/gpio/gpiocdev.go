@@ -46,6 +46,7 @@ func normalizeChip(chip string) string {
 type gpiocdevDriver struct {
 	mu        sync.Mutex
 	activeLow bool
+	dry       bool // claim lines but never energize (pre-cutover smoke)
 	lines     map[string]Line
 	handles   map[string]lineIO
 	order     []string // stations then psu for AllOff
@@ -56,11 +57,22 @@ type gpiocdevDriver struct {
 // Pure Go / CGO_ENABLED=0. Lines request AsOutput(inactive) + AsActiveLow when
 // activeLow so release/Close leaves valves de-energized (inactive-on-release).
 func NewGpiocdev() (Driver, error) {
+	return newGpiocdev(false), nil
+}
+
+// NewGpiocdevDry claims gpiochip lines like NewGpiocdev but refuses Set(On).
+// Use with -dry -driver=gpiocdev for pre-cutover permission/pin-map smoke.
+func NewGpiocdevDry() (Driver, error) {
+	return newGpiocdev(true), nil
+}
+
+func newGpiocdev(dry bool) *gpiocdevDriver {
 	return &gpiocdevDriver{
+		dry:     dry,
 		lines:   make(map[string]Line),
 		handles: make(map[string]lineIO),
 		request: requestRealLine,
-	}, nil
+	}
 }
 
 func (d *gpiocdevDriver) Setup(chip string, lines []Line, activeLow bool) error {
@@ -103,7 +115,11 @@ func (d *gpiocdevDriver) Setup(chip string, lines []Line, activeLow bool) error 
 	if psu != "" {
 		d.order = append(d.order, psu)
 	}
-	log.Printf("gpio/gpiocdev: setup chip=%s activeLow=%v lines=%d (inactive-on-release)", chip, activeLow, len(lines))
+	mode := "inactive-on-release"
+	if d.dry {
+		mode = "dry: claim+inactive only, refuse energize"
+	}
+	log.Printf("gpio/gpiocdev: setup chip=%s activeLow=%v lines=%d (%s)", chip, activeLow, len(lines), mode)
 	return nil
 }
 
@@ -113,6 +129,10 @@ func (d *gpiocdevDriver) Set(id string, level Level) error {
 	h, ok := d.handles[id]
 	if !ok {
 		return fmt.Errorf("gpiocdev: unknown line %q", id)
+	}
+	if d.dry && level == On {
+		log.Printf("gpio/gpiocdev-dry: refuse energize %s (Set On no-op)", id)
+		return nil
 	}
 	v := 0
 	if level == On {

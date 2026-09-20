@@ -157,3 +157,51 @@ func TestNormalizeChip(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+func TestGpiocdevDryRefusesEnergize(t *testing.T) {
+	d := newGpiocdev(true)
+	mocks := map[int]*mockLine{}
+	d.request = func(chip string, offset int, activeLow bool) (lineIO, error) {
+		m := &mockLine{val: 0}
+		mocks[offset] = m
+		return m, nil
+	}
+	if err := d.Setup("gpiochip0", []Line{
+		{ID: "psu", BCM: 21},
+		{ID: "front-west", BCM: 5},
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Set("front-west", On); err != nil {
+		t.Fatal(err)
+	}
+	if mocks[5].value() != 0 {
+		t.Fatalf("dry must not energize, got %d", mocks[5].value())
+	}
+	if err := d.Set("front-west", Off); err != nil {
+		t.Fatal(err)
+	}
+	if mocks[5].value() != 0 {
+		t.Fatalf("Off should stay inactive, got %d", mocks[5].value())
+	}
+	if err := d.AllOff(); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !mocks[5].closed || !mocks[21].closed {
+		t.Fatal("Close must release lines")
+	}
+}
+
+func TestNewGpiocdevDryFactory(t *testing.T) {
+	d, err := NewGpiocdevDry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gd, ok := d.(*gpiocdevDriver)
+	if !ok || !gd.dry {
+		t.Fatalf("want dry gpiocdev, got %T dry=%v", d, ok && gd.dry)
+	}
+}
