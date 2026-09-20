@@ -21,13 +21,24 @@ func main() {
 	configPath := flag.String("config", "config/pinmap.example.json", "path to config JSON")
 	driverName := flag.String("driver", "fake", "gpio driver: fake|dualrun|lockout|gpiocdev")
 	listen := flag.String("listen", "", "LAN bind for REST+SSE (empty = engine only, e.g. 192.168.1.8:8080)")
+	dry := flag.Bool("dry", false, "with -driver=gpiocdev: claim lines but refuse energize (pre-cutover smoke)")
 	flag.Parse()
 
 	cfg, err := engine.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
-	drv, err := gpio.New(*driverName)
+	var drv gpio.Driver
+	if *dry {
+		if *driverName != "gpiocdev" {
+			log.Printf("-dry is only meaningful with -driver=gpiocdev (got %s); ignoring -dry", *driverName)
+			drv, err = gpio.New(*driverName)
+		} else {
+			drv, err = gpio.NewGpiocdevDry()
+		}
+	} else {
+		drv, err = gpio.New(*driverName)
+	}
 	if err != nil {
 		log.Fatalf("gpio driver: %v", err)
 	}
@@ -42,7 +53,7 @@ func main() {
 		}
 	}()
 
-	log.Printf("zanjerito engine ready (driver=%s phase=%s)", *driverName, eng.Status().Phase)
+	log.Printf("zanjerito engine ready (driver=%s dry=%v phase=%s)", *driverName, *dry && *driverName == "gpiocdev", eng.Status().Phase)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
