@@ -1,6 +1,6 @@
 # Zanjerito — UI directions (for stakeholder feedback)
 
-**Status:** Draft v0.3 · 2026-09-12  
+**Status:** Draft v0.4 · 2026-09-23 (v1 explore added)  
 **Companion:** [prd.md](./prd.md) · [decisions.md](./decisions.md)  
 **Selected (decided):** **Direction D — hybrid strip** (Nick, 2026-09-12)
 
@@ -74,3 +74,32 @@ The `fancy-vibes` React UI was a learning prototype (stations list, schedules, G
 | Who | Date | Preference | Notes |
 |---|---|---|---|
 | Nick | 2026-09-12 | D hybrid | STOP on app and wall. Manual run may preempt a schedule with warnings. Wall screen is v1, not MVP. |
+
+
+---
+
+## v1 explore (Direction D — post-cutover)
+
+Still **Direction D** hybrid strip. Production UI is the Go-embedded phone app (`DRIVER=gpiocdev`). Do **not** surface cron strings, `PT5M`, GraphiQL, or raw GPIO as household primary controls.
+
+### Seasonal program cards
+
+Engine already skips programs outside `starts_on` / `ends_on`. Cards should show name, on/off, next fire, and a season badge (date window or year-round). Actions: Enable / Edit / Duplicate. Out of season → label **Out of season** (not a broken card).
+
+### Schedule editor polish
+
+Household editor: clock (**HH:MM**) + weekday chips + station minutes. Season: **All-year** | **Between dates**. Itinerary: station + minutes; fat tap targets. Soft warn when two enabled programs collide (D13). Never lead with cron / ISO durations / GraphiQL.
+
+### Run history
+
+Thin list later (**D10**). **Not** this explore’s implementation scope — no history store/page yet.
+
+### Kiosk density
+
+Wall / `?mode=kiosk` density remains **parked** (v1 wall, not MVP phone).
+
+### Suggested build order
+
+1. Seasonal program cards + schedule editor UI (next code PR)
+2. Run history thin list after that
+3. Webpage pause (rain/mowing) when separately green-lit

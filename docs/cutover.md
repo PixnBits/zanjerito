@@ -1,21 +1,23 @@
 # Cutover checklist (D9)
 
-Bash on `mvp-bash` stays the actuator until this list is done. The Go daemon **logs intended GPIO** (`DRIVER=dualrun`) so you can compare journal lines to what bash actually did.
+**Status (2026-09):** Flip **completed** ~**2026-09-22**. Production on the Pi is `DRIVER=gpiocdev`; Front bash cron is commented. First live Front morning **wet-check PASS 2026-09-23** (08:23–08:31 PT, west/north/south **2/3/3**). Overlap sequencing unchanged. Bash scripts remain on disk for a season — rollback copy-paste is at the bottom.
 
-Real `gpiocdev` (inactive-on-release on `/dev/gpiochip0`) must be **merged and deployed** before any DRIVER flip — still run the binary as `dualrun` (or lockout smoke) until the pre-flip gate below is green.
+The sections below keep the dual-run / pre-flip / flip procedure for history and for anyone replaying cutover on another site. Do **not** re-flip DRIVER or touch Pi cron from a docs PR.
+
+---
 
 ## Drivers
 
 | `DRIVER` | Hardware | Use |
 |---|---|---|
 | `fake` | none (shadow state) | laptop / CI |
-| `dualrun` | none; logs `intended Set` | **D9 overlap** — bash still waters (**Pi default until flip**) |
+| `dualrun` | none; logs `intended Set` | D9 overlap — bash still waters (pre-flip) |
 | `lockout` | none; logs `refuse Set` | safe Pi bring-up without bash compare |
-| `gpiocdev` | `/dev/gpiochip0` via go-gpiocdev | only after pre-flip gate |
+| `gpiocdev` | `/dev/gpiochip0` via go-gpiocdev | **production on this Pi (post-flip)** |
 
 Set in `/opt/zanjerito/zanjerito.env` (copy-once). Restart: `sudo systemctl restart zanjerito`.
 
-## Dual-run (now)
+## Dual-run (historical — pre-flip)
 
 1. Leave `mvp-bash` / `front.sh` (or cron) **enabled**. Do not disable bash yet.
 2. Install Go unit with `DRIVER=dualrun` and a LAN `LISTEN`.
@@ -24,20 +26,18 @@ Set in `/opt/zanjerito/zanjerito.env` (copy-once). Restart: `sudo systemctl rest
 
 **STOP / `systemctl stop` in dual-run only clears the Go engine shadow** (`engine.Stop()` / journal `AllOff`). **Bash keeps watering.** Do not treat the red STOP or a unit stop as a valve-off while `DRIVER=dualrun`.
 
-## Front parity (live bash vs example)
+## Front parity (live vs example)
 
-**Live bash `front.sh` (ops, 2026-09):** Front West **2** / North **3** / South **3** at **08:23** America/Phoenix.
+**Live Front program (ops, 2026-09):** Front West **2** / North **3** / South **3** at **08:23** America/Phoenix.
 
 Repo example `config/front-schedule.example.json` / `schedule.FrontParity()` is still West **4** / North **8** / South **8** — that is **not** the live program. The file on disk (`/opt/zanjerito/config.json`) wins; compare journal `start …` lines to whatever is actually scheduled.
 
-On a scheduled morning (America/Phoenix):
+On a scheduled morning (America/Phoenix), pre-flip checklist was:
 
-- [ ] Bash ran the **live** west/north/south minutes (wet-check / bash logs).
-- [ ] Go journal intended the same station ids in that order, those durations (± overlap sequencing).
-- [ ] No extra station intended ON.
-- [ ] `systemctl stop zanjerito` still all-offs in the **engine** (journal `AllOff`); real valves stay under bash.
-
-Repeat until **N good scheduled days** (default **7**, or whatever Nick names). A skip-because-busy (D13) day does not count as good.
+- [x] Bash ran the **live** west/north/south minutes (wet-check / bash logs) — dual-run era.
+- [x] Go journal intended the same station ids in that order, those durations (± overlap sequencing).
+- [x] No extra station intended ON.
+- [x] Post-flip wet-check **PASS 2026-09-23** (Go + `gpiocdev` watering west/north/south 2/3/3).
 
 ## gpiocdev dry smoke (pre-cutover)
 
@@ -61,16 +61,13 @@ Do **not** set `DRIVER=gpiocdev` in `zanjerito.env` for this smoke.
 
 ## Pre-flip gate
 
+All of (completed for this Pi):
 
-All of:
+- [x] **N GOOD** dual-run mornings (journal match vs bash).
+- [x] `gpiocdev` PR **merged** and binary **deployed** to `/opt/zanjerito` while still `DRIVER=dualrun` (or a brief `lockout` smoke — never flip DRIVER early).
+- [x] Nick / portfolio green-light to cut bash cron (~2026-09-22).
 
-- [ ] **N GOOD** dual-run mornings (journal match vs bash).
-- [ ] `gpiocdev` PR **merged** and binary **deployed** to `/opt/zanjerito` while still `DRIVER=dualrun` (or a brief `lockout` smoke — never flip DRIVER early).
-- [ ] Nick / portfolio green-light to cut bash cron.
-
-## Flip (copy-paste)
-
-Only after the pre-flip gate:
+## Flip (copy-paste) — done ~2026-09-22
 
 ```sh
 # 1) Disable bash Front cron (example — match the real crontab line)

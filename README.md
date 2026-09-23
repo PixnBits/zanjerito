@@ -7,17 +7,18 @@ https://www.srpnet.com/water/canals/azfallstour/Zanjero.aspx
 
 I had a name-brand commercial drip irrigation system controller, but first the WiFi system stopped working and then it stopped turning on valves. Raspberry Pis are easy to switch out, and Open-Source Software is great for fixing usability issues. Here's an attempt to do it "right".
 
-## Rewrite (v2)
+## Production (v2 Go on the Pi)
 
-Vision and planning for the Pi-efficient Go rewrite (new UI) live on branch `rewrite/vision`:
+**Live actuator** is the Go binary on the Pi with `DRIVER=gpiocdev` (cutover ~2026-09-22). Front bash cron is commented; bash scripts stay on disk for rollback.
 
+- [docs/deploy.md](docs/deploy.md) — build, install, systemd, env
+- [docs/cutover.md](docs/cutover.md) — completed flip notes + bash rollback copy-paste
 - [docs/prd.md](docs/prd.md) — product vision / PRD
 - [docs/decisions.md](docs/decisions.md) — prioritized decisions
 - [docs/architecture.md](docs/architecture.md) — runtime layers, state machine, API sketch
 - [docs/pin-map.md](docs/pin-map.md) — this hardware’s pin table + example config
-- [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected)
+- [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected) + v1 explore
 - [docs/impl-plan.md](docs/impl-plan.md) — scoped PR implementation plan
-- [docs/cutover.md](docs/cutover.md) — D9 dual-run + bash rollback
 
 ### Go binary + systemd
 
@@ -30,18 +31,19 @@ sudo systemctl enable --now zanjerito
 # phone: http://<pi-lan>:8080/   (set LISTEN in /opt/zanjerito/zanjerito.env)
 ```
 
-`systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. Dual-run (`DRIVER=dualrun`) is live on the Pi until cutover — see [docs/cutover.md](docs/cutover.md).
-
-Production today remains the bash scripts on `mvp-bash`. The Node app on `fancy-vibes` is a behavioral reference, not the destination.
-
+`systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. With `DRIVER=gpiocdev`, that de-energizes valves (inactive-on-release).
 
 ## Developing
-```shell
-$ git clone https://github.com/PixnBits/zanjerito.git
-$ cd zanjerito
-$ nvm use 14
-$ npm ci
-$ npm start
-# open browser to http://localhost:3000/ or http://localhost:3000/graphiql
-# or, in a chromebook, http://penguin.linux.test:3000/graphiql
+
+Primary path is the Go binary (same as production):
+
+```sh
+git clone https://github.com/PixnBits/zanjerito.git
+cd zanjerito
+git checkout fancy-vibes
+make build
+./zanjerito -config config/config.example.json -driver=fake -listen 127.0.0.1:8080
+# phone UI: http://127.0.0.1:8080/
 ```
+
+The older Node 14 / GraphiQL app under this tree is a **behavioral reference** only (not the production UI or Developing default). Prefer the embedded Direction D UI served by the Go binary.
