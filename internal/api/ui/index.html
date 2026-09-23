@@ -8,6 +8,7 @@
     :root {
       --bg: #1a1f18; --card: #262c22; --ink: #f3f6ee; --muted: #a8b39a;
       --stop: #c43c2e; --go: #3d7a3a; --chip: #32392d; --on: #e8c04a;
+      --warn: #8a6a1a; --warn-ink: #ffe9a8; --off: #5a6354;
     }
     .kiosk { font-size: 22px; }
     .kiosk .edit, .kiosk #page-schedules { display: none; }
@@ -17,7 +18,7 @@
     h1 { font-size: 1.1rem; margin: 0 0 8px; font-weight: 650; }
     .status { background: var(--card); border-radius: 16px; padding: 16px; min-height: 7rem; }
     .status .phase { font-size: 1.7rem; font-weight: 700; }
-    .status .sub { color: var(--muted); margin-top: 4px; }
+    .status .sub, .sub { color: var(--muted); margin-top: 4px; }
     .fault { color: #ffb4a8; }
     .strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
     .chip { background: var(--chip); border: 0; color: var(--ink); border-radius: 999px;
@@ -29,18 +30,37 @@
     .stop { position: fixed; left: 12px; right: 12px; bottom: 16px; max-width: 456px; margin-inline: auto;
       background: var(--stop); color: #fff; border: 0; border-radius: 16px; min-height: 56px;
       font-size: 1.25rem; font-weight: 800; letter-spacing: .04em; }
-    dialog { border: 0; border-radius: 16px; padding: 18px; width: min(92vw, 360px); background: var(--card); color: var(--ink); }
-    dialog menu { display: flex; gap: 8px; padding: 0; margin: 16px 0 0; justify-content: flex-end; }
-    dialog button { min-height: 44px; border: 0; border-radius: 10px; padding: 0 14px; }
+    dialog { border: 0; border-radius: 16px; padding: 18px; width: min(94vw, 420px);
+      max-height: 90vh; overflow: auto; background: var(--card); color: var(--ink); }
+    dialog menu { display: flex; gap: 8px; padding: 0; margin: 16px 0 0; justify-content: flex-end; flex-wrap: wrap; }
+    dialog button, .row-actions button, .sched-head button, #sched-new {
+      min-height: 44px; border: 0; border-radius: 10px; padding: 0 14px; font-size: 1rem; }
     .go { background: var(--go); color: #fff; }
     .ghost { background: var(--chip); color: var(--ink); }
-    .sched { background: var(--card); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+    .sched { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .sched-title { font-weight: 700; font-size: 1.05rem; word-break: break-word; }
+    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .badge { display: inline-block; background: var(--chip); color: var(--ink); border-radius: 999px;
+      padding: 4px 10px; font-size: .78rem; }
+    .badge.off { background: var(--off); }
+    .badge.out { background: #4a3a28; color: #ffd9a8; }
+    .badge.season { background: #2f4030; }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .days { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-    .days button { min-width: 40px; min-height: 40px; border-radius: 10px; border: 0; background: var(--chip); color: var(--ink); }
+    .days button { min-width: 44px; min-height: 44px; border-radius: 10px; border: 0; background: var(--chip); color: var(--ink); }
     .days button.on { background: #4a6b38; }
-    label { display: block; color: var(--muted); font-size: .85rem; margin-top: 8px; }
-    input, select { font-size: 1rem; padding: 8px; border-radius: 8px; border: 0; width: 100%; }
+    label { display: block; color: var(--muted); font-size: .85rem; margin-top: 10px; }
+    input, select { font-size: 1rem; padding: 10px; border-radius: 8px; border: 0; width: 100%; background: #1e241c; color: var(--ink); }
+    input[type="checkbox"] { width: auto; min-height: 22px; min-width: 22px; vertical-align: middle; margin-right: 8px; }
+    .step-row { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; align-items: end; margin-top: 8px; }
+    .step-row label { margin-top: 0; }
+    .collide { background: var(--warn); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
+      margin: 0 0 12px; font-size: .92rem; }
+    .sched-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .hidden { display: none; }
+    .ed-warn { color: var(--warn-ink); background: #3a3218; border-radius: 10px; padding: 10px; margin-top: 10px; font-size: .9rem; }
   </style>
 </head>
 <body>
@@ -57,8 +77,12 @@
     <div class="strip" id="stations"></div>
   </section>
   <section id="page-schedules" class="hidden">
-    <h1>Schedules</h1>
-    <p class="sub">Clock, weekdays, and minutes. America/Phoenix.</p>
+    <div class="sched-toolbar">
+      <h1 style="margin:0">Schedules</h1>
+      <button type="button" class="go edit" id="sched-new">New</button>
+    </div>
+    <p class="sub">Programs · America/Phoenix · seasonal windows supported</p>
+    <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
   </section>
   <button type="button" class="stop" id="stop">STOP</button>
@@ -76,9 +100,39 @@
       <button type="button" class="go" id="warn-yes">Start anyway</button>
     </menu>
   </dialog>
+  <dialog id="sched-dlg">
+    <h1 id="sched-dlg-title" style="margin-top:0">Edit program</h1>
+    <label>Name <input id="ed-note" type="text" maxlength="120" placeholder="e.g. Front morning"></label>
+    <label>Start (HH:MM) <input id="ed-start" type="time" value="06:00"></label>
+    <label>Weekdays</label>
+    <div class="days" id="ed-days"></div>
+    <label>Season</label>
+    <div class="strip" style="margin:8px 0">
+      <button type="button" class="chip" id="ed-season-all" data-mode="all">All-year</button>
+      <button type="button" class="chip" id="ed-season-between" data-mode="between">Between dates</button>
+    </div>
+    <div id="ed-season-dates" class="hidden">
+      <label>Starts on <input id="ed-starts-on" type="date"></label>
+      <label>Ends on <input id="ed-ends-on" type="date"></label>
+    </div>
+    <label>Itinerary</label>
+    <div id="ed-steps"></div>
+    <button type="button" class="ghost" id="ed-add-step" style="margin-top:8px;width:100%">Add step</button>
+    <label style="margin-top:14px"><input id="ed-enabled" type="checkbox"> Enabled</label>
+    <div id="ed-collide" class="ed-warn hidden" role="status"></div>
+    <menu>
+      <button type="button" class="ghost" id="ed-cancel">Cancel</button>
+      <button type="button" class="go" id="ed-save">Save</button>
+    </menu>
+  </dialog>
   <script>
     const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
-    const state = { status: { phase: "Idle", stations_on: [] }, stations: [], schedules: [], pick: null, kiosk: false };
+    const TZ = "America/Phoenix";
+    const state = {
+      status: { phase: "Idle", stations_on: [] },
+      stations: [], schedules: [], pick: null, kiosk: false,
+      edit: { id: null, isNew: false },
+    };
     if (new URLSearchParams(location.search).get("mode") === "kiosk") {
       document.documentElement.classList.add("kiosk");
       state.kiosk = true;
@@ -98,6 +152,103 @@
     function watering() {
       const p = state.status.phase || "";
       return p && p !== "Idle";
+    }
+    function programName(sch) {
+      const n = (sch.note || "").trim();
+      return n || sch.id || "Program";
+    }
+    function phoenixParts(d = new Date()) {
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false,
+      });
+      const map = {};
+      for (const p of fmt.formatToParts(d)) {
+        if (p.type !== "literal") map[p.type] = p.value;
+      }
+      let hour = Number(map.hour);
+      if (hour === 24) hour = 0;
+      const wdShort = { Sun: "sun", Mon: "mon", Tue: "tue", Wed: "wed", Thu: "thu", Fri: "fri", Sat: "sat" };
+      return {
+        ymd: `${map.year}-${map.month}-${map.day}`,
+        hour, minute: Number(map.minute),
+        weekday: wdShort[map.weekday] || "mon",
+      };
+    }
+    function inSeasonNow(sch, ymd) {
+      if (sch.starts_on && ymd < sch.starts_on) return false;
+      if (sch.ends_on && ymd > sch.ends_on) return false;
+      return true;
+    }
+    function seasonLabel(sch) {
+      if (sch.starts_on || sch.ends_on) {
+        return `${sch.starts_on || "…"}–${sch.ends_on || "…"}`;
+      }
+      return "Year-round";
+    }
+    function weekdayMatches(sch, wd) {
+      const days = sch.weekdays || [];
+      if (!days.length) return true;
+      return days.map((d) => String(d).toLowerCase()).includes(wd);
+    }
+    function parseHHMM(s) {
+      const m = String(s || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return null;
+      const h = Number(m[1]), mi = Number(m[2]);
+      if (h > 23 || mi > 59) return null;
+      return { h, m: mi };
+    }
+    /** Next fire in America/Phoenix: next matching weekday+start still inside season window. */
+    function nextFireLabel(sch) {
+      const clock = parseHHMM(sch.start);
+      if (!clock) return "No start time";
+      const now = new Date();
+      const seen = new Set();
+      for (let i = 0; i < 400; i++) {
+        // Phoenix has no DST; +24h walks local calendar days safely.
+        const cand = new Date(now.getTime() + i * 86400000);
+        const p = phoenixParts(cand);
+        if (seen.has(p.ymd)) continue;
+        seen.add(p.ymd);
+        if (!weekdayMatches(sch, p.weekday)) continue;
+        if (!inSeasonNow(sch, p.ymd)) continue;
+        if (i === 0 && (p.hour > clock.h || (p.hour === clock.h && p.minute >= clock.m))) continue;
+        return `${p.ymd} ${String(clock.h).padStart(2, "0")}:${String(clock.m).padStart(2, "0")}`;
+      }
+      return "None in window";
+    }
+    function weekdaysOverlap(a, b) {
+      const A = (a.weekdays || []).map((d) => String(d).toLowerCase());
+      const B = (b.weekdays || []).map((d) => String(d).toLowerCase());
+      if (!A.length || !B.length) return true;
+      return A.some((d) => B.includes(d));
+    }
+    function collidePairs(list) {
+      const enabled = (list || []).filter((s) => s.enabled);
+      const pairs = [];
+      for (let i = 0; i < enabled.length; i++) {
+        for (let j = i + 1; j < enabled.length; j++) {
+          const a = enabled[i], b = enabled[j];
+          if ((a.start || "") === (b.start || "") && a.start && weekdaysOverlap(a, b)) {
+            pairs.push([a, b]);
+          }
+        }
+      }
+      return pairs;
+    }
+    function paintCollide() {
+      const box = $("collide-warn");
+      const pairs = collidePairs(state.schedules);
+      if (!pairs.length) {
+        box.classList.add("hidden");
+        box.textContent = "";
+        return;
+      }
+      const bits = pairs.map(([a, b]) =>
+        `${programName(a)} and ${programName(b)} both at ${a.start}`);
+      box.textContent = "Soft warning: enabled programs share a start time on overlapping days — " +
+        bits.join("; ") + ". Engine skips if already watering (D13). Save is still allowed.";
+      box.classList.remove("hidden");
     }
     function paintStatus() {
       const s = state.status;
@@ -130,43 +281,178 @@
     function paintSchedules() {
       const box = $("schedules");
       box.innerHTML = "";
+      const today = phoenixParts().ymd;
       (state.schedules || []).forEach((sch) => {
         const el = document.createElement("article");
         el.className = "sched";
-        const days = new Set(sch.weekdays || []);
-        const steps = (sch.steps || []).map((s, i) =>
-          `<label>Step ${i+1} minutes
-            <input data-step="${i}" type="number" min="1" max="30" value="${esc(s.minutes || 0)}">
-            <span>${esc(s.station_id)}</span>
-          </label>`).join("");
+        const out = !inSeasonNow(sch, today);
+        const onBadge = sch.enabled
+          ? `<span class="badge">On</span>`
+          : `<span class="badge off">Off</span>`;
+        const seasonBadge = `<span class="badge season">${esc(seasonLabel(sch))}</span>`;
+        const outBadge = out ? `<span class="badge out">Out of season</span>` : "";
         el.innerHTML = `
-          <strong>${esc(sch.id)}</strong>
-          <label><input type="checkbox" data-en ${sch.enabled ? "checked" : ""}> On</label>
-          <label>Start <input type="time" data-start value="${esc(sch.start || "06:00")}"></label>
-          <div class="days">${DAYS.map(d => `<button type="button" data-day="${d}" class="${days.has(d) || days.size===0 ? "on" : ""}">${d.slice(0,2)}</button>`).join("")}</div>
-          ${steps}
-          <button type="button" class="go edit" data-save>Save</button>`;
-        el.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => b.classList.toggle("on")));
-        el.querySelector("[data-save]").addEventListener("click", () => saveSched(sch, el));
+          <div class="sched-head">
+            <div class="sched-title">${esc(programName(sch))}</div>
+            <button type="button" class="ghost" data-toggle>${sch.enabled ? "Disable" : "Enable"}</button>
+          </div>
+          <div class="sched-meta">Next: ${esc(nextFireLabel(sch))}</div>
+          <div class="badges">${onBadge}${seasonBadge}${outBadge}</div>
+          <div class="row-actions">
+            <button type="button" class="go edit" data-edit>Edit</button>
+            <button type="button" class="ghost edit" data-dup>Duplicate</button>
+          </div>`;
+        el.querySelector("[data-toggle]").addEventListener("click", () => toggleEnabled(sch));
+        el.querySelector("[data-edit]").addEventListener("click", () => openEditor(sch, false));
+        el.querySelector("[data-dup]").addEventListener("click", () => openEditor(sch, true));
         box.appendChild(el);
       });
+      if (!(state.schedules || []).length) {
+        box.innerHTML = `<p class="sub">No programs yet. Tap New to add one.</p>`;
+      }
+      paintCollide();
     }
-    async function saveSched(sch, el) {
-      const weekdays = [...el.querySelectorAll("[data-day].on")].map((b) => b.dataset.day);
-      const steps = (sch.steps || []).map((s, i) => {
-        const inp = el.querySelector(`[data-step="${i}"]`);
-        return { station_id: s.station_id, minutes: Number(inp && inp.value) || s.minutes };
+    function mintId(note) {
+      const slug = String(note || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
+      const base = slug ? `prog-${slug}` : `prog-${Date.now()}`;
+      const ids = new Set((state.schedules || []).map((s) => s.id));
+      if (!ids.has(base)) return base;
+      let n = 2;
+      while (ids.has(`${base}-${n}`)) n++;
+      return `${base}-${n}`;
+    }
+    function stationOptions(selected) {
+      return (state.stations || []).map((st) =>
+        `<option value="${esc(st.id)}" ${st.id === selected ? "selected" : ""}>${esc(st.title || st.id)}</option>`
+      ).join("");
+    }
+    function renderEdDays(selected) {
+      const set = new Set((selected || []).map((d) => String(d).toLowerCase()));
+      const allOn = set.size === 0;
+      $("ed-days").innerHTML = DAYS.map((d) =>
+        `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}">${d.slice(0,2)}</button>`
+      ).join("");
+      $("ed-days").querySelectorAll("[data-day]").forEach((b) => {
+        b.addEventListener("click", () => b.classList.toggle("on"));
       });
+    }
+    function renderEdSteps(steps) {
+      const box = $("ed-steps");
+      box.innerHTML = "";
+      const list = (steps && steps.length) ? steps : [{ station_id: (state.stations[0] || {}).id || "", minutes: 5 }];
+      list.forEach((step, i) => {
+        const row = document.createElement("div");
+        row.className = "step-row";
+        row.innerHTML = `
+          <label>Station<select data-st>${stationOptions(step.station_id)}</select></label>
+          <label>Min<input data-min type="number" min="1" max="180" value="${esc(step.minutes || 5)}"></label>
+          <button type="button" class="ghost" data-rm title="Remove">×</button>`;
+        row.querySelector("[data-rm]").addEventListener("click", () => {
+          row.remove();
+          if (!$("ed-steps").children.length) renderEdSteps([]);
+        });
+        box.appendChild(row);
+      });
+    }
+    function setSeasonMode(mode) {
+      const between = mode === "between";
+      $("ed-season-all").classList.toggle("on", !between);
+      $("ed-season-between").classList.toggle("on", between);
+      $("ed-season-dates").classList.toggle("hidden", !between);
+      if (!between) {
+        $("ed-starts-on").value = "";
+        $("ed-ends-on").value = "";
+      }
+    }
+    function openEditor(sch, asDup) {
+      const src = sch || {
+        id: "", enabled: true, note: "", weekdays: [], start: "06:00",
+        steps: [], starts_on: "", ends_on: "",
+      };
+      const isNew = !sch || asDup;
+      let id = src.id;
+      if (asDup) {
+        id = mintId((src.note || src.id || "copy") + "-copy");
+      } else if (!sch) {
+        id = mintId("program");
+      }
+      state.edit = { id, isNew };
+      $("sched-dlg-title").textContent = asDup ? "Duplicate program" : (sch ? "Edit program" : "New program");
+      $("ed-note").value = asDup ? `${programName(src)} copy` : (src.note || "");
+      $("ed-start").value = src.start || "06:00";
+      $("ed-enabled").checked = !!src.enabled;
+      renderEdDays(src.weekdays || []);
+      const seasonal = !!(src.starts_on || src.ends_on);
+      setSeasonMode(seasonal ? "between" : "all");
+      if (seasonal) {
+        $("ed-starts-on").value = src.starts_on || "";
+        $("ed-ends-on").value = src.ends_on || "";
+      }
+      const steps = (src.steps || []).map((s) => ({ station_id: s.station_id, minutes: s.minutes }));
+      renderEdSteps(asDup || sch ? steps : []);
+      updateEdCollide();
+      $("sched-dlg").showModal();
+    }
+    function readEditorDraft() {
+      let weekdays = [...$("ed-days").querySelectorAll("[data-day].on")].map((b) => b.dataset.day);
+      if (weekdays.length === DAYS.length) weekdays = []; // empty = every day
+      const between = $("ed-season-between").classList.contains("on");
+      const steps = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
+        station_id: row.querySelector("[data-st]").value,
+        minutes: Number(row.querySelector("[data-min]").value) || 1,
+      })).filter((s) => s.station_id);
+      return {
+        id: state.edit.id,
+        enabled: $("ed-enabled").checked,
+        note: $("ed-note").value.trim(),
+        weekdays,
+        start: $("ed-start").value || "06:00",
+        steps,
+        starts_on: between ? ($("ed-starts-on").value || "") : "",
+        ends_on: between ? ($("ed-ends-on").value || "") : "",
+      };
+    }
+    function updateEdCollide() {
+      const draft = readEditorDraft();
+      const others = (state.schedules || []).filter((s) => s.id !== draft.id);
+      const merged = [...others, draft];
+      const pairs = collidePairs(merged).filter(([a, b]) => a.id === draft.id || b.id === draft.id);
+      const box = $("ed-collide");
+      if (!draft.enabled || !pairs.length) {
+        box.classList.add("hidden");
+        box.textContent = "";
+        return;
+      }
+      box.textContent = "Soft warning: this start overlaps another enabled program on shared weekdays. Save still allowed.";
+      box.classList.remove("hidden");
+    }
+    async function saveEditor() {
+      const body = readEditorDraft();
+      if (!body.id) body.id = mintId(body.note);
+      if (!body.steps.length) {
+        alert("Add at least one itinerary step.");
+        return;
+      }
+      await j("/api/schedules/" + encodeURIComponent(body.id), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      $("sched-dlg").close();
+      await loadSchedules();
+    }
+    async function toggleEnabled(sch) {
+      const next = { ...sch, enabled: !sch.enabled };
       await j("/api/schedules/" + encodeURIComponent(sch.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: sch.id,
-          enabled: el.querySelector("[data-en]").checked,
+          enabled: next.enabled,
           note: sch.note || "",
-          weekdays,
-          start: el.querySelector("[data-start]").value,
-          steps,
+          weekdays: sch.weekdays || [],
+          start: sch.start || "06:00",
+          steps: sch.steps || [],
           starts_on: sch.starts_on || "",
           ends_on: sch.ends_on || "",
         }),
@@ -229,6 +515,30 @@
       $("tab-home").classList.remove("active");
       $("tab-sched").classList.add("active");
     });
+    $("sched-new").addEventListener("click", () => openEditor(null, false));
+    $("ed-cancel").addEventListener("click", () => $("sched-dlg").close());
+    $("ed-save").addEventListener("click", () => saveEditor().catch((e) => alert(e.message)));
+    $("ed-add-step").addEventListener("click", () => {
+      const cur = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
+        station_id: row.querySelector("[data-st]").value,
+        minutes: Number(row.querySelector("[data-min]").value) || 5,
+      }));
+      cur.push({ station_id: (state.stations[0] || {}).id || "", minutes: 5 });
+      renderEdSteps(cur);
+    });
+    $("ed-season-all").addEventListener("click", () => setSeasonMode("all"));
+    $("ed-season-between").addEventListener("click", () => {
+      setSeasonMode("between");
+      if (!$("ed-starts-on").value) {
+        const ymd = phoenixParts().ymd;
+        $("ed-starts-on").value = ymd;
+      }
+    });
+    ["ed-start", "ed-enabled"].forEach((id) => {
+      $(id).addEventListener("change", updateEdCollide);
+      $(id).addEventListener("input", updateEdCollide);
+    });
+    $("ed-days").addEventListener("click", () => setTimeout(updateEdCollide, 0));
     async function loadStations() {
       const d = await j("/api/stations");
       state.stations = d.stations || [];
