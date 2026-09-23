@@ -17,7 +17,10 @@ func TestUIHomeEmbedded(t *testing.T) {
 		t.Fatalf("want html, ct=%q", ct)
 	}
 	body := rr.Body.String()
-	for _, need := range []string{"STOP", "Stations", "Schedules", "[1, 5, 10]", "America/Phoenix", "Start anyway", "esc("} {
+	for _, need := range []string{
+		"STOP", "Stations", "Schedules", "[1, 5, 10]", "America/Phoenix", "Start anyway", "esc(",
+		"Out of season", "Year-round", "starts_on", "ends_on", "Duplicate", "sched-dlg", "collide-warn",
+	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
 		}
@@ -35,8 +38,12 @@ func TestUIKioskStub(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatalf("kiosk %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "mode") && !strings.Contains(rr.Body.String(), "kiosk") {
+	body := rr.Body.String()
+	if !strings.Contains(body, "mode") && !strings.Contains(body, "kiosk") {
 		t.Fatal("kiosk stub missing")
+	}
+	if !strings.Contains(body, ".kiosk #page-schedules") {
+		t.Fatal("kiosk must still hide schedules page")
 	}
 }
 
