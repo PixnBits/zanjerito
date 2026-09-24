@@ -39,7 +39,8 @@
     * { box-sizing: border-box; }
     body {
       margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
-      padding: 12px 12px 96px; max-width: 480px; margin-inline: auto;
+      /* Clear fixed STOP footer + gap so last card Edit/Duplicate stay fully above it */
+      padding: 12px 12px calc(124px + env(safe-area-inset-bottom, 0px)); max-width: 480px; margin-inline: auto;
     }
     /* Chrome: wordmark + nav */
     .chrome {
@@ -98,6 +99,7 @@
     .status .next-line {
       margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cream-edge);
       color: var(--ink); font-size: .95rem; position: relative; z-index: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .status .next-line span { color: var(--muted); }
     .fault { color: #a8482f; }
@@ -128,14 +130,21 @@
       text-transform: uppercase; letter-spacing: .04em; opacity: .7; margin-top: 2px;
     }
     .station-tile.on .tile-state { opacity: .9; color: #dff5f2; }
-    /* STOP */
-    .stop {
-      position: fixed; left: 12px; right: 12px; bottom: 16px; max-width: 456px; margin-inline: auto;
+    /* STOP — fixed footer bar; must sit above card actions (z-index), not under them */
+    .stop-bar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+      padding: 10px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+      background: linear-gradient(180deg, transparent 0%, var(--sand) 32%, var(--sand) 100%);
+      pointer-events: none;
+    }
+    .stop-bar .stop {
+      pointer-events: auto;
+      display: block; width: 100%; max-width: 456px; margin-inline: auto;
       background: var(--terracotta); color: #fff; border: 0; border-radius: 16px; min-height: 56px;
       font-size: 1.25rem; font-weight: 800; letter-spacing: .06em;
       box-shadow: 0 4px 14px rgba(196,92,62,.35);
     }
-    .stop:active { background: var(--terracotta-deep); }
+    .stop-bar .stop:active { background: var(--terracotta-deep); }
     /* Dialogs */
     dialog {
       border: 0; border-radius: 16px; padding: 18px; width: min(94vw, 420px);
@@ -166,7 +175,11 @@
       pointer-events: none; opacity: .7;
     }
     .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; position: relative; z-index: 1; }
-    .sched-title { font-weight: 700; font-size: 1.08rem; word-break: break-word; font-family: var(--serif); }
+    .sched-title {
+      flex: 1; min-width: 0; font-weight: 700; font-size: 1.08rem; font-family: var(--serif);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sched-head > button { flex-shrink: 0; }
     .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; position: relative; z-index: 1; }
     .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; position: relative; z-index: 1; }
     .badge {
@@ -250,7 +263,9 @@
     <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
   </section>
-  <button type="button" class="stop" id="stop">STOP</button>
+  <footer class="stop-bar" aria-label="Emergency stop">
+    <button type="button" class="stop" id="stop">STOP</button>
+  </footer>
   <dialog id="run-dlg">
     <p id="run-msg"></p>
     <div class="strip" id="durs"></div>
@@ -470,9 +485,9 @@
       $("status").classList.toggle("watering", isWater);
       const timer = $("timer");
       if (isWater) {
-        // No remaining-seconds field in status API — show live phase cue in teal.
+        // No remaining-seconds field — teal timer shows clock only (hero already Watering • station).
+        // Do not echo raw engine phases like "Running".
         const bits = [];
-        if (s.phase && s.phase !== "Idle" && s.phase !== "StationOn") bits.push(s.phase);
         if (s.now) bits.push(s.now.replace("T", " ").slice(11, 19));
         timer.textContent = bits.length ? bits.join(" · ") : "In progress";
         timer.classList.remove("hidden");
