@@ -34,18 +34,36 @@ func TestUIHomeEmbedded(t *testing.T) {
 	}
 }
 
-func TestUIKioskStub(t *testing.T) {
+func TestUIKioskDensity(t *testing.T) {
 	s := newTestServer(t)
 	rr := doJSON(t, s, http.MethodGet, "/?mode=kiosk", nil)
 	if rr.Code != 200 {
 		t.Fatalf("kiosk %d", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "mode") && !strings.Contains(body, "kiosk") {
-		t.Fatal("kiosk stub missing")
+	for _, need := range []string{
+		`get("mode") === "kiosk"`,
+		"document.documentElement.classList.add(\"kiosk\")",
+		".kiosk .edit, .kiosk #page-schedules",
+		".kiosk .status .phase",
+		".kiosk .stop-bar .stop",
+		".kiosk .station-tile",
+		"min-height: 88px",
+		"min-height: 168px",
+		"isPausedStatus",
+		`return "Paused"`,
+		`status").classList.toggle("paused"`,
+		"direction-d style-a",
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("kiosk density missing marker %q", need)
+		}
 	}
-	if !strings.Contains(body, ".kiosk #page-schedules") {
-		t.Fatal("kiosk must still hide schedules page")
+	// Household path still must not leak cron / GraphiQL / ISO durations
+	for _, leak := range []string{"graphql", "GraphiQL", "PT5M", "PT3M"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("kiosk ui must not contain %q", leak)
+		}
 	}
 }
 
