@@ -6,80 +6,245 @@
   <title>Zanjerito</title>
   <style>
     :root {
-      --bg: #1a1f18; --card: #262c22; --ink: #f3f6ee; --muted: #a8b39a;
-      --stop: #c43c2e; --go: #3d7a3a; --chip: #32392d; --on: #e8c04a;
-      --warn: #8a6a1a; --warn-ink: #ffe9a8; --off: #5a6354;
+      /* Polish v1 Style A — Cards + desert light */
+      --sand: #e8dcc8;
+      --sand-deep: #d9cbb4;
+      --cream: #f7f1e6;
+      --cream-edge: #ebe3d4;
+      --terracotta: #c45c3e;
+      --terracotta-deep: #a8482f;
+      --teal: #2a7a74;
+      --teal-soft: #d5ebe8;
+      --plum: #6b4a6e;
+      --plum-soft: #efe4f0;
+      --ink: #3a2a1f;
+      --muted: #7a6a58;
+      --warn: #c9a24a;
+      --warn-ink: #3a2e10;
+      --warn-bg: #f5e8c8;
+      --off-badge: #9a8a78;
+      --out-badge: #8a6a48;
+      --out-ink: #5a3a20;
+      --bg: var(--sand);
+      --card: var(--cream);
+      --stop: var(--terracotta);
+      --go: var(--teal);
+      --chip: var(--cream-edge);
+      --on: var(--teal);
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
     .kiosk { font-size: 22px; }
     .kiosk .edit, .kiosk #page-schedules { display: none; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink);
-      padding: 12px 12px 96px; max-width: 480px; margin-inline: auto; }
-    h1 { font-size: 1.1rem; margin: 0 0 8px; font-weight: 650; }
-    .status { background: var(--card); border-radius: 16px; padding: 16px; min-height: 7rem; }
-    .status .phase { font-size: 1.7rem; font-weight: 700; }
-    .status .sub, .sub { color: var(--muted); margin-top: 4px; }
-    .fault { color: #ffb4a8; }
-    .strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
-    .chip { background: var(--chip); border: 0; color: var(--ink); border-radius: 999px;
-      padding: 12px 16px; font-size: 1rem; min-height: 44px; }
-    .chip.on { outline: 3px solid var(--on); }
-    .nav { display: flex; gap: 8px; margin: 8px 0 14px; }
-    .nav button { flex: 1; min-height: 44px; border-radius: 12px; border: 0; background: var(--chip); color: var(--ink); }
-    .nav button.active { background: #3a4634; }
-    .stop { position: fixed; left: 12px; right: 12px; bottom: 16px; max-width: 456px; margin-inline: auto;
-      background: var(--stop); color: #fff; border: 0; border-radius: 16px; min-height: 56px;
-      font-size: 1.25rem; font-weight: 800; letter-spacing: .04em; }
-    dialog { border: 0; border-radius: 16px; padding: 18px; width: min(94vw, 420px);
-      max-height: 90vh; overflow: auto; background: var(--card); color: var(--ink); }
+    body {
+      margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
+      padding: 12px 12px 96px; max-width: 480px; margin-inline: auto;
+    }
+    /* Chrome: wordmark + nav */
+    .chrome {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; margin: 4px 0 14px; flex-wrap: wrap;
+    }
+    .wordmark {
+      font-family: var(--serif); font-size: 1.35rem; font-weight: 600;
+      letter-spacing: .01em; color: var(--ink); margin: 0; line-height: 1.2;
+    }
+    .nav { display: flex; gap: 4px; margin: 0; }
+    .nav button {
+      flex: 0 0 auto; min-height: 40px; border-radius: 0; border: 0;
+      background: transparent; color: var(--muted); font-size: 1rem;
+      padding: 8px 12px; border-bottom: 3px solid transparent; font-weight: 500;
+    }
+    .nav button.active {
+      color: var(--ink); border-bottom-color: var(--terracotta); font-weight: 650;
+      background: transparent;
+    }
+    h1 { font-size: 1.05rem; margin: 0 0 8px; font-weight: 650; font-family: var(--serif); }
+    /* Hero status card */
+    .status {
+      position: relative; overflow: hidden;
+      background: var(--cream); border-radius: 18px; padding: 18px 16px 16px;
+      min-height: 9.5rem; border: 1px solid var(--cream-edge);
+      box-shadow: 0 1px 0 rgba(58,42,31,.04);
+    }
+    .status.watering { border-color: color-mix(in srgb, var(--teal) 35%, var(--cream-edge)); }
+    .hero-top {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      margin-bottom: 6px; position: relative; z-index: 1;
+    }
+    .season-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .78rem; color: var(--muted); letter-spacing: .02em;
+      text-transform: uppercase; font-weight: 600;
+    }
+    .sun-accent {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #f6e7a8, #e0a84a 70%, #c47a28);
+      box-shadow: 0 0 0 2px rgba(224,168,74,.25);
+      flex-shrink: 0;
+    }
+    .status .phase {
+      font-family: var(--serif); font-size: 1.85rem; font-weight: 700;
+      line-height: 1.15; position: relative; z-index: 1; margin: 2px 0 6px;
+    }
+    .status .timer {
+      font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 700;
+      color: var(--teal); margin: 0 0 6px; position: relative; z-index: 1;
+      letter-spacing: .02em;
+    }
+    .status .timer.hidden { display: none; }
+    .status .sub, .sub { color: var(--muted); margin-top: 2px; font-size: .95rem; position: relative; z-index: 1; }
+    .status .next-line {
+      margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cream-edge);
+      color: var(--ink); font-size: .95rem; position: relative; z-index: 1;
+    }
+    .status .next-line span { color: var(--muted); }
+    .fault { color: #a8482f; }
+    /* Desert line-art (CSS + SVG), not a photo */
+    .desert-art {
+      position: absolute; right: -4px; bottom: -2px; width: 118px; height: 88px;
+      pointer-events: none; opacity: .55; z-index: 0;
+    }
+    .desert-art svg { width: 100%; height: 100%; display: block; }
+    /* Station strip — fat cream / teal tiles */
+    .strip-label { margin: 18px 0 8px; }
+    .strip { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 8px; }
+    .chip, .station-tile {
+      background: var(--cream); border: 1.5px solid var(--cream-edge); color: var(--ink);
+      border-radius: 14px; padding: 14px 16px; font-size: 1.05rem; min-height: 52px;
+      font-family: var(--serif); font-weight: 600; cursor: pointer;
+      box-shadow: 0 1px 0 rgba(58,42,31,.03);
+    }
+    .chip { border: 0; border-radius: 999px; font-family: var(--sans); font-weight: 500;
+      background: var(--cream-edge); min-height: 44px; padding: 12px 16px; }
+    .chip.on { outline: 3px solid var(--teal); background: var(--teal-soft); color: var(--teal); }
+    .station-tile.on {
+      background: var(--teal); border-color: var(--teal); color: #f4fffc;
+      outline: none; box-shadow: 0 2px 8px rgba(42,122,116,.28);
+    }
+    .station-tile .tile-state {
+      display: block; font-family: var(--sans); font-size: .72rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .04em; opacity: .7; margin-top: 2px;
+    }
+    .station-tile.on .tile-state { opacity: .9; color: #dff5f2; }
+    /* STOP */
+    .stop {
+      position: fixed; left: 12px; right: 12px; bottom: 16px; max-width: 456px; margin-inline: auto;
+      background: var(--terracotta); color: #fff; border: 0; border-radius: 16px; min-height: 56px;
+      font-size: 1.25rem; font-weight: 800; letter-spacing: .06em;
+      box-shadow: 0 4px 14px rgba(196,92,62,.35);
+    }
+    .stop:active { background: var(--terracotta-deep); }
+    /* Dialogs */
+    dialog {
+      border: 0; border-radius: 16px; padding: 18px; width: min(94vw, 420px);
+      max-height: 90vh; overflow: auto; background: var(--cream); color: var(--ink);
+      border: 1px solid var(--cream-edge);
+    }
+    dialog::backdrop { background: rgba(58,42,31,.35); }
     dialog menu { display: flex; gap: 8px; padding: 0; margin: 16px 0 0; justify-content: flex-end; flex-wrap: wrap; }
     dialog button, .row-actions button, .sched-head button, #sched-new {
-      min-height: 44px; border: 0; border-radius: 10px; padding: 0 14px; font-size: 1rem; }
-    .go { background: var(--go); color: #fff; }
-    .ghost { background: var(--chip); color: var(--ink); }
-    .sched { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
-    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-    .sched-title { font-weight: 700; font-size: 1.05rem; word-break: break-word; }
-    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; }
-    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .badge { display: inline-block; background: var(--chip); color: var(--ink); border-radius: 999px;
-      padding: 4px 10px; font-size: .78rem; }
-    .badge.off { background: var(--off); }
-    .badge.out { background: #4a3a28; color: #ffd9a8; }
-    .badge.season { background: #2f4030; }
-    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+      min-height: 44px; border: 0; border-radius: 10px; padding: 0 14px; font-size: 1rem;
+    }
+    .go { background: var(--teal); color: #fff; }
+    .ghost { background: var(--cream-edge); color: var(--ink); }
+    #sched-new {
+      background: var(--terracotta); color: #fff; font-weight: 650;
+      border-radius: 12px; padding: 0 16px;
+    }
+    /* Schedules — cream flat / line-art cards (no photo thumbs) */
+    .sched {
+      background: var(--cream); border-radius: 14px; padding: 14px; margin-bottom: 12px;
+      border: 1px solid var(--cream-edge); position: relative; overflow: hidden;
+    }
+    .sched::after {
+      content: ""; position: absolute; right: 0; bottom: 0; width: 64px; height: 40px;
+      background:
+        linear-gradient(135deg, transparent 40%, color-mix(in srgb, var(--sand-deep) 55%, transparent) 40%),
+        radial-gradient(ellipse 40px 18px at 70% 100%, color-mix(in srgb, var(--muted) 18%, transparent), transparent);
+      pointer-events: none; opacity: .7;
+    }
+    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; position: relative; z-index: 1; }
+    .sched-title { font-weight: 700; font-size: 1.08rem; word-break: break-word; font-family: var(--serif); }
+    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; position: relative; z-index: 1; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; position: relative; z-index: 1; }
+    .badge {
+      display: inline-block; background: var(--cream-edge); color: var(--ink); border-radius: 999px;
+      padding: 4px 10px; font-size: .78rem;
+    }
+    .badge.off { background: var(--off-badge); color: #fff; }
+    .badge.out { background: #f0e0c8; color: var(--out-ink); }
+    .badge.season { background: var(--teal-soft); color: var(--teal); }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; position: relative; z-index: 1; }
     .days { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-    .days button { min-width: 44px; min-height: 44px; border-radius: 10px; border: 0; background: var(--chip); color: var(--ink); }
-    .days button.on { background: #4a6b38; }
+    .days button {
+      min-width: 44px; min-height: 44px; border-radius: 10px; border: 0;
+      background: var(--cream-edge); color: var(--ink);
+    }
+    .days button.on { background: var(--teal); color: #fff; }
     label { display: block; color: var(--muted); font-size: .85rem; margin-top: 10px; }
-    input, select { font-size: 1rem; padding: 10px; border-radius: 8px; border: 0; width: 100%; background: #1e241c; color: var(--ink); }
+    input, select {
+      font-size: 1rem; padding: 10px; border-radius: 8px; border: 1px solid var(--cream-edge);
+      width: 100%; background: #fffef9; color: var(--ink);
+    }
     input[type="checkbox"] { width: auto; min-height: 22px; min-width: 22px; vertical-align: middle; margin-right: 8px; }
     .step-row { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; align-items: end; margin-top: 8px; }
     .step-row label { margin-top: 0; }
-    .collide { background: var(--warn); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
-      margin: 0 0 12px; font-size: .92rem; }
+    .collide {
+      background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
+      margin: 0 0 12px; font-size: .92rem; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    }
     .sched-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .hidden { display: none; }
-    .ed-warn { color: var(--warn-ink); background: #3a3218; border-radius: 10px; padding: 10px; margin-top: 10px; font-size: .9rem; }
+    .ed-warn {
+      color: var(--warn-ink); background: var(--warn-bg); border-radius: 10px;
+      padding: 10px; margin-top: 10px; font-size: .9rem;
+    }
+    /* Optional pause banner slot — only shown if API ever exposes pause */
+    .pause-banner {
+      display: none; background: var(--plum); color: #f8f0f8; border-radius: 12px;
+      padding: 12px 14px; margin: 0 0 12px; font-size: .95rem; font-weight: 600;
+    }
+    .pause-banner.visible { display: block; }
   </style>
 </head>
 <body>
-  <nav class="nav">
-    <button type="button" id="tab-home" class="active">Home</button>
-    <button type="button" id="tab-sched" class="edit">Schedules</button>
-  </nav>
+  <header class="chrome">
+    <p class="wordmark">Zanjerito</p>
+    <nav class="nav">
+      <button type="button" id="tab-home" class="active">Home</button>
+      <button type="button" id="tab-sched" class="edit">Schedules</button>
+    </nav>
+  </header>
+  <div id="pause-banner" class="pause-banner" role="status" hidden></div>
   <section id="page-home">
     <div class="status" id="status">
+      <div class="hero-top">
+        <div class="season-tag"><span class="sun-accent" aria-hidden="true"></span><span id="season-tag">Season</span></div>
+      </div>
       <div class="phase" id="phase">…</div>
+      <div class="timer hidden" id="timer" aria-live="polite"></div>
       <div class="sub" id="sub"></div>
+      <div class="next-line" id="next-line"><span>Next:</span> <strong id="next-text">…</strong></div>
+      <div class="desert-art" aria-hidden="true">
+        <svg viewBox="0 0 120 90" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0 72 C22 62, 38 78, 58 68 C78 58, 92 74, 120 64 L120 90 L0 90 Z" stroke="#b89a78" stroke-width="1.4" fill="#e4d5bc"/>
+          <path d="M0 80 C28 70, 48 84, 72 74 C96 64, 108 78, 120 72" stroke="#a88868" stroke-width="1.2"/>
+          <path d="M78 48 C86 36, 98 34, 108 42" stroke="#c4a074" stroke-width="1.3" stroke-linecap="round"/>
+          <circle cx="96" cy="28" r="7" stroke="#d4a84a" stroke-width="1.3"/>
+          <path d="M18 58 L22 48 L26 58 M22 48 L22 42" stroke="#8a9a6e" stroke-width="1.2" stroke-linecap="round"/>
+          <path d="M42 62 L45 54 L48 62" stroke="#8a9a6e" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>
+      </div>
     </div>
-    <h1>Stations</h1>
+    <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
   </section>
   <section id="page-schedules" class="hidden">
     <div class="sched-toolbar">
       <h1 style="margin:0">Schedules</h1>
-      <button type="button" class="go edit" id="sched-new">New</button>
+      <button type="button" class="edit" id="sched-new">+ Add program</button>
     </div>
     <p class="sub">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
@@ -153,6 +318,26 @@
       const p = state.status.phase || "";
       return p && p !== "Idle";
     }
+    function stationTitle(id) {
+      const st = (state.stations || []).find((s) => s.id === id);
+      return (st && (st.title || st.id)) || id || "";
+    }
+    function heroTitle() {
+      const s = state.status;
+      const p = s.phase || "Idle";
+      // Pause not in API yet — do not invent. Style existing Idle / Watering only.
+      if (p === "Idle") return "Idle";
+      const name = stationTitle(s.current_station) || s.current_station;
+      if (name) return "Watering • " + name;
+      return "Watering";
+    }
+    function seasonTagLabel() {
+      const month = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "numeric" }).format(new Date()));
+      if (month >= 3 && month <= 5) return "Spring";
+      if (month >= 6 && month <= 8) return "Summer";
+      if (month >= 9 && month <= 11) return "Fall";
+      return "Winter";
+    }
     function programName(sch) {
       const n = (sch.note || "").trim();
       return n || sch.id || "Program";
@@ -217,6 +402,18 @@
       }
       return "None in window";
     }
+    function globalNextLabel() {
+      const enabled = (state.schedules || []).filter((s) => s.enabled);
+      if (!enabled.length) return "No enabled programs";
+      let best = null;
+      for (const sch of enabled) {
+        const label = nextFireLabel(sch);
+        if (label === "No start time" || label === "None in window") continue;
+        if (!best || label < best.label) best = { label, name: programName(sch) };
+      }
+      if (!best) return "None in window";
+      return `${best.label} · ${best.name}`;
+    }
     function weekdaysOverlap(a, b) {
       const A = (a.weekdays || []).map((d) => String(d).toLowerCase());
       const B = (b.weekdays || []).map((d) => String(d).toLowerCase());
@@ -250,18 +447,51 @@
         bits.join("; ") + ". Engine skips if already watering (D13). Save is still allowed.";
       box.classList.remove("hidden");
     }
+    function paintPauseBanner() {
+      // Webpage pause (rain/mowing) is out of scope — only show if API already exposes it.
+      const s = state.status || {};
+      const paused = !!(s.paused || s.pause || s.lockout === true || s.phase === "Paused");
+      const banner = $("pause-banner");
+      if (!paused) {
+        banner.classList.remove("visible");
+        banner.hidden = true;
+        banner.textContent = "";
+        return;
+      }
+      banner.hidden = false;
+      banner.classList.add("visible");
+      banner.textContent = "Paused — schedules held. STOP still available.";
+    }
     function paintStatus() {
       const s = state.status;
-      $("phase").textContent = s.phase || "—";
+      $("season-tag").textContent = seasonTagLabel();
+      $("phase").textContent = heroTitle();
+      const isWater = watering();
+      $("status").classList.toggle("watering", isWater);
+      const timer = $("timer");
+      if (isWater) {
+        // No remaining-seconds field in status API — show live phase cue in teal.
+        const bits = [];
+        if (s.phase && s.phase !== "Idle" && s.phase !== "StationOn") bits.push(s.phase);
+        if (s.now) bits.push(s.now.replace("T", " ").slice(11, 19));
+        timer.textContent = bits.length ? bits.join(" · ") : "In progress";
+        timer.classList.remove("hidden");
+      } else {
+        timer.textContent = "";
+        timer.classList.add("hidden");
+      }
       const bits = [];
-      if (s.current_station) bits.push("Now: " + s.current_station);
-      if (s.now) bits.push(s.now.replace("T", " ").slice(0, 16));
       if (s.last_error) bits.push(s.last_error);
-      $("sub").textContent = bits.join(" · ") || "Phoenix";
+      else if (!isWater) bits.push("Phoenix · ready");
+      $("sub").textContent = bits.join(" · ") || "";
       $("sub").classList.toggle("fault", !!s.last_error);
-      document.querySelectorAll("#stations .chip").forEach((el) => {
+      $("next-text").textContent = globalNextLabel();
+      paintPauseBanner();
+      document.querySelectorAll("#stations .station-tile").forEach((el) => {
         const on = (s.stations_on || []).includes(el.dataset.id) || s.current_station === el.dataset.id;
         el.classList.toggle("on", on);
+        const st = el.querySelector(".tile-state");
+        if (st) st.textContent = on ? "On" : "Off";
       });
     }
     function paintStations() {
@@ -269,10 +499,10 @@
       (state.stations || []).forEach((st) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "chip";
+        b.className = "station-tile";
         b.dataset.id = st.id;
-        b.textContent = st.title || st.id;
-        if (st.color) b.style.background = st.color;
+        // API titles/ids as today — do not rename stations.
+        b.innerHTML = `${esc(st.title || st.id)}<span class="tile-state">Off</span>`;
         b.addEventListener("click", () => openRun(st));
         $("stations").appendChild(b);
       });
@@ -308,9 +538,10 @@
         box.appendChild(el);
       });
       if (!(state.schedules || []).length) {
-        box.innerHTML = `<p class="sub">No programs yet. Tap New to add one.</p>`;
+        box.innerHTML = `<p class="sub">No programs yet. Tap + Add program to add one.</p>`;
       }
       paintCollide();
+      paintStatus();
     }
     function mintId(note) {
       const slug = String(note || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
