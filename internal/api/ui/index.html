@@ -6,89 +6,431 @@
   <title>Zanjerito</title>
   <style>
     :root {
-      --bg: #1a1f18; --card: #262c22; --ink: #f3f6ee; --muted: #a8b39a;
-      --stop: #c43c2e; --go: #3d7a3a; --chip: #32392d; --on: #e8c04a;
-      --warn: #8a6a1a; --warn-ink: #ffe9a8; --off: #5a6354;
+      /* Polish v1 Style A — Cards + desert light */
+      --sand: #e8dcc8;
+      --sand-deep: #d9cbb4;
+      --cream: #f7f1e6;
+      --cream-edge: #ebe3d4;
+      --terracotta: #c45c3e;
+      --terracotta-deep: #a8482f;
+      --teal: #2a7a74;
+      --teal-soft: #d5ebe8;
+      --teal-mid: #b8ddd8;
+      --plum: #6b4a6e;
+      --plum-soft: #efe4f0;
+      --ink: #3a2a1f;
+      --muted: #7a6a58;
+      --warn: #c9a24a;
+      --warn-ink: #3a2e10;
+      --warn-bg: #f5e8c8;
+      --off-badge: #9a8a78;
+      --out-badge: #8a6a48;
+      --out-ink: #5a3a20;
+      --dune: #c4a882;
+      --dune-deep: #a88868;
+      --dune-ink: #b89878;
+      --bg: var(--sand);
+      --card: var(--cream);
+      --stop: var(--terracotta);
+      --go: var(--teal);
+      --chip: var(--cream-edge);
+      --on: var(--teal);
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
     .kiosk { font-size: 22px; }
     .kiosk .edit, .kiosk #page-schedules { display: none; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--ink);
-      padding: 12px 12px 96px; max-width: 480px; margin-inline: auto; }
-    h1 { font-size: 1.1rem; margin: 0 0 8px; font-weight: 650; }
-    .status { background: var(--card); border-radius: 16px; padding: 16px; min-height: 7rem; }
-    .status .phase { font-size: 1.7rem; font-weight: 700; }
-    .status .sub, .sub { color: var(--muted); margin-top: 4px; }
-    .fault { color: #ffb4a8; }
-    .strip { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
-    .chip { background: var(--chip); border: 0; color: var(--ink); border-radius: 999px;
-      padding: 12px 16px; font-size: 1rem; min-height: 44px; }
-    .chip.on { outline: 3px solid var(--on); }
-    .nav { display: flex; gap: 8px; margin: 8px 0 14px; }
-    .nav button { flex: 1; min-height: 44px; border-radius: 12px; border: 0; background: var(--chip); color: var(--ink); }
-    .nav button.active { background: #3a4634; }
-    .stop { position: fixed; left: 12px; right: 12px; bottom: 16px; max-width: 456px; margin-inline: auto;
-      background: var(--stop); color: #fff; border: 0; border-radius: 16px; min-height: 56px;
-      font-size: 1.25rem; font-weight: 800; letter-spacing: .04em; }
-    dialog { border: 0; border-radius: 16px; padding: 18px; width: min(94vw, 420px);
-      max-height: 90vh; overflow: auto; background: var(--card); color: var(--ink); }
+    body {
+      margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
+      /* Clear fixed STOP footer so last card Edit/Duplicate stay fully above it */
+      padding: 12px 12px calc(118px + env(safe-area-inset-bottom, 0px)); max-width: 480px; margin-inline: auto;
+    }
+    /* Chrome: wordmark + nav */
+    .chrome {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; margin: 2px 0 12px; flex-wrap: wrap;
+    }
+    .wordmark {
+      font-family: var(--serif); font-size: 1.45rem; font-weight: 700;
+      letter-spacing: -.01em; color: var(--terracotta); margin: 0; line-height: 1.15;
+    }
+    .nav { display: flex; gap: 2px; margin: 0; }
+    .nav button {
+      flex: 0 0 auto; min-height: 40px; border-radius: 0; border: 0;
+      background: transparent; color: var(--muted); font-size: 1rem;
+      padding: 8px 12px; border-bottom: 3px solid transparent; font-weight: 500;
+    }
+    .nav button.active {
+      color: var(--ink); border-bottom-color: var(--terracotta); font-weight: 650;
+      background: transparent;
+    }
+    h1 { font-size: 1.05rem; margin: 0 0 8px; font-weight: 650; font-family: var(--serif); }
+    /* Hero status card */
+    .status {
+      position: relative; overflow: hidden;
+      background: var(--cream); border-radius: 22px; padding: 20px 18px 18px;
+      min-height: 11.5rem; border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.55) inset,
+        0 2px 8px rgba(58,42,31,.06),
+        0 10px 28px rgba(58,42,31,.05);
+    }
+    .status.watering {
+      border-color: color-mix(in srgb, var(--teal) 28%, var(--cream-edge));
+    }
+    .hero-copy {
+      position: relative; z-index: 2;
+      max-width: 54%; /* doodle-safe LEFT — generous empty RIGHT for art */
+    }
+    .hero-top {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 10px;
+    }
+    .season-tag {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: .72rem; color: var(--terracotta); letter-spacing: .08em;
+      text-transform: uppercase; font-weight: 700;
+      background: color-mix(in srgb, var(--cream-edge) 70%, #fff);
+      border: 1px solid color-mix(in srgb, var(--dune) 45%, var(--cream-edge));
+      border-radius: 999px; padding: 5px 11px 5px 8px;
+      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset;
+    }
+    .season-tag svg {
+      width: 14px; height: 14px; flex-shrink: 0;
+      color: var(--terracotta);
+    }
+    .status .phase {
+      font-family: var(--serif); font-size: 1.9rem; font-weight: 700;
+      line-height: 1.12; margin: 0 0 8px; letter-spacing: -.015em;
+      color: var(--ink);
+    }
+    .status .phase .dot { color: var(--terracotta); font-weight: 700; }
+    .status .timer {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-variant-numeric: tabular-nums; font-size: 1.12rem; font-weight: 700;
+      color: var(--teal); margin: 0 0 12px;
+      letter-spacing: .01em;
+    }
+    .status .timer.hidden { display: none; }
+    .status .timer svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .status .sub {
+      color: var(--muted); margin: 0 0 10px; font-size: .92rem;
+    }
+    .status .sub.hidden { display: none; }
+    .status .next-line {
+      margin-top: 0; padding-top: 12px;
+      border-top: 1px solid color-mix(in srgb, var(--dune) 35%, var(--cream-edge));
+      color: var(--ink); font-size: .95rem;
+      display: flex; align-items: center; gap: 8px;
+      /* Stays inside hero-copy (left ~55%) — never under doodle; ellipsis only */
+      overflow: hidden; white-space: nowrap; max-width: 100%;
+    }
+    .status .next-line .next-ico {
+      flex-shrink: 0; width: 16px; height: 16px; color: var(--terracotta); opacity: .85;
+    }
+    .status .next-line .next-body {
+      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .status .next-line .lbl { color: var(--muted); font-weight: 500; }
+    .fault { color: #a8482f; }
+    /* Embossed desert doodle — RIGHT half only; never under text */
+    .desert-art {
+      position: absolute; right: 2px; top: 8px; bottom: 8px;
+      width: 50%; max-width: 210px;
+      pointer-events: none; z-index: 1;
+      /* Soft left fade — art stays RIGHT; text never reaches sun/waves */
+      mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 100%);
+      -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 100%);
+    }
+    .desert-art svg {
+      width: 100%; height: 100%; display: block;
+      filter: drop-shadow(0 1px 0 rgba(255,250,240,.55));
+    }
+    /* Station strip — taller vertical tiles, circular icon, Off/On pills */
+    .strip-label {
+      margin: 20px 0 10px; font-family: var(--serif); font-size: .78rem;
+      font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    }
+    .strip {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px; margin: 0 0 4px;
+    }
+    @media (min-width: 400px) {
+      .strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    .chip {
+      background: var(--cream-edge); border: 0; color: var(--ink);
+      border-radius: 999px; padding: 12px 16px; font-size: 1rem; min-height: 44px;
+      font-family: var(--sans); font-weight: 500; cursor: pointer;
+    }
+    .chip.on { outline: 3px solid var(--teal); background: var(--teal-soft); color: var(--teal); }
+    .station-tile {
+      background: var(--cream); border: 1.5px solid var(--cream-edge); color: var(--ink);
+      border-radius: 18px; padding: 16px 10px 14px;
+      min-height: 128px; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 8px; text-align: center;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.5) inset,
+        0 2px 6px rgba(58,42,31,.05);
+      transition: background .15s, border-color .15s, box-shadow .15s;
+    }
+    .station-tile .tile-icon {
+      width: 48px; height: 48px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: color-mix(in srgb, var(--cream-edge) 55%, #fff);
+      border: 1.5px solid color-mix(in srgb, var(--dune) 40%, var(--cream-edge));
+      color: var(--ink); flex-shrink: 0;
+      box-shadow: 0 1px 0 rgba(255,255,255,.55) inset;
+    }
+    .station-tile .tile-icon svg { width: 26px; height: 26px; }
+    .station-tile .tile-name {
+      font-family: var(--serif); font-weight: 700; font-size: 1.05rem;
+      letter-spacing: -.01em; line-height: 1.1;
+    }
+    .station-tile .tile-pill {
+      display: inline-block; font-family: var(--sans); font-size: .68rem; font-weight: 700;
+      letter-spacing: .06em; text-transform: none;
+      border-radius: 999px; padding: 4px 12px;
+      background: color-mix(in srgb, var(--cream-edge) 85%, var(--muted));
+      color: var(--muted); border: 1px solid color-mix(in srgb, var(--dune) 30%, transparent);
+    }
+    .station-tile.on {
+      background: var(--teal-soft);
+      border-color: color-mix(in srgb, var(--teal) 45%, var(--cream-edge));
+      color: var(--teal);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.45) inset,
+        0 2px 10px rgba(42,122,116,.14);
+    }
+    .station-tile.on .tile-icon {
+      background: color-mix(in srgb, var(--teal-mid) 70%, #fff);
+      border-color: color-mix(in srgb, var(--teal) 40%, var(--cream-edge));
+      color: var(--teal);
+    }
+    .station-tile.on .tile-name { color: var(--teal); }
+    .station-tile.on .tile-pill {
+      background: color-mix(in srgb, var(--teal) 18%, var(--teal-soft));
+      color: var(--teal); border-color: color-mix(in srgb, var(--teal) 30%, transparent);
+    }
+    /* STOP — fixed footer; heavier terracotta; never overlaps Edit/Duplicate */
+    .stop-bar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+      padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px));
+      background: linear-gradient(180deg, transparent 0%, var(--sand) 28%, var(--sand) 100%);
+      pointer-events: none;
+    }
+    .stop-bar .stop {
+      pointer-events: auto;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      width: 100%; max-width: 456px; margin-inline: auto;
+      background: linear-gradient(180deg, #d06648 0%, var(--terracotta) 55%, var(--terracotta-deep) 100%);
+      color: #fff; border: 0; border-radius: 16px; min-height: 62px;
+      font-size: 1.28rem; font-weight: 800; letter-spacing: .1em;
+      box-shadow:
+        0 1px 0 rgba(255,220,200,.25) inset,
+        0 4px 16px rgba(168,72,47,.4),
+        0 1px 0 rgba(58,42,31,.08);
+    }
+    .stop-bar .stop svg { width: 18px; height: 18px; opacity: .95; }
+    .stop-bar .stop:active { background: var(--terracotta-deep); }
+    /* Dialogs */
+    dialog {
+      border: 0; border-radius: 18px; padding: 18px; width: min(94vw, 420px);
+      max-height: 90vh; overflow: auto; background: var(--cream); color: var(--ink);
+      border: 1px solid var(--cream-edge);
+      box-shadow: 0 12px 40px rgba(58,42,31,.18);
+    }
+    dialog::backdrop { background: rgba(58,42,31,.35); }
     dialog menu { display: flex; gap: 8px; padding: 0; margin: 16px 0 0; justify-content: flex-end; flex-wrap: wrap; }
     dialog button, .row-actions button, .sched-head button, #sched-new {
-      min-height: 44px; border: 0; border-radius: 10px; padding: 0 14px; font-size: 1rem; }
-    .go { background: var(--go); color: #fff; }
-    .ghost { background: var(--chip); color: var(--ink); }
-    .sched { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
-    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-    .sched-title { font-weight: 700; font-size: 1.05rem; word-break: break-word; }
-    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; }
-    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .badge { display: inline-block; background: var(--chip); color: var(--ink); border-radius: 999px;
-      padding: 4px 10px; font-size: .78rem; }
-    .badge.off { background: var(--off); }
-    .badge.out { background: #4a3a28; color: #ffd9a8; }
-    .badge.season { background: #2f4030; }
-    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+      min-height: 44px; border: 0; border-radius: 12px; padding: 0 14px; font-size: 1rem;
+    }
+    .go { background: var(--teal); color: #fff; }
+    .ghost { background: var(--cream-edge); color: var(--ink); }
+    #sched-new {
+      background: var(--terracotta); color: #fff; font-weight: 650;
+      border-radius: 12px; padding: 0 16px;
+    }
+    /* Schedules — same cream language as Home */
+    .sched {
+      background: var(--cream); border-radius: 18px; padding: 16px 16px 14px; margin-bottom: 12px;
+      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
+      position: relative; overflow: hidden;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.5) inset,
+        0 2px 8px rgba(58,42,31,.05);
+    }
+    .sched::after {
+      content: ""; position: absolute; right: 0; bottom: 0; width: 88px; height: 56px;
+      background:
+        radial-gradient(ellipse 36px 22px at 78% 88%, color-mix(in srgb, var(--dune) 28%, transparent), transparent 70%),
+        radial-gradient(ellipse 52px 28px at 95% 100%, color-mix(in srgb, var(--dune-deep) 22%, transparent), transparent 72%),
+        linear-gradient(145deg, transparent 48%, color-mix(in srgb, var(--sand-deep) 40%, transparent) 48%);
+      pointer-events: none; opacity: .85;
+      box-shadow: inset 2px 2px 0 color-mix(in srgb, var(--cream) 40%, transparent);
+    }
+    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; position: relative; z-index: 1; }
+    .sched-title {
+      flex: 1; min-width: 0; font-weight: 700; font-size: 1.12rem; font-family: var(--serif);
+      letter-spacing: -.01em;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sched-head > button { flex-shrink: 0; }
+    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; position: relative; z-index: 1; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; position: relative; z-index: 1; }
+    .badge {
+      display: inline-block; background: var(--cream-edge); color: var(--ink); border-radius: 999px;
+      padding: 4px 10px; font-size: .78rem;
+    }
+    .badge.off { background: var(--off-badge); color: #fff; }
+    .badge.out { background: #f0e0c8; color: var(--out-ink); }
+    .badge.season { background: var(--teal-soft); color: var(--teal); }
+    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; position: relative; z-index: 1; }
     .days { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-    .days button { min-width: 44px; min-height: 44px; border-radius: 10px; border: 0; background: var(--chip); color: var(--ink); }
-    .days button.on { background: #4a6b38; }
+    .days button {
+      min-width: 44px; min-height: 44px; border-radius: 10px; border: 0;
+      background: var(--cream-edge); color: var(--ink);
+    }
+    .days button.on { background: var(--teal); color: #fff; }
     label { display: block; color: var(--muted); font-size: .85rem; margin-top: 10px; }
-    input, select { font-size: 1rem; padding: 10px; border-radius: 8px; border: 0; width: 100%; background: #1e241c; color: var(--ink); }
+    input, select {
+      font-size: 1rem; padding: 10px; border-radius: 8px; border: 1px solid var(--cream-edge);
+      width: 100%; background: #fffef9; color: var(--ink);
+    }
     input[type="checkbox"] { width: auto; min-height: 22px; min-width: 22px; vertical-align: middle; margin-right: 8px; }
     .step-row { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; align-items: end; margin-top: 8px; }
     .step-row label { margin-top: 0; }
-    .collide { background: var(--warn); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
-      margin: 0 0 12px; font-size: .92rem; }
+    .collide {
+      background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
+      margin: 0 0 12px; font-size: .92rem; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    }
     .sched-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .hidden { display: none; }
-    .ed-warn { color: var(--warn-ink); background: #3a3218; border-radius: 10px; padding: 10px; margin-top: 10px; font-size: .9rem; }
+    .ed-warn {
+      color: var(--warn-ink); background: var(--warn-bg); border-radius: 10px;
+      padding: 10px; margin-top: 10px; font-size: .9rem;
+    }
+    /* Pause banner slot kept but unused — webpage pause out of scope */
+    .pause-banner {
+      display: none; background: var(--plum); color: #f8f0f8; border-radius: 12px;
+      padding: 12px 14px; margin: 0 0 12px; font-size: .95rem; font-weight: 600;
+    }
+    .pause-banner.visible { display: block; }
   </style>
 </head>
 <body>
-  <nav class="nav">
-    <button type="button" id="tab-home" class="active">Home</button>
-    <button type="button" id="tab-sched" class="edit">Schedules</button>
-  </nav>
+  <header class="chrome">
+    <p class="wordmark">Zanjerito</p>
+    <nav class="nav">
+      <button type="button" id="tab-home" class="active">Home</button>
+      <button type="button" id="tab-sched" class="edit">Schedules</button>
+    </nav>
+  </header>
+  <div id="pause-banner" class="pause-banner" role="status" hidden></div>
   <section id="page-home">
     <div class="status" id="status">
-      <div class="phase" id="phase">…</div>
-      <div class="sub" id="sub"></div>
+      <div class="hero-copy">
+        <div class="hero-top">
+          <div class="season-tag">
+            <svg viewBox="0 0 14 14" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="2.4" stroke="currentColor" stroke-width="1.3"/>
+              <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+                <path d="M7 1.2v1.5M7 11.3v1.5M1.2 7h1.5M11.3 7h1.5"/>
+                <path d="M2.9 2.9l1.1 1.1M10 10l1.1 1.1M10 4l1.1-1.1M2.9 11.1l1.1-1.1"/>
+              </g>
+            </svg>
+            <span id="season-tag">Season</span>
+          </div>
+        </div>
+        <div class="phase" id="phase">…</div>
+        <div class="timer hidden" id="timer" aria-live="polite"></div>
+        <div class="sub" id="sub"></div>
+        <div class="next-line" id="next-line">
+          <svg class="next-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M5 2.2v2.2M11 2.2v2.2M2.5 6.5h11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <span class="next-body"><span class="lbl">Next:</span> <strong id="next-text">…</strong></span>
+        </div>
+      </div>
+      <div class="desert-art" aria-hidden="true">
+        <!-- Embossed / paper-cut desert: rayed sun, 4 wave ridges, dotted dunes -->
+        <svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMaxYMid meet">
+          <defs>
+            <filter id="emboss" x="-30%" y="-30%" width="160%" height="160%">
+              <feDropShadow dx="1.1" dy="1.4" stdDeviation="0.7" flood-color="#6e5640" flood-opacity="0.42"/>
+              <feDropShadow dx="-0.9" dy="-0.8" stdDeviation="0.45" flood-color="#fffaf0" flood-opacity="0.85"/>
+            </filter>
+            <filter id="cutShadow" x="-15%" y="-15%" width="140%" height="140%">
+              <feDropShadow dx="0.4" dy="2.2" stdDeviation="1.6" flood-color="#5a4534" flood-opacity="0.38"/>
+            </filter>
+            <pattern id="duneDots" width="4" height="4" patternUnits="userSpaceOnUse">
+              <circle cx="1" cy="1" r="0.7" fill="#9a7a58" fill-opacity="0.45"/>
+            </pattern>
+            <linearGradient id="duneFill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#e0d0b8"/>
+              <stop offset="100%" stop-color="#c8b090"/>
+            </linearGradient>
+            <linearGradient id="paperGrain" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#f3eadc" stop-opacity="0"/>
+              <stop offset="100%" stop-color="#d4c0a4" stop-opacity="0.18"/>
+            </linearGradient>
+          </defs>
+          <rect width="200" height="180" fill="url(#paperGrain)"/>
+          <!-- Rayed sun (circle + ~12 short rays), embossed -->
+          <g filter="url(#emboss)" transform="translate(132,36)" stroke="#a88868" stroke-width="1.9" fill="none" stroke-linecap="round">
+            <circle cx="0" cy="0" r="11" fill="#f0e6d4" fill-opacity="0.35"/>
+            <circle cx="0" cy="0" r="11"/>
+            <path d="M0-18v4M0 14v4M-18 0h4M14 0h4"/>
+            <path d="M-12.7-12.7l2.8 2.8M10-10l2.8-2.8M10 10l2.8 2.8M-12.7 12.7l2.8-2.8"/>
+            <path d="M-6.9-16.6l1.5 3.6M6.9-16.6l-1.5 3.6M-6.9 16.6l1.5-3.6M6.9 16.6l-1.5-3.6"/>
+            <path d="M-16.6-6.9l3.6 1.5M16.6-6.9l-3.6 1.5M-16.6 6.9l3.6-1.5M16.6 6.9l-3.6-1.5" opacity="0.85"/>
+          </g>
+          <!-- Four parallel wave ridges (recessed grooves) -->
+          <g filter="url(#emboss)" fill="none" stroke="#a88868" stroke-width="2.2" stroke-linecap="round" opacity="0.9">
+            <path d="M78 78 C98 70, 118 86, 138 76 C158 66, 178 80, 198 72"/>
+            <path d="M78 90 C98 82, 118 98, 138 88 C158 78, 178 92, 198 84"/>
+            <path d="M78 102 C98 94, 118 110, 138 100 C158 90, 178 104, 198 96"/>
+            <path d="M78 114 C98 106, 118 122, 138 112 C158 102, 178 116, 198 108"/>
+          </g>
+          <!-- Paper-cut dunes with cut-out shadow + dotted fill -->
+          <g filter="url(#cutShadow)">
+            <path d="M70 180 C95 148, 118 152, 145 138 C160 148, 175 142, 200 128 L200 180 Z"
+                  fill="url(#duneFill)" stroke="#a88868" stroke-width="1.2"/>
+            <path d="M145 138 C160 148, 175 142, 200 128 L200 180 L145 180 Z" fill="url(#duneDots)"/>
+            <path d="M40 180 C70 155, 95 160, 120 150 C135 162, 155 158, 175 150 L175 180 Z"
+                  fill="#ddd0ba" stroke="#a88868" stroke-width="1.1" opacity="0.92"/>
+          </g>
+          <!-- Soft highlight lip on dunes (paper edge) -->
+          <path d="M70 180 C95 148, 118 152, 145 138" fill="none" stroke="#fff8ee" stroke-width="1.4" stroke-opacity="0.55" stroke-linecap="round"/>
+        </svg>
+      </div>
     </div>
-    <h1>Stations</h1>
+    <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
   </section>
   <section id="page-schedules" class="hidden">
     <div class="sched-toolbar">
       <h1 style="margin:0">Schedules</h1>
-      <button type="button" class="go edit" id="sched-new">New</button>
+      <button type="button" class="edit" id="sched-new">+ Add program</button>
     </div>
-    <p class="sub">Programs · America/Phoenix · seasonal windows supported</p>
+    <p class="sub" style="color:var(--muted);font-size:.9rem;margin:0 0 10px">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
   </section>
-  <button type="button" class="stop" id="stop">STOP</button>
+  <footer class="stop-bar" aria-label="Emergency stop">
+    <button type="button" class="stop" id="stop">
+      <span>STOP</span>
+      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <rect x="3.5" y="3.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.8"/>
+      </svg>
+    </button>
+  </footer>
   <dialog id="run-dlg">
     <p id="run-msg"></p>
-    <div class="strip" id="durs"></div>
+    <div class="strip" id="durs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
     <menu>
       <button type="button" class="ghost" id="run-cancel">Cancel</button>
     </menu>
@@ -107,7 +449,7 @@
     <label>Weekdays</label>
     <div class="days" id="ed-days"></div>
     <label>Season</label>
-    <div class="strip" style="margin:8px 0">
+    <div class="strip" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px">
       <button type="button" class="chip" id="ed-season-all" data-mode="all">All-year</button>
       <button type="button" class="chip" id="ed-season-between" data-mode="between">Between dates</button>
     </div>
@@ -128,10 +470,20 @@
   <script>
     const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
     const TZ = "America/Phoenix";
+    const DROP_SVG = `<svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 2.2 C9 2.2 3.8 8.2 3.8 11.2 A5.2 5.2 0 0 0 14.2 11.2 C14.2 8.2 9 2.2 9 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.2 11.4c0 1.4 1.1 2.2 1.8 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".7"/></svg>`;
+    const ICONS = {
+      west: `<svg viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M13 3.5v2.2M13 20.3v2.2M3.5 13h2.2M20.3 13h2.2M6.2 6.2l1.6 1.6M18.2 18.2l1.6 1.6M18.2 7.8l1.6-1.6M6.2 19.8l1.6-1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+      north: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 4.5 L21 20.5 H5 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 11v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+      south: `<svg viewBox="0 0 26 26" fill="none"><path d="M8 21 V12 C8 8.5 10.2 6 13 6 s5 2.5 5 6 v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10.5 21h5M13 6 V3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="16.5" cy="10" r="1.3" fill="currentColor"/></svg>`,
+      drip: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.5 16.8c0 2 1.5 3.2 2.5 3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".75"/></svg>`,
+      default: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    };
     const state = {
       status: { phase: "Idle", stations_on: [] },
       stations: [], schedules: [], pick: null, kiosk: false,
       edit: { id: null, isNew: false },
+      // Client run track — API has no remaining_seconds / ends_at
+      runTrack: null, // { steps:[{station_id,minutes}], startedAt, endsAt, source }
     };
     if (new URLSearchParams(location.search).get("mode") === "kiosk") {
       document.documentElement.classList.add("kiosk");
@@ -141,6 +493,20 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
+    /** Normalize /api/status (snake) and SSE/engine Status (Pascal) into one shape. */
+    function normalizeStatus(d) {
+      if (!d || typeof d !== "object") return state.status;
+      return {
+        phase: d.phase || d.Phase || "Idle",
+        current_station: d.current_station || d.CurrentStation || "",
+        stations_on: d.stations_on || d.StationsOn || [],
+        last_error: d.last_error || d.LastError || "",
+        lockout: !!(d.lockout ?? d.Lockout),
+        now: d.now || d.Now || "",
+        timezone: d.timezone || d.Timezone || TZ,
+        paused: d.paused || d.pause || null,
+      };
+    }
     async function j(url, opt) {
       const r = await fetch(url, opt);
       const t = await r.text();
@@ -151,16 +517,71 @@
     }
     function watering() {
       const p = state.status.phase || "";
-      return p && p !== "Idle";
+      return p && p !== "Idle" && p !== "Fault";
+    }
+    function stationTitle(id) {
+      const st = (state.stations || []).find((s) => s.id === id);
+      return (st && (st.title || st.id)) || id || "";
+    }
+    /** Short display labels: Front West → West, Drip Line → Drip */
+    function shortStation(idOrTitle) {
+      let t = idOrTitle || "";
+      if (t && !/\s/.test(t) && (state.stations || []).some((s) => s.id === t)) {
+        t = stationTitle(t);
+      }
+      t = String(t).trim();
+      t = t.replace(/^Front\s+/i, "").replace(/\s+Line$/i, "").trim();
+      if (!t) return idOrTitle || "";
+      // Prefer last meaningful token for multi-word leftovers
+      const parts = t.split(/\s+/);
+      if (parts.length > 1 && /^(north|south|east|west|drip)$/i.test(parts[parts.length - 1])) {
+        return parts[parts.length - 1].replace(/^\w/, (c) => c.toUpperCase());
+      }
+      return t;
+    }
+    function stationIconKey(st) {
+      const id = String(st.id || "").toLowerCase();
+      const title = String(st.title || "").toLowerCase();
+      if (id.includes("west") || title.includes("west")) return "west";
+      if (id.includes("north") || title.includes("north")) return "north";
+      if (id.includes("south") || title.includes("south")) return "south";
+      if (id.includes("drip") || title.includes("drip")) return "drip";
+      return "default";
+    }
+    function heroTitle() {
+      const s = state.status;
+      const p = s.phase || "Idle";
+      if (p === "Idle") return "Idle";
+      if (p === "Fault") return "Fault";
+      const name = shortStation(s.current_station);
+      if (name) return `Watering <span class="dot">•</span> ${esc(name)}`;
+      return "Watering";
+    }
+    function seasonTagLabel() {
+      const month = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "numeric" }).format(new Date()));
+      // Boutique ALL-CAPS chips like LATE SPRING / FALL
+      const map = {
+        1: "WINTER", 2: "LATE WINTER", 3: "EARLY SPRING", 4: "SPRING",
+        5: "LATE SPRING", 6: "EARLY SUMMER", 7: "SUMMER", 8: "LATE SUMMER",
+        9: "EARLY FALL", 10: "FALL", 11: "LATE FALL", 12: "EARLY WINTER",
+      };
+      return map[month] || "SEASON";
     }
     function programName(sch) {
       const n = (sch.note || "").trim();
       return n || sch.id || "Program";
     }
+    function shortProgramName(sch) {
+      const n = programName(sch);
+      // Soft shorten for Next line; CSS ellipsis also applies
+      if (n.length <= 28) return n;
+      return n.slice(0, 26).trimEnd() + "…";
+    }
     function phoenixParts(d = new Date()) {
       const fmt = new Intl.DateTimeFormat("en-US", {
         timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false,
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        weekday: "short", hour12: false,
       });
       const map = {};
       for (const p of fmt.formatToParts(d)) {
@@ -171,7 +592,7 @@
       const wdShort = { Sun: "sun", Mon: "mon", Tue: "tue", Wed: "wed", Thu: "thu", Fri: "fri", Sat: "sat" };
       return {
         ymd: `${map.year}-${map.month}-${map.day}`,
-        hour, minute: Number(map.minute),
+        hour, minute: Number(map.minute), second: Number(map.second || 0),
         weekday: wdShort[map.weekday] || "mon",
       };
     }
@@ -205,7 +626,6 @@
       const now = new Date();
       const seen = new Set();
       for (let i = 0; i < 400; i++) {
-        // Phoenix has no DST; +24h walks local calendar days safely.
         const cand = new Date(now.getTime() + i * 86400000);
         const p = phoenixParts(cand);
         if (seen.has(p.ymd)) continue;
@@ -216,6 +636,18 @@
         return `${p.ymd} ${String(clock.h).padStart(2, "0")}:${String(clock.m).padStart(2, "0")}`;
       }
       return "None in window";
+    }
+    function globalNextLabel() {
+      const enabled = (state.schedules || []).filter((s) => s.enabled);
+      if (!enabled.length) return "No enabled programs";
+      let best = null;
+      for (const sch of enabled) {
+        const label = nextFireLabel(sch);
+        if (label === "No start time" || label === "None in window") continue;
+        if (!best || label < best.label) best = { label, name: shortProgramName(sch) };
+      }
+      if (!best) return "None in window";
+      return `${best.label} · ${best.name}`;
     }
     function weekdaysOverlap(a, b) {
       const A = (a.weekdays || []).map((d) => String(d).toLowerCase());
@@ -250,18 +682,138 @@
         bits.join("; ") + ". Engine skips if already watering (D13). Save is still allowed.";
       box.classList.remove("hidden");
     }
+    function paintPauseBanner() {
+      // Webpage pause (rain/mowing) is OUT OF SCOPE — never invent Pause UI.
+      // Only surface if API already exposes an explicit pause-like state (not lockout alone).
+      const s = state.status || {};
+      const paused = !!(s.paused || s.pause || s.phase === "Paused");
+      const banner = $("pause-banner");
+      if (!paused) {
+        banner.classList.remove("visible");
+        banner.hidden = true;
+        banner.textContent = "";
+        return;
+      }
+      banner.hidden = false;
+      banner.classList.add("visible");
+      banner.textContent = "Paused — schedules held. STOP still available.";
+    }
+    /** Infer active itinerary + remaining for timer / Next-station. */
+    function activeRunInfo() {
+      const s = state.status;
+      const cur = s.current_station || ((s.stations_on || [])[0] || "");
+      if (!watering() || !cur) return null;
+
+      // Prefer client track from POST /run
+      if (state.runTrack && state.runTrack.steps && state.runTrack.steps.length) {
+        const steps = state.runTrack.steps;
+        let idx = steps.findIndex((st) => st.station_id === cur);
+        if (idx < 0) idx = 0;
+        const remainingMs = Math.max(0, (state.runTrack.endsAt || 0) - Date.now());
+        return {
+          steps, index: idx,
+          remainingSec: Math.ceil(remainingMs / 1000),
+          source: "track",
+        };
+      }
+
+      // Infer from enabled schedule mid-window (Phoenix wall clock)
+      const now = phoenixParts();
+      const nowSec = now.hour * 3600 + now.minute * 60 + now.second;
+      for (const sch of (state.schedules || []).filter((x) => x.enabled)) {
+        if (!weekdayMatches(sch, now.weekday)) continue;
+        if (!inSeasonNow(sch, now.ymd)) continue;
+        const clock = parseHHMM(sch.start);
+        if (!clock) continue;
+        const startSec = clock.h * 3600 + clock.m * 60;
+        let elapsed = nowSec - startSec;
+        if (elapsed < -60) continue; // not started (1m slack)
+        if (elapsed < 0) elapsed = 0;
+        const steps = sch.steps || [];
+        if (!steps.length) continue;
+        const totalMin = steps.reduce((a, st) => a + (Number(st.minutes) || 0), 0);
+        if (elapsed > totalMin * 60 + 90) continue; // past window
+        let t = 0;
+        for (let i = 0; i < steps.length; i++) {
+          const mins = Number(steps[i].minutes) || 0;
+          const end = t + mins * 60;
+          const matches = steps[i].station_id === cur;
+          if (matches && elapsed <= end + 30) {
+            return {
+              steps, index: i,
+              remainingSec: Math.max(0, end - elapsed),
+              source: "schedule",
+            };
+          }
+          t = end;
+        }
+        // Station matches somewhere in itinerary even if clock skew
+        const idx = steps.findIndex((st) => st.station_id === cur);
+        if (idx >= 0) {
+          const mins = Number(steps[idx].minutes) || 0;
+          return { steps, index: idx, remainingSec: mins * 60, source: "schedule-loose" };
+        }
+      }
+      return { steps: [{ station_id: cur, minutes: 0 }], index: 0, remainingSec: null, source: "unknown" };
+    }
+    function formatMinLeft(sec) {
+      if (sec == null || !Number.isFinite(sec)) return null;
+      const m = Math.max(0, Math.ceil(sec / 60));
+      if (m <= 0) return "under 1 min left";
+      if (m === 1) return "1 min left";
+      return `${m} min left`;
+    }
+    function nextWhileWatering(info) {
+      if (!info || !info.steps) return null;
+      const next = info.steps[info.index + 1];
+      if (!next) return null;
+      return shortStation(next.station_id);
+    }
     function paintStatus() {
       const s = state.status;
-      $("phase").textContent = s.phase || "—";
-      const bits = [];
-      if (s.current_station) bits.push("Now: " + s.current_station);
-      if (s.now) bits.push(s.now.replace("T", " ").slice(0, 16));
-      if (s.last_error) bits.push(s.last_error);
-      $("sub").textContent = bits.join(" · ") || "Phoenix";
-      $("sub").classList.toggle("fault", !!s.last_error);
-      document.querySelectorAll("#stations .chip").forEach((el) => {
+      $("season-tag").textContent = seasonTagLabel();
+      $("phase").innerHTML = heroTitle();
+      const isWater = watering();
+      $("status").classList.toggle("watering", isWater);
+
+      if (!isWater) state.runTrack = null;
+
+      const timer = $("timer");
+      const sub = $("sub");
+      if (isWater) {
+        const info = activeRunInfo();
+        const label = formatMinLeft(info && info.remainingSec);
+        if (label) {
+          timer.innerHTML = `${DROP_SVG}<span>${esc(label)}</span>`;
+          timer.classList.remove("hidden");
+        } else {
+          // No remaining available — prefer soft relative cue over wall-clock HH:MM:SS
+          timer.innerHTML = `${DROP_SVG}<span>In progress</span>`;
+          timer.classList.remove("hidden");
+        }
+        sub.textContent = "";
+        sub.classList.add("hidden");
+        const nxt = nextWhileWatering(info);
+        $("next-text").textContent = nxt || "—";
+      } else {
+        timer.textContent = "";
+        timer.classList.add("hidden");
+        if (s.last_error) {
+          sub.textContent = s.last_error;
+          sub.classList.remove("hidden");
+        } else {
+          sub.textContent = "Phoenix · ready";
+          sub.classList.remove("hidden");
+        }
+        $("next-text").textContent = globalNextLabel();
+      }
+      sub.classList.toggle("fault", !!s.last_error);
+      paintPauseBanner();
+      document.querySelectorAll("#stations .station-tile").forEach((el) => {
         const on = (s.stations_on || []).includes(el.dataset.id) || s.current_station === el.dataset.id;
         el.classList.toggle("on", on);
+        const pill = el.querySelector(".tile-pill");
+        if (pill) pill.textContent = on ? "On" : "Off";
       });
     }
     function paintStations() {
@@ -269,10 +821,14 @@
       (state.stations || []).forEach((st) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "chip";
+        b.className = "station-tile";
         b.dataset.id = st.id;
-        b.textContent = st.title || st.id;
-        if (st.color) b.style.background = st.color;
+        const label = shortStation(st.id);
+        const icon = ICONS[stationIconKey(st)] || ICONS.default;
+        b.innerHTML =
+          `<span class="tile-icon" aria-hidden="true">${icon}</span>` +
+          `<span class="tile-name">${esc(label)}</span>` +
+          `<span class="tile-pill">Off</span>`;
         b.addEventListener("click", () => openRun(st));
         $("stations").appendChild(b);
       });
@@ -308,9 +864,10 @@
         box.appendChild(el);
       });
       if (!(state.schedules || []).length) {
-        box.innerHTML = `<p class="sub">No programs yet. Tap New to add one.</p>`;
+        box.innerHTML = `<p class="sub" style="color:var(--muted)">No programs yet. Tap + Add program to add one.</p>`;
       }
       paintCollide();
+      paintStatus();
     }
     function mintId(note) {
       const slug = String(note || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24);
@@ -323,7 +880,7 @@
     }
     function stationOptions(selected) {
       return (state.stations || []).map((st) =>
-        `<option value="${esc(st.id)}" ${st.id === selected ? "selected" : ""}>${esc(st.title || st.id)}</option>`
+        `<option value="${esc(st.id)}" ${st.id === selected ? "selected" : ""}>${esc(shortStation(st.id))}</option>`
       ).join("");
     }
     function renderEdDays(selected) {
@@ -340,7 +897,7 @@
       const box = $("ed-steps");
       box.innerHTML = "";
       const list = (steps && steps.length) ? steps : [{ station_id: (state.stations[0] || {}).id || "", minutes: 5 }];
-      list.forEach((step, i) => {
+      list.forEach((step) => {
         const row = document.createElement("div");
         row.className = "step-row";
         row.innerHTML = `
@@ -395,7 +952,7 @@
     }
     function readEditorDraft() {
       let weekdays = [...$("ed-days").querySelectorAll("[data-day].on")].map((b) => b.dataset.day);
-      if (weekdays.length === DAYS.length) weekdays = []; // empty = every day
+      if (weekdays.length === DAYS.length) weekdays = [];
       const between = $("ed-season-between").classList.contains("on");
       const steps = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
         station_id: row.querySelector("[data-st]").value,
@@ -442,13 +999,12 @@
       await loadSchedules();
     }
     async function toggleEnabled(sch) {
-      const next = { ...sch, enabled: !sch.enabled };
       await j("/api/schedules/" + encodeURIComponent(sch.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: sch.id,
-          enabled: next.enabled,
+          enabled: !sch.enabled,
           note: sch.note || "",
           weekdays: sch.weekdays || [],
           start: sch.start || "06:00",
@@ -461,7 +1017,7 @@
     }
     function openRun(st) {
       state.pick = st;
-      $("run-msg").textContent = "Run " + (st.title || st.id) + " for…";
+      $("run-msg").textContent = "Run " + shortStation(st.id) + " for…";
       const durs = $("durs");
       durs.innerHTML = "";
       [1, 5, 10].forEach((m) => {
@@ -477,8 +1033,8 @@
     function confirmRun(st, sec) {
       $("run-dlg").close();
       if (watering()) {
-        $("warn-msg").textContent = (state.status.current_station || "A station") +
-          " is watering. Stop it and run " + (st.title || st.id) + "?";
+        $("warn-msg").textContent = shortStation(state.status.current_station || "A station") +
+          " is watering. Stop it and run " + shortStation(st.id) + "?";
         $("warn-dlg").dataset.sec = String(sec);
         $("warn-dlg").dataset.id = st.id;
         $("warn-dlg").showModal();
@@ -487,11 +1043,22 @@
       startRun(st.id, sec, false);
     }
     async function startRun(id, sec, preempt) {
-      await j("/api/stations/" + encodeURIComponent(id) + "/run", {
+      const res = await j("/api/stations/" + encodeURIComponent(id) + "/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ durationSec: sec, preempt }),
       });
+      const mins = Math.max(1, Math.round(sec / 60));
+      state.runTrack = {
+        steps: [{ station_id: id, minutes: mins }],
+        startedAt: Date.now(),
+        endsAt: Date.now() + sec * 1000,
+        source: "manual",
+      };
+      // Prefer fresh status; fall back to run response (may be PascalCase)
+      try { state.status = normalizeStatus(await j("/api/status")); }
+      catch { state.status = normalizeStatus(res || { phase: "StationOn", current_station: id, stations_on: [id] }); }
+      paintStatus();
     }
     $("run-cancel").addEventListener("click", () => $("run-dlg").close());
     $("warn-no").addEventListener("click", () => $("warn-dlg").close());
@@ -501,6 +1068,7 @@
       startRun(d.dataset.id, Number(d.dataset.sec), true);
     });
     $("stop").addEventListener("click", () => {
+      state.runTrack = null;
       j("/api/run/cancel", { method: "POST" }).catch((e) => alert(e.message));
     });
     $("tab-home").addEventListener("click", () => {
@@ -530,8 +1098,7 @@
     $("ed-season-between").addEventListener("click", () => {
       setSeasonMode("between");
       if (!$("ed-starts-on").value) {
-        const ymd = phoenixParts().ymd;
-        $("ed-starts-on").value = ymd;
+        $("ed-starts-on").value = phoenixParts().ymd;
       }
     });
     ["ed-start", "ed-enabled"].forEach((id) => {
@@ -550,14 +1117,17 @@
       paintSchedules();
     }
     async function loadStatus() {
-      state.status = await j("/api/status");
+      state.status = normalizeStatus(await j("/api/status"));
       paintStatus();
     }
     function hookSSE() {
       try {
         const es = new EventSource("/api/events");
         es.addEventListener("status", (ev) => {
-          try { Object.assign(state.status, JSON.parse(ev.data)); paintStatus(); } catch (e) {}
+          try {
+            state.status = normalizeStatus({ ...state.status, ...JSON.parse(ev.data) });
+            paintStatus();
+          } catch (e) {}
         });
       } catch (e) {}
     }
@@ -566,6 +1136,8 @@
     loadSchedules();
     hookSSE();
     setInterval(loadStatus, 4000);
+    // Tick relative timer while watering
+    setInterval(() => { if (watering()) paintStatus(); }, 1000);
   </script>
 </body>
 </html>
