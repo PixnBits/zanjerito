@@ -1,6 +1,6 @@
 # Zanjerito — UI directions (for stakeholder feedback)
 
-**Status:** Draft v0.4 · 2026-09-23 (v1 explore added)  
+**Status:** Draft v0.5 · 2026-09-23 (Polish v1 Style A locked)  
 **Companion:** [prd.md](./prd.md) · [decisions.md](./decisions.md)  
 **Selected (decided):** **Direction D — hybrid strip** (Nick, 2026-09-12)
 
@@ -74,9 +74,67 @@ The `fancy-vibes` React UI was a learning prototype (stations list, schedules, G
 | Who | Date | Preference | Notes |
 |---|---|---|---|
 | Nick | 2026-09-12 | D hybrid | STOP on app and wall. Manual run may preempt a schedule with warnings. Wall screen is v1, not MVP. |
+| Nick | 2026-09-23 | Style A | **Polish v1 — Cards + desert light.** Direction D IA unchanged. Brand: sand/cream chrome, adobe terracotta STOP, canal teal active, dusk plum paused. Flat sand UI; dune photos/illustration are mood/line-art only — **not** photo thumbnail cards. Visual language Style A (hero status) on **both** Home and Schedules. **Rejected Style B** illustrated-list with season photo thumbs. |
 
 
 ---
+
+---
+
+## Polish v1 — Cards + desert light (Style A)
+
+**Locked (Nick, 2026-09-23).** Direction D hybrid-strip IA is unchanged. This section is the visual/brand contract for a later CSS/UI polish PR — **docs only here; no CSS/React in this revision.**
+
+**Not Style B.** Do not use an illustrated-list Schedules page with season **photo thumbnail** cards (mesa/dune photos as card art). Dune photography and desert illustration are **mood / line-art accents only**, never photo thumbs on program cards.
+
+### Palette
+
+| Role | Token feel | Use |
+|---|---|---|
+| Page / chrome | Flat sand | Background; flat sand UI chrome (not photo-backed chrome) |
+| Cards / surfaces | Cream | Status hero, station tiles Off, schedule cards |
+| STOP / active nav | Adobe terracotta | Primary STOP; terracotta underline on active Home \| Schedules |
+| Active / watering | Canal teal | Station On tiles; watering timer |
+| Paused | Dusk plum | Pause banner |
+| Wordmark | Serif | Left “Zanjerito” wordmark |
+
+### Chrome (Home and Schedules)
+
+- Left wordmark **Zanjerito** (serif).
+- Nav: **Home | Schedules** with terracotta underline on the active tab.
+- Flat sand chrome throughout.
+
+### Home — Style A (hero status)
+
+- Large **cream** status hero card:
+  - Season tag + sun accent
+  - Title: **Idle** / **Watering • {station}** / **Paused**
+  - Teal timer when watering
+  - **Next: …** line
+  - Subtle desert **line-art** on the right — **not** a photo
+- Stations strip: **West / North / South** only (no fake 4th station); cream **Off** / teal **On** tiles; serif station names
+- Actions: **Pause for rain** secondary cream; **STOP** primary terracotta, always visible
+- Paused state: dusk plum banner + **Resume** + **STOP**
+
+### Schedules — same language as Home (not Style B)
+
+- Cream **line-art / flat** cards (no mesa/season photo thumbs)
+- Soft collide warning banner when enabled programs overlap
+- Season badges + enable toggles; **Edit** / **Duplicate**
+- Terracotta **+ Add program**
+
+### Editor (household)
+
+- Clock (**HH:MM**), weekday chips, date window (`starts_on` / `ends_on` or all-year), station minutes
+- No cron strings, no `PT5M` / ISO durations, no GraphiQL in the household path
+
+### States checklist
+
+| State | Hero / chrome cues |
+|---|---|---|
+| Idle | Cream hero titled Idle; Next: …; stations Off cream |
+| Watering | Title Watering • {station}; teal timer; that station On teal |
+| Paused | Dusk plum banner; Resume + STOP; hero may read Paused |
 
 ## v1 explore (Direction D — post-cutover)
 
@@ -100,6 +158,7 @@ Wall / `?mode=kiosk` density remains **parked** (v1 wall, not MVP phone).
 
 ### Suggested build order
 
-1. Seasonal program cards + schedule editor UI (next code PR)
-2. Run history thin list after that
-3. Webpage pause (rain/mowing) when separately green-lit
+1. ~~Seasonal program cards + schedule editor UI~~ (landed — PR #19)
+2. CSS/UI polish implementing **Polish v1 Style A** (next code PR; this doc is the contract)
+3. Run history thin list after that
+4. Webpage pause (rain/mowing) when separately green-lit
