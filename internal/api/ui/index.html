@@ -327,7 +327,8 @@
     }
     .pause-banner .resume:active { opacity: .88; }
     .home-actions {
-      display: flex; gap: 8px; margin: 0 0 12px; flex-wrap: wrap;
+      /* Breathing room under hero card; keep Pause out of STOP footer */
+      display: flex; gap: 8px; margin: 16px 0 18px; flex-wrap: wrap;
     }
     .home-actions .pause-open {
       flex: 1; min-height: 48px; border-radius: 14px; border: 1px solid var(--cream-edge);
