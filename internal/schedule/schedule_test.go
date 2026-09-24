@@ -223,3 +223,45 @@ func TestLoopStopsOnCancel(t *testing.T) {
 		t.Fatal("Loop did not return after cancel")
 	}
 }
+
+func TestTickSkipsWhenPaused(t *testing.T) {
+	loc, err := time.LoadLocation(Phoenix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := frontCfg()
+	e, err := engine.New(cfg, gpio.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	e.SetPause(nil, "rain")
+
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	sch := store.Schedule{
+		ID: "probe", Enabled: true, Weekdays: []string{"mon"}, Start: "06:00",
+		Steps: []store.Step{{StationID: "front-west", Minutes: 1}},
+	}
+	if err := store.Save(path, store.File{Config: cfg, Schedules: []store.Schedule{sch}}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	r := &Runner{
+		Eng: e, Path: path, Loc: loc,
+		Now: fixedClock{t: time.Date(2026, 9, 14, 6, 0, 0, 0, loc)},
+		Log: log.New(&buf, "", 0),
+		lastFired: map[string]string{},
+	}
+	if err := r.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "paused") {
+		t.Fatalf("want skip paused log, got %q", buf.String())
+	}
+	if e.Status().Phase != engine.PhaseIdle {
+		t.Fatalf("must not water while paused: %s", e.Status().Phase)
+	}
+	if r.lastFired["probe"] == "" {
+		t.Fatal("paused skip should consume today's slot")
+	}
+}

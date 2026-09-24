@@ -174,6 +174,11 @@ func (r *Runner) Tick(ctx context.Context) error {
 		if !r.due(sch, now) {
 			continue
 		}
+		if r.Eng.IsPaused(now) {
+			r.Log.Printf("skip %s: paused", sch.ID)
+			r.markFired(sch.ID, now) // consume today's slot so resume mid-minute does not fire
+			continue
+		}
 		steps, err := Itinerary(sch)
 		if err != nil {
 			r.Log.Printf("skip %s: %v", sch.ID, err)
@@ -183,6 +188,11 @@ func (r *Runner) Tick(ctx context.Context) error {
 		err = r.Eng.RunItinerary(ctx, steps)
 		if errors.Is(err, engine.ErrBusy) {
 			r.Log.Printf("skip %s: busy (D13)", sch.ID)
+			continue
+		}
+		if errors.Is(err, engine.ErrPaused) {
+			r.Log.Printf("skip %s: paused", sch.ID)
+			r.markFired(sch.ID, now)
 			continue
 		}
 		if err != nil {

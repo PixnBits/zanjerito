@@ -312,12 +312,35 @@
       color: var(--warn-ink); background: var(--warn-bg); border-radius: 10px;
       padding: 10px; margin-top: 10px; font-size: .9rem;
     }
-    /* Pause banner slot kept but unused — webpage pause out of scope */
+    /* Pause — dusk plum banner + cream secondary control (not STOP) */
     .pause-banner {
-      display: none; background: var(--plum); color: #f8f0f8; border-radius: 12px;
+      display: none; background: var(--plum); color: #f8f0f8; border-radius: 14px;
       padding: 12px 14px; margin: 0 0 12px; font-size: .95rem; font-weight: 600;
+      border: 1px solid color-mix(in srgb, var(--plum) 70%, #fff);
+      box-shadow: 0 2px 10px rgba(107,74,110,.22);
     }
-    .pause-banner.visible { display: block; }
+    .pause-banner.visible { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .pause-banner .pause-msg { flex: 1; min-width: 12rem; }
+    .pause-banner .resume {
+      background: #f8f0f8; color: var(--plum); border: 0; border-radius: 12px;
+      min-height: 44px; padding: 0 16px; font-weight: 700; font-size: 1rem;
+    }
+    .pause-banner .resume:active { opacity: .88; }
+    .home-actions {
+      display: flex; gap: 8px; margin: 0 0 12px; flex-wrap: wrap;
+    }
+    .home-actions .pause-open {
+      flex: 1; min-height: 48px; border-radius: 14px; border: 1px solid var(--cream-edge);
+      background: var(--cream); color: var(--ink); font-weight: 650; font-size: 1rem;
+      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 8px rgba(58,42,31,.05);
+    }
+    .home-actions .pause-open:active { background: var(--cream-edge); }
+    .pause-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .pause-chips button {
+      min-height: 48px; border-radius: 12px; border: 1px solid var(--cream-edge);
+      background: var(--cream); color: var(--ink); padding: 0 14px; font-size: 1rem; font-weight: 600;
+    }
+    .pause-chips button:active { background: var(--plum-soft); border-color: var(--plum); color: var(--plum); }
   </style>
 </head>
 <body>
@@ -328,7 +351,10 @@
       <button type="button" id="tab-sched" class="edit">Schedules</button>
     </nav>
   </header>
-  <div id="pause-banner" class="pause-banner" role="status" hidden></div>
+  <div id="pause-banner" class="pause-banner" role="status" hidden>
+    <span class="pause-msg" id="pause-msg">Paused — schedules held. STOP still available.</span>
+    <button type="button" class="resume" id="pause-resume">Resume</button>
+  </div>
   <section id="page-home">
     <div class="status" id="status">
       <div class="hero-copy">
@@ -408,6 +434,9 @@
         </svg>
       </div>
     </div>
+    <div class="home-actions" id="home-actions">
+      <button type="button" class="pause-open" id="pause-open">Pause for rain</button>
+    </div>
     <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
   </section>
@@ -440,6 +469,21 @@
     <menu>
       <button type="button" class="ghost" id="warn-no">Keep going</button>
       <button type="button" class="go" id="warn-yes">Start anyway</button>
+    </menu>
+  </dialog>
+  <dialog id="pause-dlg">
+    <h1 style="margin-top:0;font-family:var(--serif);font-size:1.35rem">Pause for rain</h1>
+    <p style="margin:0;color:var(--muted);font-size:.95rem">Don&rsquo;t water for a while. Schedules skip; manual runs stay blocked until you Resume. STOP still only cancels a live run.</p>
+    <div class="pause-chips" id="pause-chips"></div>
+    <menu>
+      <button type="button" class="ghost" id="pause-cancel">Cancel</button>
+    </menu>
+  </dialog>
+  <dialog id="paused-block-dlg">
+    <p id="paused-block-msg">Paused for rain — resume before running a station.</p>
+    <menu>
+      <button type="button" class="ghost" id="paused-block-ok">OK</button>
+      <button type="button" class="go" id="paused-block-resume">Resume</button>
     </menu>
   </dialog>
   <dialog id="sched-dlg">
@@ -504,7 +548,9 @@
         lockout: !!(d.lockout ?? d.Lockout),
         now: d.now || d.Now || "",
         timezone: d.timezone || d.Timezone || TZ,
-        paused: d.paused || d.pause || null,
+        paused: !!(d.paused === true || d.paused === "true" || d.pause === true),
+        paused_until: d.paused_until ?? d.PausedUntil ?? null,
+        reason: d.reason || d.Reason || "",
       };
     }
     async function j(url, opt) {
@@ -548,14 +594,30 @@
       if (id.includes("drip") || title.includes("drip")) return "drip";
       return "default";
     }
+    function isPaused() {
+      return !!(state.status && state.status.paused);
+    }
     function heroTitle() {
       const s = state.status;
       const p = s.phase || "Idle";
+      if (isPaused() && (p === "Idle" || !watering())) return "Paused";
       if (p === "Idle") return "Idle";
       if (p === "Fault") return "Fault";
       const name = shortStation(s.current_station);
       if (name) return `Watering <span class="dot">•</span> ${esc(name)}`;
       return "Watering";
+    }
+    function pauseUntilLabel() {
+      const u = state.status && state.status.paused_until;
+      if (!u) return "until further notice";
+      try {
+        const d = new Date(u);
+        if (Number.isNaN(d.getTime())) return "until further notice";
+        const fmt = new Intl.DateTimeFormat("en-US", {
+          timeZone: TZ, hour: "numeric", minute: "2-digit", month: "short", day: "numeric",
+        });
+        return "until " + fmt.format(d);
+      } catch { return "until further notice"; }
     }
     function seasonTagLabel() {
       const month = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "numeric" }).format(new Date()));
@@ -683,20 +745,19 @@
       box.classList.remove("hidden");
     }
     function paintPauseBanner() {
-      // Webpage pause (rain/mowing) is OUT OF SCOPE — never invent Pause UI.
-      // Only surface if API already exposes an explicit pause-like state (not lockout alone).
-      const s = state.status || {};
-      const paused = !!(s.paused || s.pause || s.phase === "Paused");
       const banner = $("pause-banner");
-      if (!paused) {
+      const openBtn = $("pause-open");
+      if (!isPaused()) {
         banner.classList.remove("visible");
         banner.hidden = true;
-        banner.textContent = "";
+        if (openBtn) openBtn.classList.remove("hidden");
         return;
       }
       banner.hidden = false;
       banner.classList.add("visible");
-      banner.textContent = "Paused — schedules held. STOP still available.";
+      const why = (state.status.reason || "rain").trim() || "rain";
+      $("pause-msg").textContent = "Paused for " + why + " — " + pauseUntilLabel() + ". Schedules held. STOP still cancels a live run.";
+      if (openBtn) openBtn.classList.add("hidden");
     }
     /** Infer active itinerary + remaining for timer / Next-station. */
     function activeRunInfo() {
@@ -801,11 +862,14 @@
         if (s.last_error) {
           sub.textContent = s.last_error;
           sub.classList.remove("hidden");
+        } else if (isPaused()) {
+          sub.textContent = "Phoenix · paused " + pauseUntilLabel();
+          sub.classList.remove("hidden");
         } else {
           sub.textContent = "Phoenix · ready";
           sub.classList.remove("hidden");
         }
-        $("next-text").textContent = globalNextLabel();
+        $("next-text").textContent = isPaused() ? "Schedules skip while paused" : globalNextLabel();
       }
       sub.classList.toggle("fault", !!s.last_error);
       paintPauseBanner();
@@ -1016,6 +1080,12 @@
       await loadSchedules();
     }
     function openRun(st) {
+      if (isPaused()) {
+        $("paused-block-msg").textContent =
+          "Paused for rain — resume before running " + shortStation(st.id) + ".";
+        $("paused-block-dlg").showModal();
+        return;
+      }
       state.pick = st;
       $("run-msg").textContent = "Run " + shortStation(st.id) + " for…";
       const durs = $("durs");
@@ -1068,8 +1138,51 @@
       startRun(d.dataset.id, Number(d.dataset.sec), true);
     });
     $("stop").addEventListener("click", () => {
+      // STOP: cancel live run only — never fold pause duration into STOP; does not Resume.
       state.runTrack = null;
-      j("/api/run/cancel", { method: "POST" }).catch((e) => alert(e.message));
+      j("/api/run/cancel", { method: "POST" })
+        .then(() => loadStatus())
+        .catch((e) => alert(e.message));
+    });
+    function openPauseSheet() {
+      const chips = $("pause-chips");
+      chips.innerHTML = "";
+      const opts = [
+        { label: "Until further notice", body: { indefinite: true, reason: "rain" } },
+        { label: "5 min", body: { duration_sec: 300, reason: "rain" } },
+        { label: "30 min", body: { duration_sec: 1800, reason: "rain" } },
+        { label: "1 hour", body: { duration_sec: 3600, reason: "rain" } },
+      ];
+      opts.forEach((o) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = o.label;
+        b.addEventListener("click", () => setPause(o.body));
+        chips.appendChild(b);
+      });
+      $("pause-dlg").showModal();
+    }
+    async function setPause(body) {
+      $("pause-dlg").close();
+      await j("/api/pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      state.runTrack = null;
+      await loadStatus();
+    }
+    async function resumePause() {
+      await j("/api/pause", { method: "DELETE" });
+      await loadStatus();
+    }
+    $("pause-open").addEventListener("click", openPauseSheet);
+    $("pause-cancel").addEventListener("click", () => $("pause-dlg").close());
+    $("pause-resume").addEventListener("click", () => resumePause().catch((e) => alert(e.message)));
+    $("paused-block-ok").addEventListener("click", () => $("paused-block-dlg").close());
+    $("paused-block-resume").addEventListener("click", () => {
+      $("paused-block-dlg").close();
+      resumePause().catch((e) => alert(e.message));
     });
     $("tab-home").addEventListener("click", () => {
       $("page-home").classList.remove("hidden");

@@ -15,6 +15,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
 	"github.com/PixnBits/zanjerito/internal/schedule"
+	"github.com/PixnBits/zanjerito/internal/store"
 )
 
 func main() {
@@ -52,6 +53,13 @@ func main() {
 			log.Printf("engine close: %v", err)
 		}
 	}()
+
+	if ps, err := store.LoadPause(*configPath, time.Now()); err != nil {
+		log.Printf("pause load: %v (continuing unpaused)", err)
+	} else if ps.Active {
+		eng.SetPause(ps.Until, ps.Reason)
+		log.Printf("pause restored (until=%v reason=%q)", ps.Until, ps.Reason)
+	}
 
 	log.Printf("zanjerito engine ready (driver=%s dry=%v phase=%s)", *driverName, *dry && *driverName == "gpiocdev", eng.Status().Phase)
 
