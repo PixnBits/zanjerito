@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="zanjerito-ui" content="direction-d style-a">
   <title>Zanjerito</title>
   <style>
     :root {
@@ -38,8 +39,68 @@
       --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
       --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-    .kiosk { font-size: 22px; }
-    .kiosk .edit, .kiosk #page-schedules { display: none; }
+    /* Kiosk / wall density (?mode=kiosk) — same Direction D + Style A, larger targets */
+    .kiosk { font-size: 24px; }
+    .kiosk body,
+    html.kiosk body {
+      max-width: 920px;
+      padding: 18px 22px calc(148px + env(safe-area-inset-bottom, 0px));
+    }
+    /* Edits tucked: Schedules nav + schedule editor actions stay out of the wall path */
+    .kiosk .edit, .kiosk #page-schedules, .kiosk #tab-sched { display: none !important; }
+    .kiosk .chrome { margin-bottom: 18px; }
+    .kiosk .wordmark { font-size: 2.1rem; }
+    .kiosk .nav button { min-height: 52px; font-size: 1.15rem; padding: 10px 16px; }
+    .kiosk .status {
+      min-height: 15rem; padding: 28px 24px 22px; border-radius: 26px;
+    }
+    .kiosk .status.paused {
+      border-color: color-mix(in srgb, var(--plum) 40%, var(--cream-edge));
+      background: color-mix(in srgb, var(--plum-soft) 55%, var(--cream));
+    }
+    .kiosk .hero-copy { max-width: 58%; }
+    .kiosk .season-tag { font-size: .85rem; padding: 7px 14px 7px 10px; }
+    .kiosk .status .phase { font-size: 2.85rem; margin-bottom: 12px; }
+    .kiosk .status .timer { font-size: 1.55rem; margin-bottom: 14px; }
+    .kiosk .status .timer svg { width: 24px; height: 24px; }
+    .kiosk .status .sub { font-size: 1.1rem; }
+    .kiosk .status .next-line { font-size: 1.15rem; padding-top: 16px; }
+    .kiosk .pause-banner {
+      font-size: 1.2rem; padding: 16px 18px; border-radius: 16px; min-height: 56px;
+    }
+    .kiosk .strip-label { font-size: .95rem; margin: 28px 0 14px; letter-spacing: .14em; }
+    .kiosk .strip {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    @media (min-width: 700px) {
+      .kiosk .strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    .kiosk .station-tile {
+      min-height: 168px; padding: 22px 12px 18px; border-radius: 22px;
+      /* Fat-finger: avoid accidental double-taps feeling tiny */
+      touch-action: manipulation;
+    }
+    .kiosk .station-tile .tile-icon { width: 64px; height: 64px; }
+    .kiosk .station-tile .tile-icon svg { width: 34px; height: 34px; }
+    .kiosk .station-tile .tile-name { font-size: 1.35rem; }
+    .kiosk .station-tile .tile-pill { font-size: .82rem; padding: 6px 14px; }
+    .kiosk .chip { min-height: 56px; font-size: 1.15rem; padding: 14px 20px; }
+    .kiosk .stop-bar {
+      padding: 16px 18px calc(22px + env(safe-area-inset-bottom, 0px));
+    }
+    .kiosk .stop-bar .stop {
+      max-width: 876px; min-height: 88px; border-radius: 20px;
+      font-size: 1.85rem; letter-spacing: .14em; gap: 16px;
+      box-shadow:
+        0 1px 0 rgba(255,220,200,.3) inset,
+        0 6px 22px rgba(168,72,47,.5),
+        0 2px 0 rgba(58,42,31,.1);
+    }
+    .kiosk .stop-bar .stop svg { width: 26px; height: 26px; }
+    .kiosk dialog { width: min(94vw, 560px); padding: 24px; border-radius: 22px; }
+    .kiosk dialog button { min-height: 56px; font-size: 1.15rem; padding: 0 18px; }
+    .kiosk #durs .chip { min-width: 5.5rem; }
     * { box-sizing: border-box; }
     body {
       margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
@@ -548,8 +609,13 @@
       if (id.includes("drip") || title.includes("drip")) return "drip";
       return "default";
     }
+    function isPausedStatus() {
+      const s = state.status || {};
+      return !!(s.paused || s.pause || s.phase === "Paused");
+    }
     function heroTitle() {
       const s = state.status;
+      if (isPausedStatus()) return "Paused";
       const p = s.phase || "Idle";
       if (p === "Idle") return "Idle";
       if (p === "Fault") return "Fault";
@@ -774,7 +840,9 @@
       $("season-tag").textContent = seasonTagLabel();
       $("phase").innerHTML = heroTitle();
       const isWater = watering();
-      $("status").classList.toggle("watering", isWater);
+      const isPaused = isPausedStatus();
+      $("status").classList.toggle("watering", isWater && !isPaused);
+      $("status").classList.toggle("paused", isPaused);
 
       if (!isWater) state.runTrack = null;
 
@@ -800,6 +868,9 @@
         timer.classList.add("hidden");
         if (s.last_error) {
           sub.textContent = s.last_error;
+          sub.classList.remove("hidden");
+        } else if (isPaused) {
+          sub.textContent = "Schedules held · STOP still available";
           sub.classList.remove("hidden");
         } else {
           sub.textContent = "Phoenix · ready";

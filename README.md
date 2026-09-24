@@ -29,6 +29,7 @@ make build          # static; arch from uname -m (or GOARCH=arm64)
 sudo make install   # binary + copy-once config/env + unit
 sudo systemctl enable --now zanjerito
 # phone: http://<pi-lan>:8080/   (set LISTEN in /opt/zanjerito/zanjerito.env)
+# wall:  http://<pi-lan>:8080/?mode=kiosk
 ```
 
 `systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. With `DRIVER=gpiocdev`, that de-energizes valves (inactive-on-release).
@@ -44,6 +45,7 @@ git checkout fancy-vibes
 make build
 ./zanjerito -config config/config.example.json -driver=fake -listen 127.0.0.1:8080
 # phone UI: http://127.0.0.1:8080/
+# wall / kiosk density: http://127.0.0.1:8080/?mode=kiosk
 ```
 
 The older Node 14 / GraphiQL app under this tree is a **behavioral reference** only (not the production UI or Developing default). Prefer the embedded Direction D UI served by the Go binary.

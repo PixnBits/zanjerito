@@ -1,6 +1,6 @@
 # Zanjerito — UI directions (for stakeholder feedback)
 
-**Status:** Draft v0.5 · 2026-09-23 (Polish v1 Style A locked)  
+**Status:** Draft v0.6 · 2026-09-24 (Polish v1 Style A + kiosk density)  
 **Companion:** [prd.md](./prd.md) · [decisions.md](./decisions.md)  
 **Selected (decided):** **Direction D — hybrid strip** (Nick, 2026-09-12)
 
@@ -154,11 +154,25 @@ Thin list later (**D10**). **Not** this explore’s implementation scope — no 
 
 ### Kiosk density
 
-Wall / `?mode=kiosk` density remains **parked** (v1 wall, not MVP phone).
+Wall / `?mode=kiosk` density is **un-parked** (same Direction D + Style A UI — not a second app).
+
+Open `http://<pi-lan>:8080/?mode=kiosk` on the wall / `screen-mount-part` browser:
+
+| Cue | Kiosk behavior |
+|---|---|
+| Type / layout | Larger root type, wider max-width (~920px), bigger hero phase |
+| STOP | Dominant fixed footer (~88px tall) — always visible |
+| Edits | Schedules nav + `.edit` actions hidden (tucked; phone path unchanged) |
+| Stations | Fat-finger tiles (~168px min-height), larger icons/pills |
+| Glance states | Hero titles **Idle** / **Watering • {station}** / **Paused**; plum hero when paused |
+| Household leaks | Still no cron / `PT5M` / GraphiQL |
+
+Phone (`/` without `mode=kiosk`) keeps the compact Style A density.
 
 ### Suggested build order
 
 1. ~~Seasonal program cards + schedule editor UI~~ (landed — PR #19)
-2. CSS/UI polish implementing **Polish v1 Style A** (next code PR; this doc is the contract)
-3. Run history thin list after that
-4. Webpage pause (rain/mowing) when separately green-lit
+2. ~~CSS/UI polish implementing **Polish v1 Style A**~~ (landed — PR #21)
+3. ~~Kiosk / wall density (`?mode=kiosk`)~~ (this PR)
+4. Run history thin list later (**D10** — out of scope here)
+5. Webpage pause (rain/mowing) when separately green-lit
