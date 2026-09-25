@@ -336,12 +336,30 @@
       box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 8px rgba(58,42,31,.05);
     }
     .home-actions .pause-open:active { background: var(--cream-edge); }
-    .pause-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .pause-chips { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
     .pause-chips button {
-      min-height: 48px; border-radius: 12px; border: 1px solid var(--cream-edge);
-      background: var(--cream); color: var(--ink); padding: 0 14px; font-size: 1rem; font-weight: 600;
+      width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--cream-edge);
+      background: var(--cream); color: var(--ink); padding: 10px 14px; font-size: 1rem; font-weight: 600;
+      text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
     }
-    .pause-chips button:active { background: var(--plum-soft); border-color: var(--plum); color: var(--plum); }
+    .pause-chips button:active, .pause-chips button.active {
+      background: var(--plum-soft); border-color: var(--plum); color: var(--plum);
+    }
+    .pause-chips .pause-hint { font-size: .78rem; font-weight: 500; color: var(--muted); }
+    .pause-stepper { margin-top: 12px; }
+    .pause-stepper-row { display: flex; align-items: center; justify-content: center; gap: 14px; }
+    #pause-days-minus, #pause-days-plus {
+      min-width: 48px; min-height: 48px; width: 48px; height: 48px; padding: 0;
+      border-radius: 50%; border: 1px solid var(--cream-edge);
+      background: var(--cream); color: var(--plum); font-size: 1.35rem; font-weight: 700;
+    }
+    #pause-days-minus:disabled, #pause-days-plus:disabled { opacity: .4; }
+    #pause-days-value {
+      font-family: var(--serif); font-size: 1.35rem; font-weight: 700;
+      min-width: 5.5rem; text-align: center;
+    }
+    .pause-stepper-hint { margin: 8px 0 0; text-align: center; color: var(--muted); font-size: .85rem; }
+    #pause-days-go { width: 100%; margin-top: 12px; min-height: 48px; border-radius: 12px; }
   </style>
 </head>
 <body>
@@ -475,7 +493,37 @@
   <dialog id="pause-dlg">
     <h1 style="margin-top:0;font-family:var(--serif);font-size:1.35rem">Pause for rain</h1>
     <p style="margin:0;color:var(--muted);font-size:.95rem">Don&rsquo;t water for a while. Schedules skip; manual runs stay blocked until you Resume. STOP still only cancels a live run.</p>
-    <div class="pause-chips" id="pause-chips"></div>
+    <div class="pause-chips" id="pause-chips">
+      <button type="button" data-pause="tomorrow">
+        <span>Until tomorrow morning</span>
+        <span class="pause-hint" data-hint-days="1">Resumes before the first program</span>
+      </button>
+      <button type="button" data-pause="days" data-days="2">
+        <span>2 days</span>
+        <span class="pause-hint" data-hint-days="2">Resumes in 2 days, in the morning</span>
+      </button>
+      <button type="button" data-pause="days" data-days="7">
+        <span>1 week</span>
+        <span class="pause-hint" data-hint-days="7">Resumes in a week, in the morning</span>
+      </button>
+      <button type="button" data-pause="indefinite">
+        <span>Until further notice</span>
+        <span class="pause-hint">Until you tap Resume</span>
+      </button>
+      <button type="button" id="pause-pick-days" data-pause="pick">
+        <span>Pick days…</span>
+        <span class="pause-hint">Choose 1 to 14 days</span>
+      </button>
+    </div>
+    <div id="pause-stepper" class="pause-stepper hidden">
+      <div class="pause-stepper-row">
+        <button type="button" id="pause-days-minus" aria-label="Fewer days">−</button>
+        <span id="pause-days-value">3 days</span>
+        <button type="button" id="pause-days-plus" aria-label="More days">+</button>
+      </div>
+      <p class="pause-stepper-hint" id="pause-days-hint">Resumes in 3 days, in the morning</p>
+      <button type="button" class="go" id="pause-days-go">Pause 3 days</button>
+    </div>
     <menu>
       <button type="button" class="ghost" id="pause-cancel">Cancel</button>
     </menu>
@@ -515,6 +563,9 @@
   <script>
     const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
     const TZ = "America/Phoenix";
+    const PAUSE_MIN_DAYS = 1;
+    const PAUSE_MAX_DAYS = 14;
+    let pauseDaysPicked = 3;
     const DROP_SVG = `<svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 2.2 C9 2.2 3.8 8.2 3.8 11.2 A5.2 5.2 0 0 0 14.2 11.2 C14.2 8.2 9 2.2 9 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.2 11.4c0 1.4 1.1 2.2 1.8 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".7"/></svg>`;
     const ICONS = {
       west: `<svg viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M13 3.5v2.2M13 20.3v2.2M3.5 13h2.2M20.3 13h2.2M6.2 6.2l1.6 1.6M18.2 18.2l1.6 1.6M18.2 7.8l1.6-1.6M6.2 19.8l1.6-1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
@@ -551,6 +602,7 @@
         timezone: d.timezone || d.Timezone || TZ,
         paused: !!(d.paused === true || d.paused === "true" || d.pause === true),
         paused_until: d.paused_until ?? d.PausedUntil ?? null,
+        paused_label: d.paused_label ?? d.PausedLabel ?? "",
         reason: d.reason || d.Reason || "",
       };
     }
@@ -609,16 +661,26 @@
       return "Watering";
     }
     function pauseUntilLabel() {
-      const u = state.status && state.status.paused_until;
-      if (!u) return "until further notice";
+      const s = state.status || {};
+      if (s.paused_label) return s.paused_label;
+      const u = s.paused_until;
+      if (!u) return "Paused until further notice";
       try {
         const d = new Date(u);
-        if (Number.isNaN(d.getTime())) return "until further notice";
-        const fmt = new Intl.DateTimeFormat("en-US", {
-          timeZone: TZ, hour: "numeric", minute: "2-digit", month: "short", day: "numeric",
-        });
-        return "until " + fmt.format(d);
-      } catch { return "until further notice"; }
+        if (Number.isNaN(d.getTime())) return "Paused until further notice";
+        const within6 = (d.getTime() - Date.now()) <= 6 * 24 * 60 * 60 * 1000;
+        const opts = {
+          timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit", hour12: true,
+        };
+        if (!within6) { opts.month = "short"; opts.day = "numeric"; }
+        const map = {};
+        for (const p of new Intl.DateTimeFormat("en-US", opts).formatToParts(d)) {
+          if (p.type !== "literal") map[p.type] = p.value;
+        }
+        const time = `${map.hour}:${map.minute} ${map.dayPeriod}`;
+        if (within6) return "Paused until " + map.weekday + " " + time;
+        return "Paused until " + map.weekday + " " + map.month + " " + Number(map.day) + ", " + time;
+      } catch { return "Paused until further notice"; }
     }
     function seasonTagLabel() {
       const month = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "numeric" }).format(new Date()));
@@ -756,8 +818,7 @@
       }
       banner.hidden = false;
       banner.classList.add("visible");
-      const why = (state.status.reason || "rain").trim() || "rain";
-      $("pause-msg").textContent = "Paused for " + why + " — " + pauseUntilLabel() + ". Schedules held. STOP still cancels a live run.";
+      $("pause-msg").textContent = pauseUntilLabel() + " · schedules held";
       if (openBtn) openBtn.classList.add("hidden");
     }
     /** Infer active itinerary + remaining for timer / Next-station. */
@@ -864,7 +925,8 @@
           sub.textContent = s.last_error;
           sub.classList.remove("hidden");
         } else if (isPaused()) {
-          sub.textContent = "Phoenix · paused " + pauseUntilLabel();
+          const lab = pauseUntilLabel();
+          sub.textContent = "Phoenix · " + lab.charAt(0).toLowerCase() + lab.slice(1);
           sub.classList.remove("hidden");
         } else {
           sub.textContent = "Phoenix · ready";
@@ -1145,22 +1207,37 @@
         .then(() => loadStatus())
         .catch((e) => alert(e.message));
     });
+    function pauseDaysPhrase(n) {
+      return n === 1 ? "1 day" : n + " days";
+    }
+    /** "Sat" for the local calendar day N days from today (Phoenix has no DST). */
+    function pauseWeekdayIn(n) {
+      return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" })
+        .format(new Date(Date.now() + n * 24 * 60 * 60 * 1000));
+    }
+    function pauseResumeHint(n) {
+      if (n === 1) return "Resumes " + pauseWeekdayIn(1) + " morning, before the first program";
+      if (n === 7) return "Resumes next " + pauseWeekdayIn(7) + " morning";
+      return "Resumes " + pauseWeekdayIn(n) + " morning";
+    }
+    function syncPauseStepper() {
+      if (pauseDaysPicked < PAUSE_MIN_DAYS) pauseDaysPicked = PAUSE_MIN_DAYS;
+      if (pauseDaysPicked > PAUSE_MAX_DAYS) pauseDaysPicked = PAUSE_MAX_DAYS;
+      const phrase = pauseDaysPhrase(pauseDaysPicked);
+      $("pause-days-value").textContent = phrase;
+      $("pause-days-go").textContent = "Pause " + phrase;
+      $("pause-days-hint").textContent = pauseResumeHint(pauseDaysPicked);
+      $("pause-days-minus").disabled = pauseDaysPicked <= PAUSE_MIN_DAYS;
+      $("pause-days-plus").disabled = pauseDaysPicked >= PAUSE_MAX_DAYS;
+    }
     function openPauseSheet() {
-      const chips = $("pause-chips");
-      chips.innerHTML = "";
-      const opts = [
-        { label: "Until further notice", body: { indefinite: true, reason: "rain" } },
-        { label: "5 min", body: { duration_sec: 300, reason: "rain" } },
-        { label: "30 min", body: { duration_sec: 1800, reason: "rain" } },
-        { label: "1 hour", body: { duration_sec: 3600, reason: "rain" } },
-      ];
-      opts.forEach((o) => {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = o.label;
-        b.addEventListener("click", () => setPause(o.body));
-        chips.appendChild(b);
+      pauseDaysPicked = 3;
+      $("pause-stepper").classList.add("hidden");
+      $("pause-chips").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+      $("pause-chips").querySelectorAll("[data-hint-days]").forEach((h) => {
+        h.textContent = pauseResumeHint(Number(h.dataset.hintDays));
       });
+      syncPauseStepper();
       $("pause-dlg").showModal();
     }
     async function setPause(body) {
@@ -1177,6 +1254,33 @@
       await j("/api/pause", { method: "DELETE" });
       await loadStatus();
     }
+    $("pause-chips").addEventListener("click", (ev) => {
+      const b = ev.target.closest("button");
+      if (!b || !$("pause-chips").contains(b)) return;
+      const kind = b.dataset.pause;
+      if (kind === "pick") {
+        $("pause-chips").querySelectorAll("button").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        $("pause-stepper").classList.remove("hidden");
+        return;
+      }
+      let body = null;
+      if (kind === "tomorrow") body = { until: "tomorrow_morning", reason: "rain" };
+      else if (kind === "days") body = { days: Number(b.dataset.days), reason: "rain" };
+      else if (kind === "indefinite") body = { indefinite: true, reason: "rain" };
+      if (body) setPause(body).catch((e) => alert(e.message));
+    });
+    $("pause-days-minus").addEventListener("click", () => {
+      pauseDaysPicked -= 1;
+      syncPauseStepper();
+    });
+    $("pause-days-plus").addEventListener("click", () => {
+      pauseDaysPicked += 1;
+      syncPauseStepper();
+    });
+    $("pause-days-go").addEventListener("click", () => {
+      setPause({ days: pauseDaysPicked, reason: "rain" }).catch((e) => alert(e.message));
+    });
     $("pause-open").addEventListener("click", openPauseSheet);
     $("pause-cancel").addEventListener("click", () => $("pause-dlg").close());
     $("pause-resume").addEventListener("click", () => resumePause().catch((e) => alert(e.message)));
