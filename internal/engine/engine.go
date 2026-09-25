@@ -17,6 +17,7 @@ var (
 	ErrUnknownStation  = errors.New("engine: unknown station")
 	ErrDurationTooLong = errors.New("engine: duration exceeds max_on_sec")
 	ErrFaulted         = errors.New("engine: faulted")
+	ErrPaused          = errors.New("engine: paused — watering held")
 )
 
 // Phase is the high-level state machine.
@@ -56,6 +57,11 @@ type Engine struct {
 	lastErr error
 	running bool
 	cancel  context.CancelFunc
+
+	// Webpage pause ("don't water for a while") — orthogonal to Phase; Idle while paused.
+	paused      bool
+	pausedUntil *time.Time // nil = until further notice when paused
+	pauseReason string
 }
 
 // New sets up GPIO lines from config. Driver must not be used elsewhere.
@@ -98,6 +104,65 @@ func (e *Engine) Status() Status {
 		}
 	}
 	return st
+}
+
+// SetPause arms watering hold. until==nil means until further notice.
+// Does not Stop(); caller cancels any active run separately.
+func (e *Engine) SetPause(until *time.Time, reason string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.paused = true
+	if until != nil {
+		u := until.UTC()
+		e.pausedUntil = &u
+	} else {
+		e.pausedUntil = nil
+	}
+	e.pauseReason = reason
+}
+
+// ClearPause resumes watering (schedules + manual). Idempotent.
+func (e *Engine) ClearPause() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.paused = false
+	e.pausedUntil = nil
+	e.pauseReason = ""
+}
+
+// IsPaused reports whether watering is held, auto-expiring timed pauses.
+func (e *Engine) IsPaused(now time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.isPausedLocked(now)
+}
+
+func (e *Engine) isPausedLocked(now time.Time) bool {
+	if !e.paused {
+		return false
+	}
+	if e.pausedUntil != nil && !e.pausedUntil.After(now) {
+		e.paused = false
+		e.pausedUntil = nil
+		e.pauseReason = ""
+		return false
+	}
+	return true
+}
+
+// PauseSnapshot returns pause fields after expire check.
+func (e *Engine) PauseSnapshot(now time.Time) (paused bool, until *time.Time, reason string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.isPausedLocked(now) {
+		return false, nil, ""
+	}
+	var u *time.Time
+	if e.pausedUntil != nil {
+		cp := *e.pausedUntil
+		u = &cp
+	}
+	return true, u, e.pauseReason
 }
 
 // ApplyConfig replaces config only when Idle (reject while watering).
@@ -157,6 +222,10 @@ func (e *Engine) RunItinerary(ctx context.Context, steps []Step) error {
 	if e.phase == PhaseFault {
 		e.mu.Unlock()
 		return ErrFaulted
+	}
+	if e.isPausedLocked(time.Now()) {
+		e.mu.Unlock()
+		return ErrPaused
 	}
 	for _, s := range steps {
 		if !e.knownStation(s.StationID) {

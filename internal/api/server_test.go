@@ -229,3 +229,130 @@ func TestEventsSSE(t *testing.T) {
 		t.Fatalf("sse body %q", body)
 	}
 }
+
+func TestPauseTimedIndefiniteResumeAndStatus(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
+	var st map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["paused"] != false {
+		t.Fatalf("want paused false, got %v", st["paused"])
+	}
+	if st["paused_until"] != nil {
+		t.Fatalf("paused_until %v", st["paused_until"])
+	}
+
+	rr = doJSON(t, s, http.MethodPost, "/api/pause", map[string]any{"duration_sec": 120, "reason": "mow"})
+	if rr.Code != 200 {
+		t.Fatalf("timed pause %d %s", rr.Code, rr.Body.String())
+	}
+	rr = doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["paused"] != true {
+		t.Fatalf("paused %v", st["paused"])
+	}
+	if st["paused_until"] == nil || st["paused_until"] == "" {
+		t.Fatal("want paused_until RFC3339")
+	}
+	if st["reason"] != "mow" {
+		t.Fatalf("reason %v", st["reason"])
+	}
+
+	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "paused") {
+		t.Fatalf("manual run while paused want 409, got %d %s", rr.Code, rr.Body.String())
+	}
+
+	rr = doJSON(t, s, http.MethodDelete, "/api/pause", nil)
+	if rr.Code != 200 {
+		t.Fatalf("resume %d %s", rr.Code, rr.Body.String())
+	}
+	rr = doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["paused"] != false {
+		t.Fatalf("after resume paused=%v", st["paused"])
+	}
+
+	rr = doJSON(t, s, http.MethodPost, "/api/pause", map[string]any{"indefinite": true})
+	if rr.Code != 200 {
+		t.Fatalf("indefinite %d %s", rr.Code, rr.Body.String())
+	}
+	rr = doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["paused"] != true {
+		t.Fatal("indefinite paused")
+	}
+	if st["paused_until"] != nil {
+		t.Fatalf("indefinite until must be null, got %v", st["paused_until"])
+	}
+
+	rr = doJSON(t, s, http.MethodPost, "/api/pause/resume", nil)
+	if rr.Code != 200 {
+		t.Fatalf("resume alias %d", rr.Code)
+	}
+}
+
+func TestPauseCancelsActiveRunWithoutLeavingPausedOnStop(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 5})
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("run %d %s", rr.Code, rr.Body.String())
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if s.Eng.Status().Phase != engine.PhaseIdle {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rr = doJSON(t, s, http.MethodPost, "/api/pause", map[string]any{"duration_sec": 60})
+	if rr.Code != 200 {
+		t.Fatalf("pause %d %s", rr.Code, rr.Body.String())
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if s.Eng.Status().Phase == engine.PhaseIdle {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if s.Eng.Status().Phase != engine.PhaseIdle {
+		t.Fatalf("pause should cancel run, phase=%s", s.Eng.Status().Phase)
+	}
+	if !s.Eng.IsPaused(time.Now()) {
+		t.Fatal("should be paused")
+	}
+	// STOP while Idle+paused: cancel only, leave pause armed
+	rr = doJSON(t, s, http.MethodPost, "/api/run/cancel", nil)
+	if rr.Code != 200 {
+		t.Fatalf("stop %d", rr.Code)
+	}
+	if !s.Eng.IsPaused(time.Now()) {
+		t.Fatal("STOP must not clear pause")
+	}
+}
+
+func TestPauseAutoExpireAPI(t *testing.T) {
+	s := newTestServer(t)
+	past := time.Now().Add(-2 * time.Second)
+	s.Eng.SetPause(&past, "old")
+	if err := store.SavePause(s.Path, store.PauseState{Active: true, Until: &past, Reason: "old"}); err != nil {
+		t.Fatal(err)
+	}
+	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
+	var st map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["paused"] != false {
+		t.Fatalf("expired should report paused=false, got %v", st)
+	}
+}

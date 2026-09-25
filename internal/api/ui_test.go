@@ -22,6 +22,7 @@ func TestUIHomeEmbedded(t *testing.T) {
 		"Out of season", "Year-round", "starts_on", "ends_on", "Duplicate", "sched-dlg", "collide-warn",
 		// Polish v1 Style A chrome
 		"wordmark", "--sand", "--terracotta", "--teal", "station-tile", "desert-art", "+ Add program", "stop-bar",
+		"Pause for rain", "pause-dlg", "pause-resume", "--plum",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
