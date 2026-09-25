@@ -58,10 +58,14 @@ type PauseView struct {
 }
 
 // View converts PauseState to API fields (paused_until null when indefinite or inactive).
-func (p PauseState) View() PauseView {
+// loc is used to format paused_until; nil means UTC.
+func (p PauseState) View(loc *time.Location) PauseView {
 	v := PauseView{Paused: p.Active, Reason: p.Reason}
 	if p.Active && p.Until != nil {
-		s := p.Until.UTC().Format(time.RFC3339)
+		if loc == nil {
+			loc = time.UTC
+		}
+		s := p.Until.In(loc).Format(time.RFC3339)
 		v.PausedUntil = &s
 	}
 	return v

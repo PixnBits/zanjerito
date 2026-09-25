@@ -23,6 +23,9 @@ func TestUIHomeEmbedded(t *testing.T) {
 		// Polish v1 Style A chrome
 		"wordmark", "--sand", "--terracotta", "--teal", "station-tile", "desert-art", "+ Add program", "stop-bar",
 		"Pause for rain", "pause-dlg", "pause-resume", "--plum",
+		"Until tomorrow morning", "2 days", "1 week", "Until further notice", "Pick days…",
+		"pause-stepper", "pause-days-minus", "pause-days-plus",
+		"PAUSE_MAX_DAYS = 14", "PAUSE_MIN_DAYS = 1", "tomorrow_morning", "paused_label",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
@@ -31,6 +34,25 @@ func TestUIHomeEmbedded(t *testing.T) {
 	for _, leak := range []string{"graphql", "GraphiQL", "PT3M", "cron"} {
 		if strings.Contains(strings.ToLower(body), strings.ToLower(leak)) {
 			t.Fatalf("ui must not contain %q", leak)
+		}
+	}
+	for _, old := range []string{"5 min", "30 min"} {
+		if strings.Contains(body, old) {
+			t.Fatalf("old pause chip %q must be gone", old)
+		}
+	}
+	if strings.Contains(body, "datetime-local") {
+		t.Fatal("datetime-local input not allowed")
+	}
+	start := strings.Index(body, `id="pause-dlg"`)
+	end := strings.Index(body, `id="paused-block-dlg"`)
+	if start < 0 || end <= start {
+		t.Fatal("pause dialog bounds")
+	}
+	pauseHTML := body[start:end]
+	for _, bad := range []string{`type="date"`, `type="time"`, "datetime-local"} {
+		if strings.Contains(pauseHTML, bad) {
+			t.Fatalf("pause sheet must not contain %q", bad)
 		}
 	}
 }

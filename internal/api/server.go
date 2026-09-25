@@ -83,14 +83,36 @@ func (s *Server) load() (store.File, error) {
 	return store.Load(s.Path)
 }
 
+// location is the config timezone, then Phoenix, then UTC.
+func (s *Server) location() *time.Location {
+	tz := schedule.Phoenix
+	if f, err := store.Load(s.Path); err == nil && f.Timezone != "" {
+		tz = f.Timezone
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc, err = time.LoadLocation(schedule.Phoenix)
+		if err != nil {
+			return time.UTC
+		}
+	}
+	return loc
+}
+
+func (s *Server) pauseAPI(now time.Time) (loc *time.Location, paused bool, untilStr any, label, reason string) {
+	loc = s.location()
+	paused, until, reason := s.Eng.PauseSnapshot(now)
+	label = schedule.PauseLabel(paused, until, now, loc)
+	if until != nil {
+		untilStr = until.In(loc).Format(time.RFC3339)
+	}
+	return loc, paused, untilStr, label, reason
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	st := s.Eng.Status()
-	loc, err := time.LoadLocation(schedule.Phoenix)
-	if err != nil {
-		loc = time.UTC
-	}
 	now := time.Now()
-	paused, until, reason := s.Eng.PauseSnapshot(now)
+	loc, paused, untilStr, label, reason := s.pauseAPI(now)
 	// Persist auto-expire so disk matches memory after timed pause ends.
 	if !paused {
 		if p, err := store.LoadPause(s.Path, now); err == nil && p.Active {
@@ -99,18 +121,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 	out := map[string]any{
 		"now":             now.In(loc).Format(time.RFC3339),
-		"timezone":        schedule.Phoenix,
+		"timezone":        loc.String(),
 		"phase":           st.Phase,
 		"current_station": st.CurrentStation,
 		"stations_on":     st.StationsOn,
 		"last_error":      st.LastError,
 		"lockout":         false,
 		"paused":          paused,
-		"paused_until":    nil,
+		"paused_until":    untilStr,
+		"paused_label":    label,
 		"reason":          reason,
-	}
-	if until != nil {
-		out["paused_until"] = until.Format(time.RFC3339)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -370,18 +390,17 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 func writeStatusEvent(w http.ResponseWriter, fl http.Flusher, s *Server) {
 	st := s.Eng.Status()
-	paused, until, reason := s.Eng.PauseSnapshot(time.Now())
+	now := time.Now()
+	_, paused, untilStr, label, reason := s.pauseAPI(now)
 	payload := map[string]any{
-		"Phase":           st.Phase,
-		"CurrentStation":  st.CurrentStation,
-		"StationsOn":      st.StationsOn,
-		"LastError":       st.LastError,
-		"paused":          paused,
-		"paused_until":    nil,
-		"reason":          reason,
-	}
-	if until != nil {
-		payload["paused_until"] = until.Format(time.RFC3339)
+		"Phase":          st.Phase,
+		"CurrentStation": st.CurrentStation,
+		"StationsOn":     st.StationsOn,
+		"LastError":      st.LastError,
+		"paused":         paused,
+		"paused_until":   untilStr,
+		"paused_label":   label,
+		"reason":         reason,
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -394,6 +413,7 @@ func writeStatusEvent(w http.ResponseWriter, fl http.Flusher, s *Server) {
 func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DurationSec *int   `json:"duration_sec"`
+		Days        *int   `json:"days"`
 		Until       string `json:"until"`
 		Indefinite  bool   `json:"indefinite"`
 		Reason      string `json:"reason"`
@@ -405,29 +425,64 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	n := 0
+	if body.DurationSec != nil {
+		n++
+	}
+	if body.Days != nil {
+		n++
+	}
+	if body.Until != "" {
+		n++
+	}
+	if body.Indefinite {
+		n++
+	}
+	if n > 1 {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("choose one of duration_sec, days, until, indefinite"))
+		return
+	}
+
 	now := time.Now()
+	loc := s.location()
+	var schedules []store.Schedule
+	if f, err := store.Load(s.Path); err == nil {
+		schedules = f.Schedules
+	}
+
 	var until *time.Time
 	switch {
-	case body.Indefinite || (body.DurationSec == nil && body.Until == ""):
-		until = nil
 	case body.DurationSec != nil:
 		if *body.DurationSec <= 0 {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("duration_sec must be positive"))
 			return
 		}
-		u := now.Add(time.Duration(*body.DurationSec) * time.Second)
+		u := now.Add(time.Duration(*body.DurationSec) * time.Second).In(loc)
+		until = &u
+	case body.Days != nil:
+		if *body.Days < schedule.MinPauseDays || *body.Days > schedule.MaxPauseDays {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("days must be between 1 and 14"))
+			return
+		}
+		u := schedule.PauseUntilDays(schedules, now, loc, *body.Days)
 		until = &u
 	case body.Until != "":
-		u, err := time.Parse(time.RFC3339, body.Until)
-		if err != nil {
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("until must be RFC3339: %w", err))
-			return
+		if body.Until == "tomorrow_morning" {
+			u := schedule.PauseUntilDays(schedules, now, loc, 1)
+			until = &u
+		} else {
+			u, err := time.Parse(time.RFC3339, body.Until)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("until must be RFC3339: %w", err))
+				return
+			}
+			if !u.After(now) {
+				writeErr(w, http.StatusBadRequest, fmt.Errorf("until must be in the future"))
+				return
+			}
+			u = u.In(loc)
+			until = &u
 		}
-		if !u.After(now) {
-			writeErr(w, http.StatusBadRequest, fmt.Errorf("until must be in the future"))
-			return
-		}
-		until = &u
 	default:
 		until = nil
 	}
@@ -457,15 +512,13 @@ func (s *Server) handlePauseClear(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) writePauseStatus(w http.ResponseWriter) {
 	now := time.Now()
-	paused, until, reason := s.Eng.PauseSnapshot(now)
+	_, paused, untilStr, label, reason := s.pauseAPI(now)
 	out := map[string]any{
 		"paused":       paused,
-		"paused_until": nil,
+		"paused_until": untilStr,
+		"paused_label": label,
 		"reason":       reason,
 		"phase":        s.Eng.Status().Phase,
-	}
-	if until != nil {
-		out["paused_until"] = until.Format(time.RFC3339)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
