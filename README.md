@@ -33,6 +33,8 @@ sudo systemctl enable --now zanjerito
 
 `systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. With `DRIVER=gpiocdev`, that de-energizes valves (inactive-on-release).
 
+Optional wall Chromium kiosk (`deploy/zanjerito-kiosk.service`, `WantedBy=graphical.target`) is documented in [docs/deploy.md](docs/deploy.md) — opt-in only; headless API-only Pis stay unchanged. Wall UI density: `http://<pi-lan>:8080/?mode=kiosk`.
+
 ## Developing
 
 Primary path is the Go binary (same as production):

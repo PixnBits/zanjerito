@@ -1,0 +1,36 @@
+# Optional wall / screen-mount Chromium kiosk.
+# Does NOT start with zanjerito.service — headless API-only Pis stay fine.
+# WantedBy=graphical.target so multi-user (no display) never pulls this in.
+#
+# Prereqs: desktop/session on the Pi (DISPLAY), chromium installed, zanjerito
+# already serving the LAN UI. Edit Environment= below to match LAN LISTEN.
+#
+# Install (opt-in, not part of default make install):
+#   sudo install -m 644 deploy/zanjerito-kiosk.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now zanjerito-kiosk
+#
+# Disable / remove without touching the irrigation daemon:
+#   sudo systemctl disable --now zanjerito-kiosk
+
+[Unit]
+Description=Zanjerito Chromium kiosk (optional wall UI)
+After=network-online.target zanjerito.service graphical.target
+Wants=network-online.target
+# Soft ordering only — do not Require= zanjerito (API may already be up; kiosk is optional)
+
+[Service]
+Type=simple
+# Run as the desktop user that owns the local X/Wayland session.
+User=pi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+# LAN UI with wall density. Override with drop-in if LISTEN differs.
+Environment=KIOSK_URL=http://192.168.5.51:8080/?mode=kiosk
+# Prefer chromium, fall back handled by ExecStart wrapper in docs if needed.
+ExecStart=/usr/bin/chromium-browser --kiosk --noerrdialogs --disable-infobars --check-for-update-interval=31536000 --disable-session-crashed-bubble --app=${KIOSK_URL}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
