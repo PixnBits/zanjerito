@@ -37,9 +37,10 @@ sudo systemctl enable --now zanjerito
 
 Open the controller UI from a phone on the home Wi‑Fi (LAN only): `http://<pi>:8080`.
 
-**Android / Pixel (Chrome), the primary phone:** open `http://<pi>:8080` in Chrome → menu ⋮ → **Add to Home screen**.
+**Android / Pixel (Chrome), the primary phone:** open `http://<pi>:8080` in Chrome → menu ⋮ → **Install and create shortcut** (older Chrome: **Add to Home screen**) → **Create shortcut**.
 
-- Over plain `http` on the home Wi‑Fi, Chrome adds a **home-screen shortcut that opens in a browser tab**. It is not a full-screen standalone app, and Chrome won't offer "Install app".
+- Menu wording varies by Chrome version.
+- Over plain `http` on the home Wi‑Fi, Chrome adds a **home-screen shortcut that opens in a browser tab**. It is not a full-screen standalone app, and over http you only get the shortcut option, not a standalone install.
 - A true standalone install on Android needs HTTPS (a secure context, which also lets the service worker register). That is a separate decision and not part of this setup.
 
 **iPhone (Safari):** open `http://<pi>:8080` in Safari → Share → **Add to Home Screen**. iOS opens it full-screen (standalone) even over plain `http`, via `apple-mobile-web-app-capable`.

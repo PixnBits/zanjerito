@@ -610,6 +610,8 @@
       stations: [], schedules: [], pick: null, kiosk: false,
       edit: { id: null, isNew: false },
       reachable: true,
+      stationsLoaded: false,
+      schedulesLoaded: false,
       // Client run track — API has no remaining_seconds / ends_at
       runTrack: null, // { steps:[{station_id,minutes}], startedAt, endsAt, source }
     };
@@ -1394,11 +1396,26 @@
       const d = await j("/api/stations");
       state.stations = d.stations || [];
       paintStations();
+      state.stationsLoaded = true;
     }
     async function loadSchedules() {
       const d = await j("/api/schedules");
       state.schedules = d.schedules || [];
       paintSchedules();
+      state.schedulesLoaded = true;
+    }
+    let listsInFlight = null;
+    function recoverLists(force) {
+      if (listsInFlight) return listsInFlight;
+      const jobs = [];
+      if (force || !state.stationsLoaded) jobs.push(loadStations());
+      if (force || !state.schedulesLoaded) jobs.push(loadSchedules());
+      if (!jobs.length) return Promise.resolve();
+      listsInFlight = Promise.allSettled(jobs).finally(() => {
+        listsInFlight = null;
+        applyReachableUI();
+      });
+      return listsInFlight;
     }
     async function loadStatus() {
       const ac = new AbortController();
@@ -1408,8 +1425,10 @@
         if (!r.ok) throw new Error("status " + r.status);
         const d = await r.json();
         state.status = normalizeStatus(d);
+        const wasDown = state.reachable === false;
         state.reachable = true;
         paintStatus();
+        if (wasDown || !state.stationsLoaded || !state.schedulesLoaded) recoverLists(wasDown);
       } catch (e) {
         state.reachable = false;
         paintStatus();
@@ -1435,8 +1454,7 @@
       navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
     }
     loadStatus();
-    loadStations();
-    loadSchedules();
+    recoverLists();
     hookSSE();
     setInterval(loadStatus, 4000);
     // Tick relative timer while watering

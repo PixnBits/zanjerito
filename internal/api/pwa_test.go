@@ -150,6 +150,30 @@ func TestPWAHomeHTML(t *testing.T) {
 	}
 }
 
+func TestPWAListRecovery(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/", nil)
+	if rr.Code != 200 {
+		t.Fatalf("GET / %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, need := range []string{
+		"function recoverLists",
+		"listsInFlight",
+		"stationsLoaded",
+		"schedulesLoaded",
+		"recoverLists(wasDown)",
+		"recoverLists();",
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("ui missing %q", need)
+		}
+	}
+	if strings.Contains(body, "loadStations();\n    loadSchedules();") {
+		t.Fatal("startup must use recoverLists(), not a bare loadStations()/loadSchedules() pair")
+	}
+}
+
 func TestPWAStatusUnchanged(t *testing.T) {
 	s := newTestServer(t)
 	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
