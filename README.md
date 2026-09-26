@@ -33,6 +33,22 @@ sudo systemctl enable --now zanjerito
 
 `systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. With `DRIVER=gpiocdev`, that de-energizes valves (inactive-on-release).
 
+## Install on a phone
+
+The Style A UI is an installable home-screen web app on the LAN (`http://<pi>:8080`).
+
+**iPhone (Safari):** open `http://<pi>:8080` → Share → Add to Home Screen.
+
+**Android (Chrome):** open the same URL → menu ⋮ → Add to Home screen / Install app.
+
+Notes:
+
+- Works only on the home Wi‑Fi (LAN).
+- Over plain `http` the service worker does not register (browsers require a secure context), so Android Chrome may add a browser shortcut instead of a full-screen app.
+- iOS still opens standalone via `apple-mobile-web-app-capable`.
+- The app never caches controller state: `/api/*` is always live network. If the controller can't be reached it shows "Can't reach the controller".
+- Icons are generated from `internal/api/ui/icons/icon.svg` via `python3 scripts/gen-icons.py`.
+
 ## Developing
 
 Primary path is the Go binary (same as production):
