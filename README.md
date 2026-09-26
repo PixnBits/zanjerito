@@ -35,17 +35,19 @@ sudo systemctl enable --now zanjerito
 
 ## Install on a phone
 
-The Style A UI is an installable home-screen web app on the LAN (`http://<pi>:8080`).
+Open the controller UI from a phone on the home Wi‑Fi (LAN only): `http://<pi>:8080`.
 
-**iPhone (Safari):** open `http://<pi>:8080` → Share → Add to Home Screen.
+**Android / Pixel (Chrome), the primary phone:** open `http://<pi>:8080` in Chrome → menu ⋮ → **Add to Home screen**.
 
-**Android (Chrome):** open the same URL → menu ⋮ → Add to Home screen / Install app.
+- Over plain `http` on the home Wi‑Fi, Chrome adds a **home-screen shortcut that opens in a browser tab**. It is not a full-screen standalone app, and Chrome won't offer "Install app".
+- A true standalone install on Android needs HTTPS (a secure context, which also lets the service worker register). That is a separate decision and not part of this setup.
+
+**iPhone (Safari):** open `http://<pi>:8080` in Safari → Share → **Add to Home Screen**. iOS opens it full-screen (standalone) even over plain `http`, via `apple-mobile-web-app-capable`.
 
 Notes:
 
-- Works only on the home Wi‑Fi (LAN).
-- Over plain `http` the service worker does not register (browsers require a secure context), so Android Chrome may add a browser shortcut instead of a full-screen app.
-- iOS still opens standalone via `apple-mobile-web-app-capable`.
+- Works only on the home Wi‑Fi (LAN). There is no off-LAN access.
+- Over plain `http` the service worker does not register, so nothing is cached offline.
 - The app never caches controller state: `/api/*` is always live network. If the controller can't be reached it shows "Can't reach the controller".
 - Icons are generated from `internal/api/ui/icons/icon.svg` via `python3 scripts/gen-icons.py`.
 
