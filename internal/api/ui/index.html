@@ -4,6 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Zanjerito</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#e8dcc8">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="icon" type="image/png" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Zanjerito">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <style>
     :root {
       /* Polish v1 Style A — Cards + desert light */
@@ -44,7 +53,11 @@
     body {
       margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
       /* Clear fixed STOP footer so last card Edit/Duplicate stay fully above it */
-      padding: 12px 12px calc(118px + env(safe-area-inset-bottom, 0px)); max-width: 480px; margin-inline: auto;
+      padding-top: calc(12px + env(safe-area-inset-top, 0px));
+      padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+      padding-left: max(12px, env(safe-area-inset-left, 0px));
+      padding-right: max(12px, env(safe-area-inset-right, 0px));
+      max-width: 480px; margin-inline: auto;
     }
     /* Chrome: wordmark + nav */
     .chrome {
@@ -217,7 +230,10 @@
     /* STOP — fixed footer; heavier terracotta; never overlaps Edit/Duplicate */
     .stop-bar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-      padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px));
+      padding-top: 12px;
+      padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+      padding-left: max(12px, env(safe-area-inset-left, 0px));
+      padding-right: max(12px, env(safe-area-inset-right, 0px));
       background: linear-gradient(180deg, transparent 0%, var(--sand) 28%, var(--sand) 100%);
       pointer-events: none;
     }
@@ -360,6 +376,18 @@
     }
     .pause-stepper-hint { margin: 8px 0 0; text-align: center; color: var(--muted); font-size: .85rem; }
     #pause-days-go { width: 100%; margin-top: 12px; min-height: 48px; border-radius: 12px; }
+    .reach-banner {
+      background: var(--warn-bg); color: var(--warn-ink);
+      border-radius: 14px; padding: 12px 14px; margin: 0 0 12px;
+      font-size: .95rem; font-weight: 600;
+      border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    }
+    body.unreachable #page-home .status,
+    body.unreachable #stations { opacity: .45; }
+    body.unreachable #pause-open,
+    body.unreachable #pause-resume,
+    body.unreachable #ed-save { opacity: .5; }
+    .station-tile:disabled { cursor: default; }
   </style>
 </head>
 <body>
@@ -370,6 +398,9 @@
       <button type="button" id="tab-sched" class="edit">Schedules</button>
     </nav>
   </header>
+  <div id="reach-banner" class="reach-banner" role="alert" hidden>
+    Can't reach the controller — check you're on the home Wi‑Fi. Retrying…
+  </div>
   <div id="pause-banner" class="pause-banner" role="status" hidden>
     <span class="pause-msg" id="pause-msg">Paused — schedules held. STOP still available.</span>
     <button type="button" class="resume" id="pause-resume">Resume</button>
@@ -578,6 +609,9 @@
       status: { phase: "Idle", stations_on: [] },
       stations: [], schedules: [], pick: null, kiosk: false,
       edit: { id: null, isNew: false },
+      reachable: true,
+      stationsLoaded: false,
+      schedulesLoaded: false,
       // Client run track — API has no remaining_seconds / ends_at
       runTrack: null, // { steps:[{station_id,minutes}], startedAt, endsAt, source }
     };
@@ -892,7 +926,33 @@
       if (!next) return null;
       return shortStation(next.station_id);
     }
+    function applyReachableUI() {
+      const down = state.reachable === false;
+      document.body.classList.toggle("unreachable", down);
+      const banner = $("reach-banner");
+      if (banner) banner.hidden = !down;
+      ["pause-open", "pause-resume", "ed-save"].forEach((id) => {
+        const el = $(id);
+        if (el) el.disabled = down;
+      });
+      document.querySelectorAll("#stations .station-tile").forEach((el) => {
+        el.disabled = down;
+      });
+    }
     function paintStatus() {
+      applyReachableUI();
+      if (state.reachable === false) {
+        $("phase").textContent = "Controller unreachable";
+        $("timer").textContent = "";
+        $("timer").classList.add("hidden");
+        $("sub").textContent = "—";
+        $("sub").classList.remove("hidden");
+        $("sub").classList.remove("fault");
+        $("next-text").textContent = "—";
+        // Don't show last-known pause state as current while unreachable.
+        $("pause-banner").hidden = true; $("pause-banner").classList.remove("visible");
+        return;
+      }
       const s = state.status;
       $("season-tag").textContent = seasonTagLabel();
       $("phase").innerHTML = heroTitle();
@@ -1143,6 +1203,7 @@
       await loadSchedules();
     }
     function openRun(st) {
+      if (state.reachable === false) return;
       if (isPaused()) {
         $("paused-block-msg").textContent =
           "Paused for rain — resume before running " + shortStation(st.id) + ".";
@@ -1202,10 +1263,17 @@
     });
     $("stop").addEventListener("click", () => {
       // STOP: cancel live run only — never fold pause duration into STOP; does not Resume.
+      // Still attempt while unreachable (emergency stop).
       state.runTrack = null;
       j("/api/run/cancel", { method: "POST" })
         .then(() => loadStatus())
-        .catch((e) => alert(e.message));
+        .catch((e) => {
+          if (state.reachable === false) {
+            alert("STOP failed: can't reach the controller");
+          } else {
+            alert(e.message);
+          }
+        });
     });
     function pauseDaysPhrase(n) {
       return n === 1 ? "1 day" : n + " days";
@@ -1328,15 +1396,45 @@
       const d = await j("/api/stations");
       state.stations = d.stations || [];
       paintStations();
+      state.stationsLoaded = true;
     }
     async function loadSchedules() {
       const d = await j("/api/schedules");
       state.schedules = d.schedules || [];
       paintSchedules();
+      state.schedulesLoaded = true;
+    }
+    let listsInFlight = null;
+    function recoverLists(force) {
+      if (listsInFlight) return listsInFlight;
+      const jobs = [];
+      if (force || !state.stationsLoaded) jobs.push(loadStations());
+      if (force || !state.schedulesLoaded) jobs.push(loadSchedules());
+      if (!jobs.length) return Promise.resolve();
+      listsInFlight = Promise.allSettled(jobs).finally(() => {
+        listsInFlight = null;
+        applyReachableUI();
+      });
+      return listsInFlight;
     }
     async function loadStatus() {
-      state.status = normalizeStatus(await j("/api/status"));
-      paintStatus();
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), 5000);
+      try {
+        const r = await fetch("/api/status", { signal: ac.signal, cache: "no-store" });
+        if (!r.ok) throw new Error("status " + r.status);
+        const d = await r.json();
+        state.status = normalizeStatus(d);
+        const wasDown = state.reachable === false;
+        state.reachable = true;
+        paintStatus();
+        if (wasDown || !state.stationsLoaded || !state.schedulesLoaded) recoverLists(wasDown);
+      } catch (e) {
+        state.reachable = false;
+        paintStatus();
+      } finally {
+        clearTimeout(to);
+      }
     }
     function hookSSE() {
       try {
@@ -1344,18 +1442,23 @@
         es.addEventListener("status", (ev) => {
           try {
             state.status = normalizeStatus({ ...state.status, ...JSON.parse(ev.data) });
-            paintStatus();
+            if (state.reachable) paintStatus();
           } catch (e) {}
         });
+        es.onerror = () => { loadStatus(); };
       } catch (e) {}
     }
+    window.addEventListener("offline", () => loadStatus());
+    window.addEventListener("online", () => loadStatus());
+    if ('serviceWorker' in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    }
     loadStatus();
-    loadStations();
-    loadSchedules();
+    recoverLists();
     hookSSE();
     setInterval(loadStatus, 4000);
     // Tick relative timer while watering
-    setInterval(() => { if (watering()) paintStatus(); }, 1000);
+    setInterval(() => { if (watering() && state.reachable) paintStatus(); }, 1000);
   </script>
 </body>
 </html>

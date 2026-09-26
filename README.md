@@ -33,6 +33,25 @@ sudo systemctl enable --now zanjerito
 
 `systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. With `DRIVER=gpiocdev`, that de-energizes valves (inactive-on-release).
 
+## Install on a phone
+
+Open the controller UI from a phone on the home Wi‑Fi (LAN only): `http://<pi>:8080`.
+
+**Android / Pixel (Chrome), the primary phone:** open `http://<pi>:8080` in Chrome → menu ⋮ → **Install and create shortcut** (older Chrome: **Add to Home screen**) → **Create shortcut**.
+
+- Menu wording varies by Chrome version.
+- Over plain `http` on the home Wi‑Fi, Chrome adds a **home-screen shortcut that opens in a browser tab**. It is not a full-screen standalone app, and over http you only get the shortcut option, not a standalone install.
+- A true standalone install on Android needs HTTPS (a secure context, which also lets the service worker register). That is a separate decision and not part of this setup.
+
+**iPhone (Safari):** open `http://<pi>:8080` in Safari → Share → **Add to Home Screen**. iOS opens it full-screen (standalone) even over plain `http`, via `apple-mobile-web-app-capable`.
+
+Notes:
+
+- Works only on the home Wi‑Fi (LAN). There is no off-LAN access.
+- Over plain `http` the service worker does not register, so nothing is cached offline.
+- The app never caches controller state: `/api/*` is always live network. If the controller can't be reached it shows "Can't reach the controller".
+- Icons are generated from `internal/api/ui/icons/icon.svg` via `python3 scripts/gen-icons.py`.
+
 ## Developing
 
 Primary path is the Go binary (same as production):

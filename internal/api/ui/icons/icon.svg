@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-hidden="true">
+  <!-- Desert-light mark: teal drop over a terracotta acequia, sand/cream plate. -->
+  <rect width="512" height="512" rx="108" fill="#e8dcc8"/>
+  <rect x="36" y="36" width="440" height="440" rx="88" fill="#f7f1e6"/>
+  <path fill="#2a7a74" d="M256 140 C256 198 184 248 184 300 A72 72 0 0 0 328 300 C328 248 256 198 256 140 Z"/>
+  <rect x="158" y="368" width="196" height="32" rx="16" fill="#c45c3e"/>
+  <rect x="178" y="378" width="156" height="8" rx="4" fill="#f7f1e6" fill-opacity="0.4"/>
+</svg>

@@ -7,8 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/PixnBits/zanjerito/internal/engine"
@@ -16,7 +17,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/store"
 )
 
-//go:embed ui/*
+//go:embed ui
 var uiFS embed.FS
 
 // Server is the LAN REST+JSON+SSE surface (D5/D7). No GraphQL.
@@ -46,13 +47,60 @@ func New(e *engine.Engine, path string) *Server {
 }
 
 func mountUI(mux *http.ServeMux) {
-	sub, err := fs.Sub(uiFS, "ui")
+	mux.HandleFunc("GET /{$}", serveIndexHTML)
+	mux.HandleFunc("GET /index.html", serveIndexHTML)
+	mux.HandleFunc("GET /manifest.webmanifest", serveManifest)
+	mux.HandleFunc("GET /sw.js", serveServiceWorker)
+	mux.HandleFunc("GET /icons/{file}", serveIcon)
+}
+
+func writeUI(w http.ResponseWriter, rel, contentType string, extra map[string]string) {
+	b, err := uiFS.ReadFile("ui/" + rel)
 	if err != nil {
+		http.Error(w, "404 page not found", http.StatusNotFound)
 		return
 	}
-	h := http.FileServer(http.FS(sub))
-	mux.Handle("GET /{$}", h)
-	mux.Handle("GET /index.html", h)
+	w.Header().Set("Content-Type", contentType)
+	for k, v := range extra {
+		w.Header().Set(k, v)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
+}
+
+func serveIndexHTML(w http.ResponseWriter, _ *http.Request) {
+	writeUI(w, "index.html", "text/html; charset=utf-8", map[string]string{
+		"Cache-Control": "no-cache",
+	})
+}
+
+func serveManifest(w http.ResponseWriter, _ *http.Request) {
+	writeUI(w, "manifest.webmanifest", "application/manifest+json", nil)
+}
+
+func serveServiceWorker(w http.ResponseWriter, _ *http.Request) {
+	writeUI(w, "sw.js", "text/javascript; charset=utf-8", map[string]string{
+		"Cache-Control": "no-cache",
+	})
+}
+
+func serveIcon(w http.ResponseWriter, r *http.Request) {
+	file := r.PathValue("file")
+	if file == "" || path.Base(file) != file || strings.Contains(file, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	var ct string
+	switch strings.ToLower(path.Ext(file)) {
+	case ".png":
+		ct = "image/png"
+	case ".svg":
+		ct = "image/svg+xml"
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	writeUI(w, "icons/"+file, ct, nil)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
