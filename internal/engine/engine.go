@@ -310,9 +310,27 @@ func (e *Engine) runTagged(ctx context.Context, programID, program, kind string,
 	e.mu.Unlock()
 	end := time.Now()
 	tim.closeOpen(end)
-	rec = buildRecord(programID, program, kind, tim, started, end, OutcomeCompleted, "")
+	outcome := OutcomeCompleted
+	errStr := ""
+	if actuationRefused(e.drv) {
+		outcome = OutcomeRefused
+		errStr = "lockout driver: relays not energized"
+	}
+	rec = buildRecord(programID, program, kind, tim, started, end, outcome, errStr)
+	if outcome == OutcomeRefused {
+		for i := range rec.Stations {
+			rec.Stations[i].ActualSec = 0
+		}
+	}
 	record = true
 	return nil
+}
+
+// actuationRefused reports a driver that accepts Set but does not energize.
+// The check is not on the Stop/cancel path; phase timing is unchanged.
+func actuationRefused(drv gpio.Driver) bool {
+	r, ok := drv.(gpio.Refuser)
+	return ok && r.RefusesActuation()
 }
 
 func (e *Engine) run(ctx context.Context, steps []Step, tim *stationTimer) error {

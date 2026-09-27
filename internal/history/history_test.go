@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -304,5 +306,156 @@ func TestRecordPersistsViaWriter(t *testing.T) {
 	}
 	if got[0].Stations[0].ActualSec != 12 {
 		t.Fatalf("%+v", got[0].Stations)
+	}
+}
+
+func TestOpenRemovesStaleTemps(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.json")
+	if err := os.WriteFile(path, []byte("{\"entries\":[]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, ".history.json.tmp-interrupted")
+	if err := os.WriteFile(stale, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "pause.json")
+	if err := os.WriteFile(other, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := Open(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale temp still present: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseWithoutStartIsImmediate(t *testing.T) {
+	l, err := Open(filepath.Join(t.TempDir(), "history.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	l.Close()
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("Close without Start took %s", elapsed)
+	}
+}
+
+func TestCloseReturnsWhileWriteInFlight(t *testing.T) {
+	l, err := Open(filepath.Join(t.TempDir(), "history.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Close)
+	entered := make(chan struct{})
+	var once sync.Once
+	l.SetWriteFuncForTest(func(string, any) error {
+		once.Do(func() { close(entered) })
+		time.Sleep(5 * time.Second)
+		return nil
+	})
+	l.settle = time.Millisecond
+	l.Start(context.Background())
+	l.Record(recAt("slow", time.Now()))
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow write did not start")
+	}
+	start := time.Now()
+	l.Close()
+	if elapsed := time.Since(start); elapsed > 2500*time.Millisecond {
+		t.Fatalf("Close took %s, want ≤ 2.5s", elapsed)
+	}
+}
+
+func TestListDuringSlowWrite(t *testing.T) {
+	l, err := Open(filepath.Join(t.TempDir(), "history.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(l.Close)
+	entered := make(chan struct{})
+	var once sync.Once
+	l.SetWriteFuncForTest(func(string, any) error {
+		once.Do(func() { close(entered) })
+		time.Sleep(3 * time.Second)
+		return nil
+	})
+	l.settle = time.Millisecond
+	l.Start(context.Background())
+	l.Record(recAt("visible", time.Now()))
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow write did not start")
+	}
+	start := time.Now()
+	got := l.List(10)
+	if elapsed := time.Since(start); elapsed >= 100*time.Millisecond {
+		t.Fatalf("List took %s", elapsed)
+	}
+	if len(got) != 1 || got[0].Program != "visible" {
+		t.Fatalf("%+v", programs(got))
+	}
+}
+
+func TestSlowFirstWriteKeepsNewestSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.json")
+	base := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	l, err := Open(path, func() time.Time { return base })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	var n atomic.Int32
+	l.SetWriteFuncForTest(func(p string, v any) error {
+		if n.Add(1) == 1 {
+			time.Sleep(300 * time.Millisecond)
+		}
+		return store.AtomicWriteJSON(p, v)
+	})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		l.Append(recAt("first", base))
+	}()
+	go func() {
+		defer wg.Done()
+		l.Append(recAt("second", base.Add(time.Minute)))
+	}()
+	wg.Wait()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc diskFile
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Entries) != 2 {
+		t.Fatalf("file len %d %+v", len(doc.Entries), programs(doc.Entries))
+	}
+	got := map[string]bool{}
+	for _, e := range doc.Entries {
+		got[e.Program] = true
+	}
+	if !got["first"] || !got["second"] {
+		t.Fatalf("file missing an entry: %+v", programs(doc.Entries))
+	}
+	listed := l.List(10)
+	if len(listed) != 2 {
+		t.Fatalf("memory %+v", programs(listed))
 	}
 }

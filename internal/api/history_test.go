@@ -1,11 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -144,6 +147,86 @@ func decodeHistory(t *testing.T, b []byte) historyBody {
 		t.Fatal(err)
 	}
 	return body
+}
+
+func TestHistoryNilLogRejectsBadLimit(t *testing.T) {
+	s := newTestServer(t)
+	if s.History != nil {
+		t.Fatal("expected nil history")
+	}
+	for _, q := range []string{"abc", "0", "-1", "1.5"} {
+		rr := doJSON(t, s, http.MethodGet, "/api/history?limit="+q, nil)
+		if rr.Code != 400 {
+			t.Fatalf("limit=%s code %d %s", q, rr.Code, rr.Body.String())
+		}
+		if rr.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("limit=%s cache %q", q, rr.Header().Get("Cache-Control"))
+		}
+	}
+	rr := doJSON(t, s, http.MethodGet, "/api/history?limit=3", nil)
+	if rr.Code != 200 {
+		t.Fatalf("valid limit on nil history %d %s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("cache %q", rr.Header().Get("Cache-Control"))
+	}
+}
+
+func TestHistoryGetDuringSlowWrite(t *testing.T) {
+	s := newTestServer(t)
+	hl, err := history.Open(filepath.Join(t.TempDir(), "history.json"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(hl.Close)
+	entered := make(chan struct{})
+	var once sync.Once
+	hl.SetWriteFuncForTest(func(string, any) error {
+		once.Do(func() { close(entered) })
+		time.Sleep(3 * time.Second)
+		return nil
+	})
+	hl.Start(context.Background())
+	s.History = hl
+	hl.Record(engine.RunRecord{
+		ProgramID: "dawn",
+		Program:   "Dawn",
+		Kind:      engine.KindSchedule,
+		Outcome:   engine.OutcomeCompleted,
+		Start:     time.Now(),
+		End:       time.Now(),
+	})
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow write did not start")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/history", nil)
+	rr := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		s.ServeHTTP(rr, req)
+		close(done)
+	}()
+	start := time.Now()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("GET /api/history blocked while a history write was in flight")
+	}
+	if elapsed := time.Since(start); elapsed >= 200*time.Millisecond {
+		t.Fatalf("GET /api/history took %s", elapsed)
+	}
+	if rr.Code != 200 {
+		t.Fatalf("code %d %s", rr.Code, rr.Body.String())
+	}
+	if rr.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("cache %q", rr.Header().Get("Cache-Control"))
+	}
+	body := decodeHistory(t, rr.Body.Bytes())
+	if len(body.Entries) != 1 || body.Entries[0].Program != "Dawn" {
+		t.Fatalf("%+v", programsOf(body))
+	}
 }
 
 func programsOf(body historyBody) []string {

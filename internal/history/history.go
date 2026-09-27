@@ -13,9 +13,16 @@
 // Prune drops entries whose ended_at (or started_at when ended_at is zero)
 // is strictly older than MaxAge, then keeps the newest MaxEntries.
 // Open prunes in memory; the file shrinks on the next append.
+// Open also removes leftover atomic-write temps in the same directory
+// (".<file>.tmp-*", the store.AtomicWriteJSON pattern; best effort).
 //
 // Open does not start the writer. Call Start, then Close to flush and stop.
 // Record never blocks: it sends on a buffered channel and drops when full.
+//
+// Append copies entries under the log lock and persists that snapshot outside
+// the lock, serialized by a separate write mutex. List only takes the log lock,
+// so it stays responsive while a write is in flight. Close starts its 2s bound
+// immediately and does not wait out a stuck write.
 package history
 
 import (
@@ -24,7 +31,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PixnBits/zanjerito/internal/engine"
@@ -37,6 +46,14 @@ const (
 
 	recordBuf     = 64
 	defaultSettle = 400 * time.Millisecond
+)
+
+// life is the writer lifecycle. Own block so iota starts at 0, matching
+// atomic.Int32's zero value (not started).
+const (
+	lifeIdle int32 = iota
+	lifeRunning
+	lifeClosed
 )
 
 // Station is one step in the stored and served log.
@@ -70,13 +87,21 @@ type Log struct {
 	path    string
 	now     func() time.Time
 	entries []Entry // oldest-first
-	seq     uint64
+	seq     uint64  // bumped on each append; also the snapshot version
 
-	ch      chan engine.RunRecord
-	stop    chan struct{}
-	done    chan struct{}
-	started bool
-	shut    bool
+	// writeMu serializes disk writes. List and Close never acquire it.
+	writeMu sync.Mutex
+	written uint64 // highest seq successfully persisted; writeMu only
+	// write persists one snapshot. Nil means store.AtomicWriteJSON.
+	write func(path string, v any) error
+
+	ch   chan engine.RunRecord
+	stop chan struct{}
+	done chan struct{}
+
+	// life is idle, running, or closed-without-start. Touched only via atomics
+	// so Close can bound itself without taking mu or writeMu.
+	life atomic.Int32
 
 	startOnce sync.Once
 	closeOnce sync.Once
@@ -101,7 +126,10 @@ func Open(path string, now func() time.Time) (*Log, error) {
 		entries: []Entry{},
 		ch:      make(chan engine.RunRecord, recordBuf),
 		stop:    make(chan struct{}),
+		done:    make(chan struct{}),
+		write:   store.AtomicWriteJSON,
 	}
+	removeStaleTemps(path)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -123,6 +151,24 @@ func Open(path string, now func() time.Time) (*Log, error) {
 	return l, nil
 }
 
+// removeStaleTemps drops temps left when a write was interrupted after
+// CreateTemp and before rename. Matches store.AtomicWriteJSON:
+// "." + base + ".tmp-*". Best effort.
+func removeStaleTemps(path string) {
+	dir := filepath.Dir(path)
+	pattern := filepath.Join(dir, "."+filepath.Base(path)+".tmp-*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		log.Printf("history: temp glob %s: %v", pattern, err)
+		return
+	}
+	for _, name := range matches {
+		if err := os.Remove(name); err != nil && !os.IsNotExist(err) {
+			log.Printf("history: remove stale temp %s: %v", name, err)
+		}
+	}
+}
+
 func renameCorrupt(path string, now time.Time) {
 	dest := fmt.Sprintf("%s.corrupt-%d", path, now.UnixNano())
 	if err := os.Rename(path, dest); err != nil {
@@ -137,6 +183,21 @@ func (l *Log) clock() time.Time {
 	return l.now()
 }
 
+// SetWriteFuncForTest installs fn as the persistence function used by Append.
+// It must be called before Start. nil restores store.AtomicWriteJSON.
+// Tests use it to simulate a slow or failing disk without changing List or Close.
+func (l *Log) SetWriteFuncForTest(fn func(path string, v any) error) {
+	if l == nil {
+		return
+	}
+	if fn == nil {
+		fn = store.AtomicWriteJSON
+	}
+	l.mu.Lock()
+	l.write = fn
+	l.mu.Unlock()
+}
+
 // Start launches the single writer. It is safe to call once.
 // Cancel ctx or call Close to stop. Main passes a context that outlives Stop
 // so Close can flush the final record.
@@ -148,40 +209,31 @@ func (l *Log) Start(ctx context.Context) {
 		ctx = context.Background()
 	}
 	l.startOnce.Do(func() {
-		l.mu.Lock()
-		if l.shut {
-			l.mu.Unlock()
+		if !l.life.CompareAndSwap(lifeIdle, lifeRunning) {
 			return
 		}
-		l.started = true
-		l.done = make(chan struct{})
-		l.mu.Unlock()
 		go l.loop(ctx)
 	})
 }
 
 // Close stops the writer and flushes queued records. Safe to call once.
 // If Start was not called, Close returns immediately.
-// The wait is bounded by 2s, including a short grace for a record emitted
-// just after engine.Stop returns.
+// The wait is bounded by 2s from entry, including a short grace for a record
+// emitted just after engine.Stop returns. A disk write still in flight does
+// not extend that bound; it may be cut off on process exit.
 func (l *Log) Close() {
 	if l == nil {
 		return
 	}
 	l.closeOnce.Do(func() {
-		l.mu.Lock()
-		l.shut = true
-		started := l.started
-		done := l.done
-		l.mu.Unlock()
-		if !started {
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		if l.life.CompareAndSwap(lifeIdle, lifeClosed) {
 			return
 		}
 		close(l.stop)
-		timer := time.NewTimer(2 * time.Second)
-		defer timer.Stop()
 		select {
-		case <-done:
+		case <-l.done:
 		case <-timer.C:
 			log.Printf("history: close timed out after 2s")
 		}
@@ -271,11 +323,10 @@ func (l *Log) drain() {
 	}
 }
 
-// Append adds rec, prunes, and persists. It may do file I/O.
+// Append adds rec, prunes, and persists. It may do file I/O outside the log lock.
 // Call it from the writer goroutine or tests, not under the engine lock.
 func (l *Log) Append(rec engine.RunRecord) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	start := rec.Start
 	if start.IsZero() {
 		start = l.clock()
@@ -293,6 +344,7 @@ func (l *Log) Append(rec engine.RunRecord) {
 		})
 	}
 	l.seq++
+	ver := l.seq
 	l.entries = append(l.entries, Entry{
 		ID:        fmt.Sprintf("%d-%d", start.UnixNano(), l.seq),
 		ProgramID: rec.ProgramID,
@@ -306,9 +358,40 @@ func (l *Log) Append(rec engine.RunRecord) {
 		Reason:    rec.Reason,
 	})
 	l.prune(l.clock())
-	if err := store.AtomicWriteJSON(l.path, diskFile{Entries: l.entries}); err != nil {
-		log.Printf("history: write %s: %v", l.path, err)
+	snap := cloneEntries(l.entries)
+	path := l.path
+	write := l.write
+	l.mu.Unlock()
+
+	l.persist(path, snap, ver, write)
+}
+
+func cloneEntries(in []Entry) []Entry {
+	out := make([]Entry, len(in))
+	for i, e := range in {
+		if e.Stations != nil {
+			e.Stations = append([]Station(nil), e.Stations...)
+		}
+		out[i] = e
 	}
+	return out
+}
+
+func (l *Log) persist(path string, snap []Entry, ver uint64, write func(string, any) error) {
+	if write == nil {
+		write = store.AtomicWriteJSON
+	}
+	l.writeMu.Lock()
+	defer l.writeMu.Unlock()
+	// A newer snapshot is already on disk. Writing this one would go backwards.
+	if ver <= l.written {
+		return
+	}
+	if err := write(path, diskFile{Entries: snap}); err != nil {
+		log.Printf("history: write %s: %v", path, err)
+		return
+	}
+	l.written = ver
 }
 
 func (l *Log) prune(now time.Time) {
@@ -332,6 +415,8 @@ func (l *Log) prune(now time.Time) {
 
 // List returns up to limit entries, newest first. limit <= 0 returns all.
 // The slice and each Stations slice are copies.
+// List takes only the log lock, never the write mutex, so a slow disk write
+// does not delay readers.
 func (l *Log) List(limit int) []Entry {
 	if l == nil {
 		return []Entry{}

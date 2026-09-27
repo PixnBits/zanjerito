@@ -12,6 +12,7 @@ const (
 	OutcomeCompleted = "completed"
 	OutcomeStopped   = "stopped"
 	OutcomeSkipped   = "skipped"
+	OutcomeRefused   = "refused"
 	OutcomeError     = "error"
 )
 
@@ -33,12 +34,12 @@ type RunRecord struct {
 	Stations  []StationRun
 	Start     time.Time
 	End       time.Time
-	Outcome   string // OutcomeCompleted, OutcomeStopped, OutcomeSkipped, or OutcomeError
+	Outcome   string // OutcomeCompleted, OutcomeStopped, OutcomeSkipped, OutcomeRefused, or OutcomeError
 	Error     string
 	Reason    string
 }
 
-// RunRecorder accepts a finished or skipped run.
+// RunRecorder accepts a finished, skipped, or refused run.
 // Record must not block. The engine calls it without holding its lock,
 // after relays are off and the run is no longer marked busy.
 // Stop does not call Record.

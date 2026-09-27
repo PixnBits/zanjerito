@@ -158,7 +158,7 @@ type historyEntryJSON struct {
 	Stations  []historyStationJSON `json:"stations"`
 	StartedAt string               `json:"started_at"`
 	EndedAt   string               `json:"ended_at"`
-	Outcome   string               `json:"outcome"`
+	Outcome   string               `json:"outcome"` // completed, stopped, skipped, refused, or error
 	Error     string               `json:"error,omitempty"`
 	Reason    string               `json:"reason,omitempty"`
 }
@@ -172,15 +172,18 @@ func roundedMin(sec int) int {
 
 // handleHistory returns newest-first runs. Times are RFC3339 in the config timezone,
 // same as /api/status. Default limit is 50; values above history.MaxEntries are clamped.
+// limit is validated before the nil-log shortcut, so a server with no history log
+// still rejects a non-integer or non-positive limit. Outcomes are completed,
+// stopped, skipped, refused, or error.
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if s.History == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"entries": []historyEntryJSON{}})
-		return
-	}
 	limit, err := historyLimit(r.URL.Query().Get("limit"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if s.History == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []historyEntryJSON{}})
 		return
 	}
 	loc := s.location()

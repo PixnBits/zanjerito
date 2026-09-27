@@ -101,6 +101,53 @@ func TestRunRecordsCompletedActualNearPlanned(t *testing.T) {
 	}
 }
 
+func TestLockoutRecordsRefused(t *testing.T) {
+	cfg := testConfig(t)
+	drv := gpio.NewLockout()
+	e, err := New(cfg, drv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	rec := &capture{drv: drv}
+	e.SetRecorder(rec)
+	steps := []Step{
+		{StationID: "front-west", Duration: 1100 * time.Millisecond},
+		{StationID: "front-north", Duration: 1100 * time.Millisecond},
+	}
+	if err := e.RunItinerary(context.Background(), steps); err != nil {
+		t.Fatal(err)
+	}
+	got := rec.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("got %d records", len(got))
+	}
+	g := got[0]
+	if g.Outcome != OutcomeRefused || g.Error != "lockout driver: relays not energized" {
+		t.Fatalf("outcome=%s err=%q", g.Outcome, g.Error)
+	}
+	if len(g.Stations) != 2 {
+		t.Fatalf("%+v", g.Stations)
+	}
+	for _, st := range g.Stations {
+		if st.ActualSec != 0 {
+			t.Fatalf("actual %d on %s", st.ActualSec, st.StationID)
+		}
+	}
+	if g.Stations[0].PlannedSec != 1 || g.Stations[1].PlannedSec != 1 {
+		t.Fatalf("planned %+v", g.Stations)
+	}
+	if e.Status().Phase != PhaseIdle {
+		t.Fatalf("phase %s", e.Status().Phase)
+	}
+	st := gpio.StateForTest(drv)
+	for id, lv := range st {
+		if lv != gpio.Off {
+			t.Fatalf("%s energized under lockout", id)
+		}
+	}
+}
+
 func TestRunProgramTaggedSchedule(t *testing.T) {
 	cfg := testConfig(t)
 	e, err := New(cfg, gpio.NewFake())

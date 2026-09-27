@@ -50,4 +50,4 @@ The older Node 14 / GraphiQL app under this tree is a **behavioral reference** o
 
 ## Run history
 
-Each finished, stopped, skipped (paused), or failed run is appended to `history.json` beside the config file (same directory as `config.json` and `pause.json`). The log keeps the newest 200 entries from the last 60 days. Home shows the latest few; `GET /api/history?limit=N` returns newest-first (`limit` defaults to 50 and caps at 200).
+Each finished, stopped, skipped (paused), refused (lockout), or failed run is appended to `history.json` beside the config file (same directory as `config.json` and `pause.json`). Outcomes are `completed`, `stopped`, `skipped`, `refused`, and `error`. The log keeps the newest 200 entries from the last 60 days. Home shows the latest few; `GET /api/history?limit=N` returns newest-first (`limit` defaults to 50 and caps at 200).

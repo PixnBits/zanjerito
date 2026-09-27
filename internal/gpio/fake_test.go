@@ -59,6 +59,25 @@ func TestDualrunLogsIntentLeavesOff(t *testing.T) {
 	}
 }
 
+func TestRefuserOnlyLockout(t *testing.T) {
+	if r, ok := NewLockout().(Refuser); !ok || !r.RefusesActuation() {
+		t.Fatal("lockout should refuse actuation")
+	}
+	if r, ok := NewFake().(Refuser); !ok || r.RefusesActuation() {
+		t.Fatal("fake should not refuse actuation")
+	}
+	if r, ok := NewDualrun().(Refuser); !ok || r.RefusesActuation() {
+		t.Fatal("dualrun should not refuse actuation")
+	}
+	d, err := NewGpiocdev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.(Refuser); ok {
+		t.Fatal("gpiocdev must not implement Refuser")
+	}
+}
+
 func TestUnknownDriver(t *testing.T) {
 	if _, err := New("nope"); err == nil {
 		t.Fatal("expected error")

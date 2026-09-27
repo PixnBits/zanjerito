@@ -4,9 +4,11 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"github.com/PixnBits/zanjerito/internal/engine"
 )
@@ -92,6 +94,8 @@ func HistoryPath(configPath string) string {
 }
 
 // AtomicWriteJSON writes v as indented JSON via a temp file in the same directory, then rename.
+// After rename it fsyncs the directory so the new name survives a crash.
+// Directory sync errors from filesystems that do not support it (EINVAL and the like) are ignored.
 func AtomicWriteJSON(path string, v any) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -130,7 +134,34 @@ func AtomicWriteJSON(path string, v any) error {
 		return fmt.Errorf("store: rename: %w", err)
 	}
 	cleanup = false
+	if err := syncDir(dir); err != nil {
+		return err
+	}
 	return nil
+}
+
+// syncDir fsyncs dir after a rename. EINVAL-like errors mean this filesystem
+// cannot sync a directory; the renamed file is already in place, so those are not failures.
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("store: sync dir: %w", err)
+	}
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	if syncErr != nil && !dirSyncUnsupported(syncErr) {
+		return fmt.Errorf("store: sync dir: %w", syncErr)
+	}
+	if closeErr != nil && !dirSyncUnsupported(closeErr) {
+		return fmt.Errorf("store: sync dir: %w", closeErr)
+	}
+	return nil
+}
+
+func dirSyncUnsupported(err error) bool {
+	return errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTSUP) ||
+		errors.Is(err, syscall.EOPNOTSUPP)
 }
 
 func atomicWriteJSON(path string, v any) error {

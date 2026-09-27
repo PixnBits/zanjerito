@@ -56,6 +56,13 @@ func (d *fakeDriver) Setup(chip string, lines []Line, activeLow bool) error {
 	return nil
 }
 
+// RefusesActuation reports whether this driver will not energize relays.
+// True only for lockout. Fake actuates its shadow state. Dualrun logs intent
+// while bash still actuates, so it does not refuse.
+func (d *fakeDriver) RefusesActuation() bool {
+	return d.name == "lockout"
+}
+
 func (d *fakeDriver) Set(id string, level Level) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

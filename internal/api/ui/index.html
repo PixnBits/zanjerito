@@ -1492,7 +1492,11 @@
       const actual = (entry.stations || []).reduce((n, s) => n + (Number(s.actual_sec) || 0), 0);
       const mins = formatRunMins(actual);
       if (entry.outcome === "completed") return `${mins} · finished`;
-      if (entry.outcome === "stopped") return `Stopped after ${mins}`;
+      if (entry.outcome === "stopped") {
+        if (actual > 0 && actual < 60) return "Stopped after under a minute";
+        return `Stopped after ${mins}`;
+      }
+      if (entry.outcome === "refused") return "Refused (lockout mode)";
       if (entry.outcome === "skipped") {
         const reason = String(entry.reason || "").trim().toLowerCase();
         if (reason === "rain") return "Skipped, paused for rain";
@@ -1546,8 +1550,10 @@
     function loadHistory() {
       if (historyInFlight) return historyInFlight;
       historyInFlight = (async () => {
+        const ac = new AbortController();
+        const to = setTimeout(() => ac.abort(), 5000);
         try {
-          const d = await j("/api/history?limit=200", { cache: "no-store" });
+          const d = await j("/api/history?limit=200", { cache: "no-store", signal: ac.signal });
           if (!d || !Array.isArray(d.entries)) throw new Error("history");
           state.history = d.entries;
           state.historyLoaded = true;
@@ -1555,6 +1561,7 @@
         } catch (e) {
           state.historyError = "Couldn't load recent runs.";
         } finally {
+          clearTimeout(to);
           historyInFlight = null;
           try { paintHistory(); } catch (e) {}
         }
