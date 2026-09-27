@@ -1,0 +1,193 @@
+package rain
+
+import "time"
+
+// ActionKind is the poller's next step. Pause covers a new pause and an
+// extension (Until is never earlier than the pause already in effect).
+type ActionKind int
+
+const (
+	ActionNone ActionKind = iota
+	ActionPause
+	ActionClear
+	ActionUnavailable
+)
+
+// Action is the pure result of Decide. Until, Inches, EventAt, and LastRain
+// are set for ActionPause (and LastRain for ActionClear when known).
+// Total is the in-window sum on a fresh read, including ActionNone.
+type Action struct {
+	Kind     ActionKind
+	Until    time.Time
+	Inches   float64
+	EventAt  time.Time // first positive increment in the window (kept on extend)
+	LastRain time.Time // newest positive increment in the window
+	Total    float64
+	Error    string
+}
+
+// PauseView is the current watering hold, without I/O.
+// Source "auto" is an automatic rain pause; anything else active is manual
+// (including an empty source). Until nil while Active is indefinite.
+type PauseView struct {
+	Active   bool
+	Until    *time.Time
+	Reason   string
+	Source   string
+	Inches   float64
+	EventAt  *time.Time
+	LastRain *time.Time
+}
+
+// Memory is what survives a clear. ClearedAt is the last manual Resume.
+// LastEventRain is the newest positive increment of the last automatic event.
+type Memory struct {
+	ClearedAt     *time.Time
+	LastEventRain *time.Time
+}
+
+// Decide chooses none, pause-or-extend, clear, or unavailable.
+// Qualifying rain is an in-window increment sum at or above the trigger.
+// A new event's newest positive increment must be after ClearedAt (when set)
+// and after LastEventRain (when set). The sum still counts every in-window
+// increment, including rain from before the clear.
+// Stale or empty input returns ActionUnavailable and must not pause or clear.
+func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Memory) Action {
+	cfg = cfg.normalized()
+	if len(samples) == 0 {
+		return Action{Kind: ActionUnavailable, Error: "no samples"}
+	}
+	newest := samples[0].Time
+	for _, s := range samples[1:] {
+		if s.Time.After(newest) {
+			newest = s.Time
+		}
+	}
+	stale := time.Duration(cfg.StaleHours * float64(time.Hour))
+	if now.Sub(newest) > stale {
+		return Action{Kind: ActionUnavailable, Error: "stale rain data"}
+	}
+
+	total, lastRain, firstRain, havePos := sumWindow(samples, now, cfg)
+	base := Action{Total: total}
+	qualifying := havePos && atLeast(total, cfg.TriggerInches)
+	var until time.Time
+	if havePos {
+		days := cfg.DryDays
+		if atLeast(total, cfg.HeavyInches) {
+			days = cfg.HeavyDryDays
+		}
+		until = lastRain.Add(time.Duration(days * float64(24*time.Hour)))
+	}
+
+	// Timed automatic rain pause only. Manual (any reason), empty source,
+	// and indefinite holds are left alone.
+	auto := pause.Active && pause.Source == "auto" && pause.Reason == "rain" && pause.Until != nil
+	if pause.Active && !auto {
+		base.Kind = ActionNone
+		return base
+	}
+
+	if auto {
+		expired := !pause.Until.After(now)
+		extends := qualifying && until.After(*pause.Until)
+		if expired && !extends {
+			base.Kind = ActionClear
+			if havePos {
+				base.LastRain = lastRain
+				base.EventAt = firstRain
+			}
+			return base
+		}
+		if !qualifying {
+			base.Kind = ActionNone
+			return base
+		}
+		useUntil := *pause.Until
+		if extends && until.After(now) {
+			useUntil = until
+		}
+		inches := total
+		if pause.Inches > inches {
+			inches = pause.Inches
+		}
+		last := lastRain
+		if pause.LastRain != nil && pause.LastRain.After(last) {
+			last = *pause.LastRain
+		}
+		event := firstRain
+		if pause.EventAt != nil {
+			event = *pause.EventAt
+		}
+		changed := extends && until.After(*pause.Until)
+		if inches > pause.Inches+1e-9 {
+			changed = true
+		}
+		if pause.LastRain == nil || lastRain.After(*pause.LastRain) {
+			changed = true
+		}
+		base.Until = useUntil
+		base.Inches = inches
+		base.LastRain = last
+		base.EventAt = event
+		if !changed || !useUntil.After(now) {
+			if !useUntil.After(now) && expired {
+				base.Kind = ActionClear
+				return base
+			}
+			base.Kind = ActionNone
+			return base
+		}
+		base.Kind = ActionPause
+		return base
+	}
+
+	base.Kind = ActionNone
+	if !qualifying || !havePos || !until.After(now) {
+		return base
+	}
+	if mem.ClearedAt != nil && !lastRain.After(*mem.ClearedAt) {
+		return base
+	}
+	if mem.LastEventRain != nil && !lastRain.After(*mem.LastEventRain) {
+		return base
+	}
+	base.Kind = ActionPause
+	base.Until = until
+	base.Inches = total
+	base.LastRain = lastRain
+	base.EventAt = firstRain
+	return base
+}
+
+// sumWindow totals increments in (now-window, now]. Negatives count as 0.
+// last is the newest positive increment in that window; first is the oldest.
+func sumWindow(samples []Sample, now time.Time, cfg Config) (total float64, last, first time.Time, havePos bool) {
+	start := now.Add(-time.Duration(cfg.WindowHours * float64(time.Hour)))
+	for _, s := range samples {
+		if !s.Time.After(start) || s.Time.After(now) {
+			continue
+		}
+		inches := s.Inches
+		if inches < 0 {
+			inches = 0
+		}
+		total += inches
+		if inches > 0 {
+			if !havePos || s.Time.After(last) {
+				last = s.Time
+			}
+			if !havePos || s.Time.Before(first) {
+				first = s.Time
+			}
+			havePos = true
+		}
+	}
+	return total, last, first, havePos
+}
+
+// atLeast treats sub-nanometer float dust as equal so 0.25 compares cleanly,
+// without promoting 0.999 up to 1.0.
+func atLeast(total, threshold float64) bool {
+	return total+1e-9 >= threshold
+}

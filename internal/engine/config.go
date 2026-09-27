@@ -17,13 +17,13 @@ const (
 
 // Config is the runtime pin map + safety knobs. Persistence is internal/store (atomic JSON).
 type Config struct {
-	Chip       string          `json:"chip"`
-	ActiveLow  *bool           `json:"active_low"` // pointer: missing is invalid
-	Timezone   string          `json:"timezone"`
-	MaxOnSec   int             `json:"max_on_sec"`
+	Chip       string           `json:"chip"`
+	ActiveLow  *bool            `json:"active_low"` // pointer: missing is invalid
+	Timezone   string           `json:"timezone"`
+	MaxOnSec   int              `json:"max_on_sec"`
 	Sequencing SequencingConfig `json:"sequencing"`
-	Power      StationConfig   `json:"power"`
-	Stations   []StationConfig `json:"stations"`
+	Power      StationConfig    `json:"power"`
+	Stations   []StationConfig  `json:"stations"`
 }
 
 type SequencingConfig struct {
@@ -32,12 +32,13 @@ type SequencingConfig struct {
 }
 
 type StationConfig struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Color    string `json:"color,omitempty"`
-	BCM      int    `json:"bcm"`
-	Physical int    `json:"physical,omitempty"`
-	WiringPi int    `json:"wiringPi,omitempty"`
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	Color           string `json:"color,omitempty"`
+	BCM             int    `json:"bcm"`
+	Physical        int    `json:"physical,omitempty"`
+	WiringPi        int    `json:"wiringPi,omitempty"`
+	RainPauseExempt bool   `json:"rain_pause_exempt,omitempty"`
 }
 
 // LoadConfig reads JSON and validates Architect rules (refuse active_low missing/false).

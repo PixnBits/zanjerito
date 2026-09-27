@@ -10,10 +10,26 @@ import (
 
 // PauseState is the durable "don't water for a while" flag (sidecar JSON).
 // Active + Until==nil means until further notice. Timed pauses auto-expire on read.
+// Source empty means manual. RainClearedAt and LastRainAt are kept across expiry
+// so an automatic pause does not re-arm for the same rain.
 type PauseState struct {
-	Active bool       `json:"paused"`
-	Until  *time.Time `json:"paused_until"` // RFC3339; null = indefinite when Active
-	Reason string     `json:"reason,omitempty"`
+	Active        bool       `json:"paused"`
+	Until         *time.Time `json:"paused_until"` // RFC3339; null = indefinite when Active
+	Reason        string     `json:"reason,omitempty"`
+	Source        string     `json:"source,omitempty"` // "auto" or "manual"; empty = manual
+	RainInches    float64    `json:"rain_inches,omitempty"`
+	RainEventAt   *time.Time `json:"rain_event_at,omitempty"`
+	LastRainAt    *time.Time `json:"last_rain_at,omitempty"`
+	RainClearedAt *time.Time `json:"rain_cleared_at,omitempty"`
+}
+
+// WithoutActive drops the hold but keeps rain memory for the next process.
+func (p PauseState) WithoutActive() PauseState {
+	return PauseState{
+		RainEventAt:   p.RainEventAt,
+		LastRainAt:    p.LastRainAt,
+		RainClearedAt: p.RainClearedAt,
+	}
 }
 
 // PausePath is pause.json beside the config file.
@@ -36,7 +52,7 @@ func LoadPause(configPath string, now time.Time) (PauseState, error) {
 		return PauseState{}, fmt.Errorf("store: decode pause %s: %w", path, err)
 	}
 	if p.Active && p.Until != nil && !p.Until.After(now) {
-		cleared := PauseState{}
+		cleared := p.WithoutActive()
 		if err := SavePause(configPath, cleared); err != nil {
 			return PauseState{}, err
 		}

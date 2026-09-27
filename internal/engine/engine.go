@@ -21,6 +21,41 @@ var (
 	ErrPaused          = errors.New("engine: paused — watering held")
 )
 
+const (
+	// PauseSourceManual is a user pause. Empty on-disk source loads as manual.
+	PauseSourceManual = "manual"
+	// PauseSourceAuto is an automatic rain pause.
+	PauseSourceAuto = "auto"
+)
+
+// PauseMeta is optional rain context stored with a pause.
+// Source empty is treated as manual.
+type PauseMeta struct {
+	Source      string
+	RainInches  float64
+	RainEventAt *time.Time
+	LastRainAt  *time.Time
+}
+
+// PauseSnap is the pause after an optional expiry check.
+// EventLastRain and RainClearedAt survive ClearPause and timed expiry.
+type PauseSnap struct {
+	Paused        bool
+	Until         *time.Time
+	Reason        string
+	Source        string
+	RainInches    float64
+	RainEventAt   *time.Time
+	LastRainAt    *time.Time
+	RainClearedAt *time.Time
+	EventLastRain *time.Time
+}
+
+// AutoRain reports an active automatic pause whose reason is rain.
+func (p PauseSnap) AutoRain() bool {
+	return p.Paused && p.Source == PauseSourceAuto && p.Reason == "rain"
+}
+
 // Phase is the high-level state machine.
 type Phase string
 
@@ -63,6 +98,13 @@ type Engine struct {
 	paused      bool
 	pausedUntil *time.Time // nil = until further notice when paused
 	pauseReason string
+	pauseSource string
+	rainInches  float64
+	rainEventAt *time.Time
+	lastRainAt  *time.Time
+	// rainClearedAt and eventLastRain outlive the active pause.
+	rainClearedAt *time.Time
+	eventLastRain *time.Time
 
 	// rec is consulted without mu. Record runs only after running is cleared.
 	rec atomic.Pointer[recorderSlot]
@@ -110,11 +152,21 @@ func (e *Engine) Status() Status {
 	return st
 }
 
-// SetPause arms watering hold. until==nil means until further notice.
+// SetPause arms a manual watering hold. until==nil means until further notice.
 // Does not Stop(); caller cancels any active run separately.
 func (e *Engine) SetPause(until *time.Time, reason string) {
+	e.SetPauseMeta(until, reason, PauseMeta{Source: PauseSourceManual})
+}
+
+// SetPauseMeta arms a hold with source and rain fields.
+// Source empty is stored as manual. Does not Stop().
+func (e *Engine) SetPauseMeta(until *time.Time, reason string, meta PauseMeta) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.setPauseLocked(until, reason, meta)
+}
+
+func (e *Engine) setPauseLocked(until *time.Time, reason string, meta PauseMeta) {
 	e.paused = true
 	if until != nil {
 		u := until.UTC()
@@ -123,22 +175,66 @@ func (e *Engine) SetPause(until *time.Time, reason string) {
 		e.pausedUntil = nil
 	}
 	e.pauseReason = reason
+	src := meta.Source
+	if src == "" {
+		src = PauseSourceManual
+	}
+	e.pauseSource = src
+	e.rainInches = meta.RainInches
+	e.rainEventAt = cloneTime(meta.RainEventAt)
+	e.lastRainAt = cloneTime(meta.LastRainAt)
+	if src == PauseSourceAuto && meta.LastRainAt != nil {
+		if e.eventLastRain == nil || meta.LastRainAt.After(*e.eventLastRain) {
+			e.eventLastRain = cloneTime(meta.LastRainAt)
+		}
+	}
 }
 
 // ClearPause resumes watering (schedules + manual). Idempotent.
+// Rain clear memory (rainClearedAt, eventLastRain) is kept; call NoteRainCleared
+// to record a manual resume.
 func (e *Engine) ClearPause() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.paused = false
-	e.pausedUntil = nil
-	e.pauseReason = ""
+	e.clearActiveLocked()
+}
+
+// NoteRainCleared records a manual resume instant. It does not clear by itself.
+func (e *Engine) NoteRainCleared(at time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rainClearedAt = cloneTime(&at)
+}
+
+// NoteEventRain remembers the newest positive increment of an automatic event
+// without changing the active pause. Used when an auto pause ends.
+func (e *Engine) NoteEventRain(at time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if at.IsZero() {
+		return
+	}
+	if e.eventLastRain == nil || at.After(*e.eventLastRain) {
+		e.eventLastRain = cloneTime(&at)
+	}
+}
+
+// RestoreRainMemory installs clear/event memory from pause.json. Nil fields
+// are left unchanged.
+func (e *Engine) RestoreRainMemory(clearedAt, eventLast *time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if clearedAt != nil {
+		e.rainClearedAt = cloneTime(clearedAt)
+	}
+	if eventLast != nil && (e.eventLastRain == nil || eventLast.After(*e.eventLastRain)) {
+		e.eventLastRain = cloneTime(eventLast)
+	}
 }
 
 // IsPaused reports whether watering is held, auto-expiring timed pauses.
 func (e *Engine) IsPaused(now time.Time) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.isPausedLocked(now)
+	return e.PauseDetail(now).Paused
 }
 
 func (e *Engine) isPausedLocked(now time.Time) bool {
@@ -146,27 +242,106 @@ func (e *Engine) isPausedLocked(now time.Time) bool {
 		return false
 	}
 	if e.pausedUntil != nil && !e.pausedUntil.After(now) {
-		e.paused = false
-		e.pausedUntil = nil
-		e.pauseReason = ""
+		e.clearActiveLocked()
 		return false
 	}
 	return true
 }
 
+func (e *Engine) clearActiveLocked() {
+	e.paused = false
+	e.pausedUntil = nil
+	e.pauseReason = ""
+	e.pauseSource = ""
+	e.rainInches = 0
+	e.rainEventAt = nil
+	e.lastRainAt = nil
+}
+
 // PauseSnapshot returns pause fields after expire check.
 func (e *Engine) PauseSnapshot(now time.Time) (paused bool, until *time.Time, reason string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if !e.isPausedLocked(now) {
+	d := e.PauseDetail(now)
+	if !d.Paused {
 		return false, nil, ""
 	}
-	var u *time.Time
-	if e.pausedUntil != nil {
-		cp := *e.pausedUntil
-		u = &cp
+	return true, d.Until, d.Reason
+}
+
+// PauseDetail returns pause fields after expire check.
+func (e *Engine) PauseDetail(now time.Time) PauseSnap {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_ = e.isPausedLocked(now)
+	return e.snapLocked()
+}
+
+// PauseRaw returns the pause without expiring a timed hold.
+// The rain poller uses this so a stale fetch cannot clear via expiry.
+func (e *Engine) PauseRaw() PauseSnap {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.snapLocked()
+}
+
+func (e *Engine) snapLocked() PauseSnap {
+	s := PauseSnap{
+		Paused:        e.paused,
+		Reason:        e.pauseReason,
+		Source:        e.pauseSource,
+		RainInches:    e.rainInches,
+		RainEventAt:   cloneTime(e.rainEventAt),
+		LastRainAt:    cloneTime(e.lastRainAt),
+		RainClearedAt: cloneTime(e.rainClearedAt),
+		EventLastRain: cloneTime(e.eventLastRain),
 	}
-	return true, u, e.pauseReason
+	if e.pausedUntil != nil {
+		s.Until = cloneTime(e.pausedUntil)
+	}
+	if s.Paused && s.Source == "" {
+		s.Source = PauseSourceManual
+	}
+	return s
+}
+
+// StationRainExempt reports the station's rain_pause_exempt flag.
+func (e *Engine) StationRainExempt(id string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.stationExemptLocked(id)
+}
+
+func (e *Engine) stationExemptLocked(id string) bool {
+	for _, s := range e.cfg.Stations {
+		if s.ID == id {
+			return s.RainPauseExempt
+		}
+	}
+	return false
+}
+
+// exemptRunLocked is true only for an automatic rain pause whose every step
+// is rain_pause_exempt. Manual pauses never allow a run.
+func (e *Engine) exemptRunLocked(steps []Step) bool {
+	if !e.paused || e.pauseSource != PauseSourceAuto || e.pauseReason != "rain" {
+		return false
+	}
+	if len(steps) == 0 {
+		return false
+	}
+	for _, s := range steps {
+		if !e.stationExemptLocked(s.StationID) {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneTime(t *time.Time) *time.Time {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
 
 // ApplyConfig replaces config only when Idle (reject while watering).
@@ -237,7 +412,7 @@ func (e *Engine) runTagged(ctx context.Context, programID, program, kind string,
 		e.mu.Unlock()
 		return ErrFaulted
 	}
-	if e.isPausedLocked(time.Now()) {
+	if e.isPausedLocked(time.Now()) && !e.exemptRunLocked(steps) {
 		e.mu.Unlock()
 		return ErrPaused
 	}

@@ -183,15 +183,30 @@ func (r *Runner) Tick(ctx context.Context) error {
 		}
 		steps, ierr := Itinerary(sch)
 		if r.Eng.IsPaused(now) {
-			r.Log.Printf("skip %s: paused", sch.ID)
-			var st []engine.Step
+			detail := r.Eng.PauseDetail(now)
+			reason := detail.Reason
 			if ierr != nil {
+				r.Log.Printf("skip %s: paused", sch.ID)
 				r.Log.Printf("skip %s: %v", sch.ID, ierr)
-			} else {
-				st = steps
+				r.Eng.RecordSkipped(sch.ID, programName(sch), nil, reason, now)
+				r.markFired(sch.ID, now)
+				continue
 			}
-			_, _, reason := r.Eng.PauseSnapshot(now)
-			r.Eng.RecordSkipped(sch.ID, programName(sch), st, reason, now)
+			if detail.AutoRain() {
+				runSteps, skipSteps := splitRainExempt(r.Eng, steps)
+				if len(runSteps) > 0 {
+					if r.Eng.Status().Phase != engine.PhaseIdle { // D13 busy: retry next tick, no duplicate skip record
+						continue
+					}
+					if len(skipSteps) > 0 {
+						r.Eng.RecordSkipped(sch.ID, programName(sch), skipSteps, reason, now)
+					}
+					r.startProgram(ctx, sch, runSteps, now)
+					continue
+				}
+			}
+			r.Log.Printf("skip %s: paused", sch.ID)
+			r.Eng.RecordSkipped(sch.ID, programName(sch), steps, reason, now)
 			r.markFired(sch.ID, now) // consume today's slot so resume mid-minute does not fire
 			continue
 		}
@@ -199,28 +214,44 @@ func (r *Runner) Tick(ctx context.Context) error {
 			r.Log.Printf("skip %s: %v", sch.ID, ierr)
 			continue
 		}
-		r.Log.Printf("start %s at %s Phoenix (%d steps)", sch.ID, now.Format("15:04"), len(steps))
-		err = r.Eng.RunProgram(ctx, sch.ID, programName(sch), steps)
-		if errors.Is(err, engine.ErrBusy) {
-			// D13: do not record a busy skip.
-			r.Log.Printf("skip %s: busy (D13)", sch.ID)
-			continue
-		}
-		if errors.Is(err, engine.ErrPaused) {
-			r.Log.Printf("skip %s: paused", sch.ID)
-			_, _, reason := r.Eng.PauseSnapshot(now)
-			r.Eng.RecordSkipped(sch.ID, programName(sch), steps, reason, now)
-			r.markFired(sch.ID, now)
-			continue
-		}
-		if err != nil {
-			r.Log.Printf("run %s: %v", sch.ID, err)
-			continue
-		}
-		r.markFired(sch.ID, now)
-		r.Log.Printf("done %s", sch.ID)
+		r.startProgram(ctx, sch, steps, now)
 	}
 	return nil
+}
+
+// splitRainExempt keeps rain_pause_exempt steps for an automatic rain pause.
+func splitRainExempt(e *engine.Engine, steps []engine.Step) (run, skip []engine.Step) {
+	for _, st := range steps {
+		if e.StationRainExempt(st.StationID) {
+			run = append(run, st)
+		} else {
+			skip = append(skip, st)
+		}
+	}
+	return run, skip
+}
+
+func (r *Runner) startProgram(ctx context.Context, sch store.Schedule, steps []engine.Step, now time.Time) {
+	r.Log.Printf("start %s at %s Phoenix (%d steps)", sch.ID, now.Format("15:04"), len(steps))
+	err := r.Eng.RunProgram(ctx, sch.ID, programName(sch), steps)
+	if errors.Is(err, engine.ErrBusy) {
+		// D13: do not record a busy skip.
+		r.Log.Printf("skip %s: busy (D13)", sch.ID)
+		return
+	}
+	if errors.Is(err, engine.ErrPaused) {
+		r.Log.Printf("skip %s: paused", sch.ID)
+		_, _, reason := r.Eng.PauseSnapshot(now)
+		r.Eng.RecordSkipped(sch.ID, programName(sch), steps, reason, now)
+		r.markFired(sch.ID, now)
+		return
+	}
+	if err != nil {
+		r.Log.Printf("run %s: %v", sch.ID, err)
+		return
+	}
+	r.markFired(sch.ID, now)
+	r.Log.Printf("done %s", sch.ID)
 }
 
 // Loop Ticks until ctx is cancelled. interval defaults to 1s.

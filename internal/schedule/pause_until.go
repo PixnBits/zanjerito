@@ -1,6 +1,9 @@
 package schedule
 
 import (
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/PixnBits/zanjerito/internal/store"
@@ -89,4 +92,46 @@ func PauseLabel(paused bool, until *time.Time, now time.Time, loc *time.Location
 		return "Paused until " + t.Format("Mon 3:04 PM")
 	}
 	return "Paused until " + t.Format("Mon Jan 2, 3:04 PM")
+}
+
+// FormatInches renders a rainfall amount to 0.1 in when the hundredths digit
+// is 0, otherwise 0.01 in (0.40 → "0.4", 0.25 → "0.25").
+func FormatInches(v float64) string {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		v = 0
+	}
+	r := math.Round(v*100) / 100
+	s := strconv.FormatFloat(r, 'f', 2, 64)
+	if strings.HasSuffix(s, "0") {
+		s = strconv.FormatFloat(r, 'f', 1, 64)
+	}
+	return s
+}
+
+// RainPauseLabel is the automatic-rain banner sentence.
+// A local hour from 5:00 through 11:59 is "Tue morning"; other times reuse
+// PauseLabel's clock style ("Tue 4:36 PM").
+func RainPauseLabel(inches float64, until *time.Time, now time.Time, loc *time.Location) string {
+	amt := FormatInches(inches)
+	if until == nil {
+		return "Paused for rain (" + amt + " in) until further notice"
+	}
+	return "Paused for rain (" + amt + " in) until " + rainUntilPhrase(*until, now, loc)
+}
+
+func rainUntilPhrase(until, now time.Time, loc *time.Location) string {
+	loc = locOrUTC(loc)
+	t := until.In(loc)
+	morning := t.Hour() >= 5 && t.Hour() < 12
+	within := until.Sub(now) <= 6*24*time.Hour
+	switch {
+	case morning && within:
+		return t.Format("Mon") + " morning"
+	case morning:
+		return t.Format("Mon Jan 2") + " morning"
+	case within:
+		return t.Format("Mon 3:04 PM")
+	default:
+		return t.Format("Mon Jan 2, 3:04 PM")
+	}
 }

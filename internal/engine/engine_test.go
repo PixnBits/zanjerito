@@ -15,10 +15,10 @@ func testConfig(t *testing.T) Config {
 	t.Helper()
 	active := true
 	return Config{
-		Chip:      "gpiochip0",
-		ActiveLow: &active,
-		Timezone:  "America/Phoenix",
-		MaxOnSec:  900,
+		Chip:       "gpiochip0",
+		ActiveLow:  &active,
+		Timezone:   "America/Phoenix",
+		MaxOnSec:   900,
 		Sequencing: SequencingConfig{Mode: SequenceOverlap, OverlapMS: 50},
 		Power:      StationConfig{ID: "psu", Title: "PSU", BCM: 21},
 		Stations: []StationConfig{
@@ -54,6 +54,19 @@ func TestLoadExampleConfig(t *testing.T) {
 	}
 	if len(cfg.Stations) != 4 {
 		t.Fatalf("stations=%d", len(cfg.Stations))
+	}
+	var drip bool
+	for _, s := range cfg.Stations {
+		if s.ID == "drip" {
+			drip = s.RainPauseExempt
+			continue
+		}
+		if s.RainPauseExempt {
+			t.Fatalf("%s should not be rain_pause_exempt", s.ID)
+		}
+	}
+	if !drip {
+		t.Fatal("drip station must set rain_pause_exempt")
 	}
 }
 

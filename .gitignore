@@ -12,3 +12,6 @@ lib
 *.exe
 /zanjerito
 /cmd/zanjerito/zanjerito
+
+# Local rain gauge config (copy from config/rain.local.example.json; never commit)
+rain.local.json

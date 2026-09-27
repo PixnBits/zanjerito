@@ -245,3 +245,19 @@ func TestPauseLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestRainPauseLabel(t *testing.T) {
+	loc := mustPhoenix(t)
+	now := time.Date(2026, 9, 25, 15, 0, 0, 0, loc)
+	tueMorning := time.Date(2026, 9, 29, 6, 0, 0, 0, loc)
+	tueAfternoon := time.Date(2026, 9, 29, 16, 36, 0, 0, loc)
+	if got := RainPauseLabel(0.4, &tueMorning, now, loc); got != "Paused for rain (0.4 in) until Tue morning" {
+		t.Fatalf("morning %q", got)
+	}
+	if got := RainPauseLabel(0.25, &tueAfternoon, now, loc); got != "Paused for rain (0.25 in) until Tue 4:36 PM" {
+		t.Fatalf("afternoon %q", got)
+	}
+	if got := FormatInches(1); got != "1.0" {
+		t.Fatalf("inches %q", got)
+	}
+}

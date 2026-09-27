@@ -15,6 +15,7 @@ import (
 
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/history"
+	"github.com/PixnBits/zanjerito/internal/rain"
 	"github.com/PixnBits/zanjerito/internal/schedule"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
@@ -27,7 +28,9 @@ type Server struct {
 	Eng     *engine.Engine
 	Path    string
 	History *history.Log
-	mux     *http.ServeMux
+	// Rain is nil when automatic rain pause is disabled.
+	Rain *rain.Poller
+	mux  *http.ServeMux
 }
 
 func New(e *engine.Engine, path string) *Server {
@@ -104,24 +107,85 @@ func (s *Server) location() *time.Location {
 	return loc
 }
 
-func (s *Server) pauseAPI(now time.Time) (loc *time.Location, paused bool, untilStr any, label, reason string) {
+// pauseFields is the pause + rain object shared by status, SSE, and pause writes.
+// Existing keys (paused, paused_until, paused_label, reason) stay.
+func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[string]any) {
 	loc = s.location()
-	paused, until, reason := s.Eng.PauseSnapshot(now)
-	label = schedule.PauseLabel(paused, until, now, loc)
-	if until != nil {
-		untilStr = until.In(loc).Format(time.RFC3339)
+	d := s.Eng.PauseDetail(now)
+	label := schedule.PauseLabel(d.Paused, d.Until, now, loc)
+	if d.AutoRain() {
+		label = schedule.RainPauseLabel(d.RainInches, d.Until, now, loc)
 	}
-	return loc, paused, untilStr, label, reason
+	var untilStr any
+	if d.Paused && d.Until != nil {
+		untilStr = d.Until.In(loc).Format(time.RFC3339)
+	}
+	var lastRain any
+	if d.Paused && d.LastRainAt != nil {
+		lastRain = d.LastRainAt.In(loc).Format(time.RFC3339)
+	}
+	src := ""
+	inches := 0.0
+	if d.Paused {
+		src = d.Source
+		if src == "" {
+			src = engine.PauseSourceManual
+		}
+		inches = d.RainInches
+	}
+	fields = map[string]any{
+		"paused":       d.Paused,
+		"paused_until": untilStr,
+		"paused_label": label,
+		"reason":       d.Reason,
+		"pause_source": src,
+		"rain_inches":  inches,
+		"last_rain_at": lastRain,
+		"rain":         s.rainBody(loc),
+	}
+	return loc, fields
+}
+
+func (s *Server) rainBody(loc *time.Location) map[string]any {
+	out := map[string]any{"enabled": false, "unavailable": false}
+	if s.Rain == nil {
+		return out
+	}
+	st := s.Rain.Status()
+	out["enabled"] = st.Enabled
+	out["unavailable"] = st.Unavailable
+	if st.LastError != "" {
+		out["last_error"] = st.LastError
+	}
+	if st.LastOK != nil {
+		if loc == nil {
+			loc = time.UTC
+		}
+		out["last_ok_at"] = st.LastOK.In(loc).Format(time.RFC3339)
+	}
+	if st.HaveTotal {
+		out["last_total_inches"] = st.LastTotal
+	}
+	return out
+}
+
+func (s *Server) withRain(fn func()) {
+	if s.Rain != nil {
+		s.Rain.Do(fn)
+		return
+	}
+	fn()
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	st := s.Eng.Status()
 	now := time.Now()
-	loc, paused, untilStr, label, reason := s.pauseAPI(now)
+	loc, fields := s.pauseFields(now)
 	// Persist auto-expire so disk matches memory after timed pause ends.
-	if !paused {
-		if p, err := store.LoadPause(s.Path, now); err == nil && p.Active {
-			_ = store.SavePause(s.Path, store.PauseState{})
+	// Keep rain clear memory; do not wipe rain_cleared_at.
+	if fields["paused"] != true {
+		if p, err := store.LoadPause(s.Path, now); err == nil && p.Active && !s.Eng.IsPaused(now) {
+			_ = store.SavePause(s.Path, p.WithoutActive())
 		}
 	}
 	out := map[string]any{
@@ -132,10 +196,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"stations_on":     st.StationsOn,
 		"last_error":      st.LastError,
 		"lockout":         false,
-		"paused":          paused,
-		"paused_until":    untilStr,
-		"paused_label":    label,
-		"reason":          reason,
+	}
+	for k, v := range fields {
+		out[k] = v
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -323,8 +386,11 @@ func (s *Server) handleStationRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.Eng.IsPaused(time.Now()) {
-		writeErr(w, http.StatusConflict, fmt.Errorf("%w: pause for rain — resume before running a station", engine.ErrPaused))
-		return
+		d := s.Eng.PauseDetail(time.Now())
+		if !(d.AutoRain() && s.Eng.StationRainExempt(id)) {
+			writeErr(w, http.StatusConflict, fmt.Errorf("%w: pause for rain — resume before running a station", engine.ErrPaused))
+			return
+		}
 	}
 	st := s.Eng.Status()
 	if st.Phase != engine.PhaseIdle && !body.Preempt {
@@ -486,16 +552,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func writeStatusEvent(w http.ResponseWriter, fl http.Flusher, s *Server) {
 	st := s.Eng.Status()
 	now := time.Now()
-	_, paused, untilStr, label, reason := s.pauseAPI(now)
+	_, fields := s.pauseFields(now)
 	payload := map[string]any{
 		"Phase":          st.Phase,
 		"CurrentStation": st.CurrentStation,
 		"StationsOn":     st.StationsOn,
 		"LastError":      st.LastError,
-		"paused":         paused,
-		"paused_until":   untilStr,
-		"paused_label":   label,
-		"reason":         reason,
+	}
+	for k, v := range fields {
+		payload[k] = v
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -587,19 +652,25 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 	}
 	// Cancel any active run; valves off. STOP remains separate (cancel-only).
 	_ = s.Eng.Stop()
-	s.Eng.SetPause(until, reason)
-	ps := store.PauseState{Active: true, Until: until, Reason: reason}
-	if err := store.SavePause(s.Path, ps); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+	var saveErr error
+	s.withRain(func() {
+		saveErr = rain.RememberManualPause(s.Eng, s.Path, until, reason, now)
+	})
+	if saveErr != nil {
+		writeErr(w, http.StatusInternalServerError, saveErr)
 		return
 	}
 	s.writePauseStatus(w)
 }
 
 func (s *Server) handlePauseClear(w http.ResponseWriter, _ *http.Request) {
-	s.Eng.ClearPause()
-	if err := store.SavePause(s.Path, store.PauseState{}); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+	now := time.Now()
+	var saveErr error
+	s.withRain(func() {
+		saveErr = rain.RememberManualClear(s.Eng, s.Path, now)
+	})
+	if saveErr != nil {
+		writeErr(w, http.StatusInternalServerError, saveErr)
 		return
 	}
 	s.writePauseStatus(w)
@@ -607,13 +678,12 @@ func (s *Server) handlePauseClear(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) writePauseStatus(w http.ResponseWriter) {
 	now := time.Now()
-	_, paused, untilStr, label, reason := s.pauseAPI(now)
+	_, fields := s.pauseFields(now)
 	out := map[string]any{
-		"paused":       paused,
-		"paused_until": untilStr,
-		"paused_label": label,
-		"reason":       reason,
-		"phase":        s.Eng.Status().Phase,
+		"phase": s.Eng.Status().Phase,
+	}
+	for k, v := range fields {
+		out[k] = v
 	}
 	writeJSON(w, http.StatusOK, out)
 }
