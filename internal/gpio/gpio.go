@@ -13,6 +13,13 @@ const (
 	On  Level = true
 )
 
+// Refuser is an optional capability for drivers that accept Set but do not
+// energize relays. Lockout returns true. Fake and dualrun return false.
+// gpiocdev does not implement Refuser (including -dry).
+type Refuser interface {
+	RefusesActuation() bool
+}
+
 // Driver is the single writer surface for station and PSU lines.
 type Driver interface {
 	// Setup claims lines. activeLow matches config active_low (HIGH ≈ off when true).

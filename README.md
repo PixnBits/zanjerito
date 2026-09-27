@@ -47,3 +47,7 @@ make build
 ```
 
 The older Node 14 / GraphiQL app under this tree is a **behavioral reference** only (not the production UI or Developing default). Prefer the embedded Direction D UI served by the Go binary.
+
+## Run history
+
+Each finished, stopped, skipped (paused), refused (lockout), or failed run is appended to `history.json` beside the config file (same directory as `config.json` and `pause.json`). Outcomes are `completed`, `stopped`, `skipped`, `refused`, and `error`. The log keeps the newest 200 entries from the last 60 days. Home shows the latest few; `GET /api/history?limit=N` returns newest-first (`limit` defaults to 50 and caps at 200).

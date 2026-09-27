@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/PixnBits/zanjerito/internal/gpio"
@@ -40,20 +41,20 @@ type Step struct {
 
 // Status is a snapshot for API/UI later.
 type Status struct {
-	Phase         Phase
+	Phase          Phase
 	CurrentStation string
-	StationsOn    []string
-	LastError     string
+	StationsOn     []string
+	LastError      string
 }
 
 // Engine owns the driver and enforces safety invariants.
 type Engine struct {
-	mu     sync.Mutex
-	cfg    Config
-	drv    gpio.Driver
-	phase  Phase
-	on     map[string]bool // stations currently logically On (excl psu tracked separately)
-	psuOn  bool
+	mu      sync.Mutex
+	cfg     Config
+	drv     gpio.Driver
+	phase   Phase
+	on      map[string]bool // stations currently logically On (excl psu tracked separately)
+	psuOn   bool
 	lastErr error
 	running bool
 	cancel  context.CancelFunc
@@ -62,6 +63,9 @@ type Engine struct {
 	paused      bool
 	pausedUntil *time.Time // nil = until further notice when paused
 	pauseReason string
+
+	// rec is consulted without mu. Record runs only after running is cleared.
+	rec atomic.Pointer[recorderSlot]
 }
 
 // New sets up GPIO lines from config. Driver must not be used elsewhere.
@@ -211,9 +215,19 @@ func (e *Engine) Close() error {
 	return e.drv.Close()
 }
 
-// RunItinerary executes steps with overlap or isolate sequencing.
-// Sole caller of gpio Set for watering.
+// RunItinerary is the manual watering entry (Kind manual, Program "manual").
+// Sole caller of gpio Set for watering, together with RunProgram.
+// Validation failures are not recorded.
 func (e *Engine) RunItinerary(ctx context.Context, steps []Step) error {
+	return e.runTagged(ctx, "", "manual", KindManual, steps)
+}
+
+// RunProgram is the schedule watering entry (Kind schedule).
+func (e *Engine) RunProgram(ctx context.Context, programID, program string, steps []Step) error {
+	return e.runTagged(ctx, programID, program, KindSchedule, steps)
+}
+
+func (e *Engine) runTagged(ctx context.Context, programID, program, kind string, steps []Step) error {
 	e.mu.Lock()
 	if e.running {
 		e.mu.Unlock()
@@ -247,15 +261,26 @@ func (e *Engine) RunItinerary(ctx context.Context, steps []Step) error {
 	e.lastErr = nil
 	e.mu.Unlock()
 
+	tim := newStationTimer(steps)
+	var (
+		rec    RunRecord
+		record bool
+	)
+	// Emit only after this reset. A blocked Record must not keep the engine busy
+	// or sit on mu (Stop never calls the recorder).
 	defer func() {
 		e.mu.Lock()
 		e.running = false
 		e.cancel = nil
 		e.mu.Unlock()
 		cancel()
+		if record {
+			e.emit(rec)
+		}
 	}()
 
-	err := e.run(runCtx, steps)
+	started := time.Now()
+	err := e.run(runCtx, steps, tim)
 	if err != nil {
 		// Fail-safe: any exit including context.Canceled must all-off (CISO #5).
 		// Stop() also cancels; all-off here is idempotent.
@@ -264,32 +289,79 @@ func (e *Engine) RunItinerary(ctx context.Context, steps []Step) error {
 			offErr := e.allOffLocked()
 			e.phase = PhaseIdle
 			e.mu.Unlock()
+			end := time.Now()
+			tim.closeOpen(end)
+			rec = buildRecord(programID, program, kind, tim, started, end, OutcomeStopped, "")
+			record = true
 			if offErr != nil {
 				return errors.Join(err, offErr)
 			}
 			return err
 		}
 		_ = e.fault(err)
+		end := time.Now()
+		tim.closeOpen(end)
+		rec = buildRecord(programID, program, kind, tim, started, end, OutcomeError, err.Error())
+		record = true
 		return err
 	}
 	e.mu.Lock()
 	e.phase = PhaseIdle
 	e.mu.Unlock()
+	end := time.Now()
+	tim.closeOpen(end)
+	outcome := OutcomeCompleted
+	errStr := ""
+	if actuationRefused(e.drv) {
+		outcome = OutcomeRefused
+		errStr = "lockout driver: relays not energized"
+	}
+	rec = buildRecord(programID, program, kind, tim, started, end, outcome, errStr)
+	if outcome == OutcomeRefused {
+		for i := range rec.Stations {
+			rec.Stations[i].ActualSec = 0
+		}
+	}
+	record = true
 	return nil
 }
 
-func (e *Engine) run(ctx context.Context, steps []Step) error {
+// actuationRefused reports a driver that accepts Set but does not energize.
+// The check is not on the Stop/cancel path; phase timing is unchanged.
+func actuationRefused(drv gpio.Driver) bool {
+	r, ok := drv.(gpio.Refuser)
+	return ok && r.RefusesActuation()
+}
+
+func (e *Engine) run(ctx context.Context, steps []Step, tim *stationTimer) error {
 	if len(steps) == 0 {
 		return nil
 	}
 	mode := e.cfg.Sequencing.Mode
 	if mode == SequenceIsolate {
-		return e.runIsolate(ctx, steps)
+		return e.runIsolate(ctx, steps, tim)
 	}
-	return e.runOverlap(ctx, steps)
+	return e.runOverlap(ctx, steps, tim)
 }
 
-func (e *Engine) runOverlap(ctx context.Context, steps []Step) error {
+// turn is only called from the run goroutine. It updates tim after the relay write.
+func (e *Engine) turn(id string, on bool, idx int, tim *stationTimer) error {
+	if err := e.setStation(id, on); err != nil {
+		return err
+	}
+	if tim == nil {
+		return nil
+	}
+	now := time.Now()
+	if on {
+		tim.on(id, idx, now)
+	} else {
+		tim.off(id, now)
+	}
+	return nil
+}
+
+func (e *Engine) runOverlap(ctx context.Context, steps []Step, tim *stationTimer) error {
 	overlap := time.Duration(e.cfg.Sequencing.OverlapMS) * time.Millisecond
 	if overlap <= 0 {
 		overlap = 2 * time.Second
@@ -303,6 +375,7 @@ func (e *Engine) runOverlap(ctx context.Context, steps []Step) error {
 	}
 
 	var prev string
+	prevIdx := -1
 	for i, step := range steps {
 		dur := step.Duration
 		ov := overlap
@@ -313,7 +386,7 @@ func (e *Engine) runOverlap(ctx context.Context, steps []Step) error {
 		if err := e.setPhase(PhaseStationOn); err != nil {
 			return err
 		}
-		if err := e.setStation(step.StationID, true); err != nil {
+		if err := e.turn(step.StationID, true, i, tim); err != nil {
 			return err
 		}
 
@@ -325,7 +398,7 @@ func (e *Engine) runOverlap(ctx context.Context, steps []Step) error {
 			if err := sleepCtx(ctx, ov); err != nil {
 				return err
 			}
-			if err := e.setStation(prev, false); err != nil {
+			if err := e.turn(prev, false, prevIdx, tim); err != nil {
 				return err
 			}
 			remain := dur - ov
@@ -343,11 +416,11 @@ func (e *Engine) runOverlap(ctx context.Context, steps []Step) error {
 			}
 		}
 		prev = step.StationID
-		_ = i
+		prevIdx = i
 	}
 
 	if prev != "" {
-		if err := e.setStation(prev, false); err != nil {
+		if err := e.turn(prev, false, prevIdx, tim); err != nil {
 			return err
 		}
 	}
@@ -360,8 +433,8 @@ func (e *Engine) runOverlap(ctx context.Context, steps []Step) error {
 	return e.setPhase(PhaseIdle)
 }
 
-func (e *Engine) runIsolate(ctx context.Context, steps []Step) error {
-	for _, step := range steps {
+func (e *Engine) runIsolate(ctx context.Context, steps []Step, tim *stationTimer) error {
+	for i, step := range steps {
 		if err := e.setPhase(PhasePowerDown); err != nil {
 			return err
 		}
@@ -380,13 +453,13 @@ func (e *Engine) runIsolate(ctx context.Context, steps []Step) error {
 		if err := e.setPhase(PhaseStationOn); err != nil {
 			return err
 		}
-		if err := e.setStation(step.StationID, true); err != nil {
+		if err := e.turn(step.StationID, true, i, tim); err != nil {
 			return err
 		}
 		if err := sleepCtx(ctx, step.Duration); err != nil {
 			return err
 		}
-		if err := e.setStation(step.StationID, false); err != nil {
+		if err := e.turn(step.StationID, false, i, tim); err != nil {
 			return err
 		}
 		if err := e.setPSU(false); err != nil {

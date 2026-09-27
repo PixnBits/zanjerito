@@ -150,6 +150,13 @@ func (r *Runner) markFired(id string, now time.Time) {
 	r.lastFired[id] = now.Format("2006-01-02")
 }
 
+func programName(sch store.Schedule) string {
+	if note := strings.TrimSpace(sch.Note); note != "" {
+		return note
+	}
+	return sch.ID
+}
+
 // Tick loads schedules and starts any that are due. Busy engine → skip+log (D13).
 func (r *Runner) Tick(ctx context.Context) error {
 	if r.Now == nil {
@@ -174,24 +181,35 @@ func (r *Runner) Tick(ctx context.Context) error {
 		if !r.due(sch, now) {
 			continue
 		}
+		steps, ierr := Itinerary(sch)
 		if r.Eng.IsPaused(now) {
 			r.Log.Printf("skip %s: paused", sch.ID)
+			var st []engine.Step
+			if ierr != nil {
+				r.Log.Printf("skip %s: %v", sch.ID, ierr)
+			} else {
+				st = steps
+			}
+			_, _, reason := r.Eng.PauseSnapshot(now)
+			r.Eng.RecordSkipped(sch.ID, programName(sch), st, reason, now)
 			r.markFired(sch.ID, now) // consume today's slot so resume mid-minute does not fire
 			continue
 		}
-		steps, err := Itinerary(sch)
-		if err != nil {
-			r.Log.Printf("skip %s: %v", sch.ID, err)
+		if ierr != nil {
+			r.Log.Printf("skip %s: %v", sch.ID, ierr)
 			continue
 		}
 		r.Log.Printf("start %s at %s Phoenix (%d steps)", sch.ID, now.Format("15:04"), len(steps))
-		err = r.Eng.RunItinerary(ctx, steps)
+		err = r.Eng.RunProgram(ctx, sch.ID, programName(sch), steps)
 		if errors.Is(err, engine.ErrBusy) {
+			// D13: do not record a busy skip.
 			r.Log.Printf("skip %s: busy (D13)", sch.ID)
 			continue
 		}
 		if errors.Is(err, engine.ErrPaused) {
 			r.Log.Printf("skip %s: paused", sch.ID)
+			_, _, reason := r.Eng.PauseSnapshot(now)
+			r.Eng.RecordSkipped(sch.ID, programName(sch), steps, reason, now)
 			r.markFired(sch.ID, now)
 			continue
 		}

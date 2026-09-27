@@ -127,8 +127,13 @@ func TestTickSkipsWhenBusy(t *testing.T) {
 		Log:       log.New(&buf, "", 0),
 		lastFired: map[string]string{},
 	}
+	cap := &capRec{}
+	e.SetRecorder(cap)
 	if err := r.Tick(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if n := len(cap.snapshot()); n != 0 {
+		t.Fatalf("busy skip must not record, got %d", n)
 	}
 	cancel()
 	<-errCh

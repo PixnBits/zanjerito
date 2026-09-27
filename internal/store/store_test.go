@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -124,6 +125,46 @@ func TestAtomicRenameNoTempLeft(t *testing.T) {
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAtomicWriteJSONDirSyncSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.json")
+	payload := map[string]any{"entries": []any{map[string]any{"program": "Dawn"}}}
+	if err := AtomicWriteJSON(path, payload); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("write did not stick: %v %s", err, b)
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ents) != 1 || ents[0].Name() != "history.json" {
+		t.Fatalf("leftover after dir sync: %v", ents)
+	}
+}
+
+func TestDirSyncUnsupportedIgnoresEINVAL(t *testing.T) {
+	if !dirSyncUnsupported(syscall.EINVAL) {
+		t.Fatal("EINVAL should not fail the write")
+	}
+	wrapped := &os.PathError{Op: "sync", Path: ".", Err: syscall.EINVAL}
+	if !dirSyncUnsupported(wrapped) {
+		t.Fatal("wrapped EINVAL should not fail the write")
+	}
+	if !dirSyncUnsupported(&os.PathError{Op: "sync", Path: ".", Err: syscall.EOPNOTSUPP}) {
+		t.Fatal("EOPNOTSUPP should not fail the write")
+	}
+	if dirSyncUnsupported(syscall.EIO) {
+		t.Fatal("EIO should still fail the write")
 	}
 }
 
