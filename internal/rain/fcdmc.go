@@ -2,6 +2,7 @@ package rain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -80,7 +81,7 @@ func (f *FCDMC) Fetch(ctx context.Context) ([]Sample, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s", redact(err.Error(), f.GaugeID))
+		return nil, fmt.Errorf("%s", redactErr(err, f.GaugeID))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -94,17 +95,47 @@ func (f *FCDMC) Fetch(ctx context.Context) ([]Sample, error) {
 	return samples, nil
 }
 
-var urlPattern = regexp.MustCompile(`https?://\S+`)
+var (
+	// Stop before a quote so Post "http://host/path": EOF keeps its closing quote.
+	urlPattern      = regexp.MustCompile(`https?://[^\s"'<>]+`)
+	ipv4PortPattern = regexp.MustCompile(`(?:\d{1,3}\.){3}\d{1,3}:\d+`)
+	ipv6PortPattern = regexp.MustCompile(`\[[0-9a-fA-F:]*\]:\d+`)
+)
 
-// redact strips URLs and the gauge id so logs and status text stay anonymous.
+// redactErr rebuilds a transport error without the request URL or gauge id.
+// url.Error formats as Op "URL": inner; copying that string and substituting
+// the URL swallows the closing quote, so the URL is dropped before formatting.
+func redactErr(err error, gaugeID string) string {
+	if err == nil {
+		return "fetch failed"
+	}
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		op := uerr.Op
+		if strings.TrimSpace(op) == "" {
+			op = "GET"
+		}
+		inner := "fetch failed"
+		if uerr.Err != nil {
+			inner = redact(uerr.Err.Error(), gaugeID)
+		}
+		return fmt.Sprintf("%s %q: %s", op, "<redacted>", inner)
+	}
+	return redact(err.Error(), gaugeID)
+}
+
+// redact strips URLs, host:port pairs, and the gauge id.
+// The URL match stops at a quote so a wrapped Post "…": err stays balanced.
 func redact(msg, gaugeID string) string {
+	msg = urlPattern.ReplaceAllString(msg, "<redacted>")
 	if gaugeID != "" {
-		msg = strings.ReplaceAll(msg, gaugeID, "gauge")
+		msg = strings.ReplaceAll(msg, gaugeID, "<redacted>")
 		if esc := url.QueryEscape(gaugeID); esc != "" && esc != gaugeID {
-			msg = strings.ReplaceAll(msg, esc, "gauge")
+			msg = strings.ReplaceAll(msg, esc, "<redacted>")
 		}
 	}
-	msg = urlPattern.ReplaceAllString(msg, "url")
+	msg = ipv4PortPattern.ReplaceAllString(msg, "<redacted>")
+	msg = ipv6PortPattern.ReplaceAllString(msg, "<redacted>")
 	msg = strings.TrimSpace(msg)
 	if msg == "" {
 		return "fetch failed"

@@ -11,5 +11,7 @@
   "dry_days": 2,
   "heavy_inches": 1.0,
   "heavy_dry_days": 4,
-  "stale_hours": 7
+  "stale_hours": 7,
+  "max_increment_inches": 2.0,
+  "max_window_inches": 6.0
 }

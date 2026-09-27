@@ -2,6 +2,13 @@ package rain
 
 import "time"
 
+// futureSkew is how far ahead of now a sample may be and still count.
+// Rows further ahead are ignored for staleness and for the window sum.
+const futureSkew = 15 * time.Minute
+
+// errImplausible is Decide's Error when a reading cannot be trusted.
+const errImplausible = "implausible rain reading"
+
 // ActionKind is the poller's next step. Pause covers a new pause and an
 // extension (Until is never earlier than the pause already in effect).
 type ActionKind int
@@ -51,17 +58,17 @@ type Memory struct {
 // A new event's newest positive increment must be after ClearedAt (when set)
 // and after LastEventRain (when set). The sum still counts every in-window
 // increment, including rain from before the clear.
-// Stale or empty input returns ActionUnavailable and must not pause or clear.
+// Stale, empty, all-future, or implausible input returns ActionUnavailable
+// and must not pause, extend, or clear. Samples more than futureSkew ahead
+// of now are ignored. Staleness uses the newest remaining sample.
 func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Memory) Action {
 	cfg = cfg.normalized()
 	if len(samples) == 0 {
 		return Action{Kind: ActionUnavailable, Error: "no samples"}
 	}
-	newest := samples[0].Time
-	for _, s := range samples[1:] {
-		if s.Time.After(newest) {
-			newest = s.Time
-		}
+	newest, haveNewest := newestUsable(samples, now)
+	if !haveNewest {
+		return Action{Kind: ActionUnavailable, Error: "no samples"}
 	}
 	stale := time.Duration(cfg.StaleHours * float64(time.Hour))
 	if now.Sub(newest) > stale {
@@ -69,6 +76,9 @@ func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Me
 	}
 
 	total, lastRain, firstRain, havePos := sumWindow(samples, now, cfg)
+	if implausible(samples, now, cfg, total) {
+		return Action{Kind: ActionUnavailable, Error: errImplausible}
+	}
 	base := Action{Total: total}
 	qualifying := havePos && atLeast(total, cfg.TriggerInches)
 	var until time.Time
@@ -160,12 +170,57 @@ func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Me
 	return base
 }
 
-// sumWindow totals increments in (now-window, now]. Negatives count as 0.
-// last is the newest positive increment in that window; first is the oldest.
-func sumWindow(samples []Sample, now time.Time, cfg Config) (total float64, last, first time.Time, havePos bool) {
-	start := now.Add(-time.Duration(cfg.WindowHours * float64(time.Hour)))
+// newestUsable is the newest sample that is not more than futureSkew ahead.
+func newestUsable(samples []Sample, now time.Time) (time.Time, bool) {
+	limit := now.Add(futureSkew)
+	var newest time.Time
+	have := false
 	for _, s := range samples {
-		if !s.Time.After(start) || s.Time.After(now) {
+		if s.Time.After(limit) {
+			continue
+		}
+		if !have || s.Time.After(newest) {
+			newest = s.Time
+			have = true
+		}
+	}
+	return newest, have
+}
+
+// inWindow reports whether s falls in (now-window, now+futureSkew].
+func inWindow(s Sample, now time.Time, cfg Config) bool {
+	start := now.Add(-time.Duration(cfg.WindowHours * float64(time.Hour)))
+	end := now.Add(futureSkew)
+	return s.Time.After(start) && !s.Time.After(end)
+}
+
+// implausible is true when any in-window increment, or the in-window total,
+// is strictly above its cap. Values equal to the cap are allowed.
+func implausible(samples []Sample, now time.Time, cfg Config, total float64) bool {
+	if total > cfg.MaxWindowInches {
+		return true
+	}
+	for _, s := range samples {
+		if !inWindow(s, now, cfg) {
+			continue
+		}
+		inches := s.Inches
+		if inches < 0 {
+			inches = 0
+		}
+		if inches > cfg.MaxIncrementInches {
+			return true
+		}
+	}
+	return false
+}
+
+// sumWindow totals increments in (now-window, now+futureSkew]. Negatives count as 0.
+// last is the newest positive increment in that window; first is the oldest.
+// Samples more than futureSkew ahead of now are excluded.
+func sumWindow(samples []Sample, now time.Time, cfg Config) (total float64, last, first time.Time, havePos bool) {
+	for _, s := range samples {
+		if !inWindow(s, now, cfg) {
 			continue
 		}
 		inches := s.Inches

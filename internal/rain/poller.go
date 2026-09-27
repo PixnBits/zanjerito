@@ -2,7 +2,9 @@ package rain
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,10 +22,20 @@ type Status struct {
 	HaveTotal   bool
 }
 
+const (
+	badFetch       = "fetch"
+	badStale       = "stale"
+	badImplausible = "implausible"
+	badEmpty       = "empty"
+	badOther       = "other"
+)
+
 // Poller fetches on an interval and applies Decide to the engine.
 // It does not call engine.Stop. A cancelled ctx ends Loop.
-// Do serializes manual pause edits with Poll so a clear cannot be overwritten
-// by an in-flight decision. Do's callback must not call Poll or Do.
+//
+// mu guards engine edits, status, and the snapshot version. Disk writes take
+// writeMu only, after mu is released, so Status never waits on fsync.
+// Do's callback must not call Poll, Do, ManualPause, or ManualClear.
 type Poller struct {
 	Source Source
 	Eng    *engine.Engine
@@ -32,8 +44,18 @@ type Poller struct {
 	Now    func() time.Time
 	Log    *log.Logger
 
-	mu sync.Mutex
-	st Status
+	// save persists one snapshot. Nil means store.SavePause.
+	// Called outside mu. Tests replace it via SetSaveFuncForTest.
+	save func(path string, ps store.PauseState) error
+
+	mu     sync.Mutex
+	st     Status
+	badCat string
+	seq    uint64 // bumped under mu for each snapshot
+
+	// writeMu serializes pause.json writes. Status never takes it.
+	writeMu sync.Mutex
+	written uint64 // highest version successfully persisted; writeMu only
 }
 
 // Start loads rain config beside configPath. A missing or disabled file
@@ -84,6 +106,7 @@ func (p *Poller) Loop(ctx context.Context) {
 }
 
 // Do runs fn while holding the poller lock.
+// fn must not call Poll, Do, ManualPause, or ManualClear.
 func (p *Poller) Do(fn func()) {
 	if p == nil || fn == nil {
 		if fn != nil {
@@ -96,7 +119,19 @@ func (p *Poller) Do(fn func()) {
 	fn()
 }
 
+// SetSaveFuncForTest installs fn as the pause persistence function.
+// Nil restores store.SavePause. The function runs outside mu.
+func (p *Poller) SetSaveFuncForTest(fn func(path string, ps store.PauseState) error) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.save = fn
+	p.mu.Unlock()
+}
+
 // Status returns a copy of the feed health. Enabled is true when a poller exists.
+// It takes only mu, never writeMu, so an in-flight pause.json write does not block it.
 func (p *Poller) Status() Status {
 	if p == nil {
 		return Status{}
@@ -112,8 +147,56 @@ func (p *Poller) Status() Status {
 	return s
 }
 
-// Poll fetches once and applies the decision. Fetch errors and stale samples
-// do not pause or clear. A cancelled ctx does not mark the feed unavailable.
+// ManualPause arms a user pause and persists it after releasing mu.
+// The snapshot is ordered with Poll so a later Resume is not overwritten by
+// an earlier decision. The caller waits for the disk write; Status does not.
+func (p *Poller) ManualPause(until *time.Time, reason string, now time.Time) error {
+	if p == nil || p.Eng == nil {
+		return fmt.Errorf("rain: no poller")
+	}
+	p.mu.Lock()
+	ps := manualPauseState(p.Eng, until, reason, now)
+	ver, path, save := p.bumpLocked()
+	p.mu.Unlock()
+	return p.persist(path, ps, ver, save)
+}
+
+// ManualClear resumes watering, records the rain event, and persists outside mu.
+func (p *Poller) ManualClear(now time.Time) error {
+	if p == nil || p.Eng == nil {
+		return fmt.Errorf("rain: no poller")
+	}
+	p.mu.Lock()
+	ps := manualClearState(p.Eng, now)
+	ver, path, save := p.bumpLocked()
+	p.mu.Unlock()
+	return p.persist(path, ps, ver, save)
+}
+
+// SyncExpiredPause writes an engine-expired hold back to disk when no pause
+// snapshot is already being saved. It returns immediately if a write is in
+// progress so status does not wait on that fsync.
+func (p *Poller) SyncExpiredPause(now time.Time) {
+	if p == nil || p.Path == "" {
+		return
+	}
+	if !p.writeMu.TryLock() {
+		return
+	}
+	defer p.writeMu.Unlock()
+	ps, err := store.LoadPause(p.Path, now)
+	if err != nil || !ps.Active {
+		return
+	}
+	if p.Eng != nil && p.Eng.IsPaused(now) {
+		return
+	}
+	_ = store.SavePause(p.Path, ps.WithoutActive())
+}
+
+// Poll fetches once and applies the decision. Fetch errors and stale or
+// implausible samples do not pause or clear. A cancelled ctx does not mark
+// the feed unavailable. pause.json is written after mu is released.
 func (p *Poller) Poll(ctx context.Context) {
 	if p == nil || p.Source == nil || p.Eng == nil {
 		return
@@ -125,18 +208,45 @@ func (p *Poller) Poll(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+
+	var (
+		ps       store.PauseState
+		ver      uint64
+		doSave   bool
+		loadFile bool
+		logs     []string
+		path     string
+		save     func(string, store.PauseState) error
+	)
+
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	now := p.now()
 	if fetchErr != nil {
-		msg := redact(fetchErr.Error(), p.Cfg.GaugeID)
-		p.markBad(msg)
-		p.logf("rain: fetch failed: %s", msg)
+		msg := redactErr(fetchErr, p.Cfg.GaugeID)
+		if line := p.observeBad(msg, badFetch); line != "" {
+			logs = append(logs, line)
+		}
+	} else {
+		detail := p.Eng.PauseRaw()
+		action := Decide(samples, now, p.Cfg, viewFrom(detail), memoryFrom(detail))
+		ps, ver, doSave, loadFile, logs = p.applyLocked(now, action)
+	}
+	path = p.Path
+	save = p.saveFuncLocked()
+	p.mu.Unlock()
+
+	for _, line := range logs {
+		p.logf("%s", line)
+	}
+	if doSave {
+		if err := p.persist(path, ps, ver, save); err != nil {
+			p.logf("rain: save pause: %v", err)
+		}
 		return
 	}
-	detail := p.Eng.PauseRaw()
-	action := Decide(samples, now, p.Cfg, viewFrom(detail), memoryFrom(detail))
-	p.apply(now, action)
+	if loadFile && path != "" {
+		p.readPauseFile(path, now)
+	}
 }
 
 func (p *Poller) now() time.Time {
@@ -154,6 +264,18 @@ func (p *Poller) logf(format string, args ...any) {
 	lg.Printf(format, args...)
 }
 
+func (p *Poller) saveFuncLocked() func(string, store.PauseState) error {
+	if p.save != nil {
+		return p.save
+	}
+	return store.SavePause
+}
+
+func (p *Poller) bumpLocked() (ver uint64, path string, save func(string, store.PauseState) error) {
+	p.seq++
+	return p.seq, p.Path, p.saveFuncLocked()
+}
+
 func (p *Poller) markBad(msg string) {
 	p.st.Enabled = true
 	p.st.Unavailable = true
@@ -166,76 +288,125 @@ func (p *Poller) noteFresh(now time.Time, total float64) {
 	p.st.Unavailable = false
 	p.st.LastError = ""
 	p.st.LastOK = &t
-	p.st.LastTotal = total
+	p.st.LastTotal = RoundInches(total)
 	p.st.HaveTotal = true
 }
 
-func (p *Poller) apply(now time.Time, action Action) {
+// observeBad records unavailable. It returns a log line only when the feed
+// enters unavailable, or the reason category changes.
+func (p *Poller) observeBad(msg, cat string) string {
+	changed := !p.st.Unavailable || p.badCat != cat
+	p.markBad(msg)
+	p.badCat = cat
+	if !changed {
+		return ""
+	}
+	if cat == badFetch {
+		return "rain: fetch failed: " + msg
+	}
+	return "rain: " + msg
+}
+
+// observeGood records a fresh read. It returns a log line only on recovery.
+func (p *Poller) observeGood(now time.Time, total float64) string {
+	wasBad := p.st.Unavailable
+	p.noteFresh(now, total)
+	p.badCat = ""
+	if !wasBad {
+		return ""
+	}
+	return "rain: data available again"
+}
+
+func (p *Poller) applyLocked(now time.Time, action Action) (ps store.PauseState, ver uint64, doSave, loadFile bool, logs []string) {
 	switch action.Kind {
 	case ActionUnavailable:
 		msg := action.Error
 		if msg == "" {
 			msg = "rain data unavailable"
 		}
-		p.markBad(msg)
-		p.logf("rain: %s", msg)
+		if line := p.observeBad(msg, badCategory(msg)); line != "" {
+			logs = append(logs, line)
+		}
 		return
 	case ActionClear:
-		p.noteFresh(now, action.Total)
+		if line := p.observeGood(now, action.Total); line != "" {
+			logs = append(logs, line)
+		}
 		if !action.LastRain.IsZero() {
 			p.Eng.NoteEventRain(action.LastRain)
 		}
 		p.Eng.ClearPause()
-		if err := p.saveFromEngine(now); err != nil {
-			p.logf("rain: save pause: %v", err)
-		}
-		p.logf("rain: auto pause ended")
+		ps = pauseStateFromEngine(p.Eng, now)
+		ver, _, _ = p.bumpLocked()
+		doSave = true
+		logs = append(logs, "rain: auto pause ended")
 		return
 	case ActionPause:
-		p.noteFresh(now, action.Total)
+		if line := p.observeGood(now, action.Total); line != "" {
+			logs = append(logs, line)
+		}
 		until := action.Until
 		event := action.EventAt
 		last := action.LastRain
 		p.Eng.SetPauseMeta(&until, "rain", engine.PauseMeta{
 			Source:      engine.PauseSourceAuto,
-			RainInches:  action.Inches,
+			RainInches:  RoundInches(action.Inches),
 			RainEventAt: &event,
 			LastRainAt:  &last,
 		})
-		if err := p.saveFromEngine(now); err != nil {
-			p.logf("rain: save pause: %v", err)
-		}
-		p.logf("rain: auto pause")
+		ps = pauseStateFromEngine(p.Eng, now)
+		ver, _, _ = p.bumpLocked()
+		doSave = true
+		logs = append(logs, "rain: auto pause")
 		return
 	default:
-		p.noteFresh(now, action.Total)
-		detail := p.Eng.PauseRaw()
-		if !detail.Paused {
-			if _, err := store.LoadPause(p.Path, now); err != nil {
-				p.logf("rain: pause load: %v", err)
-			}
+		if line := p.observeGood(now, action.Total); line != "" {
+			logs = append(logs, line)
 		}
+		loadFile = !p.Eng.PauseRaw().Paused
+		return
 	}
 }
 
-func (p *Poller) saveFromEngine(now time.Time) error {
-	d := p.Eng.PauseDetail(now)
-	ps := store.PauseState{RainClearedAt: d.RainClearedAt}
-	if d.Paused {
-		ps.Active = true
-		ps.Until = d.Until
-		ps.Reason = d.Reason
-		ps.Source = d.Source
-		if ps.Source == "" {
-			ps.Source = engine.PauseSourceManual
-		}
-		ps.RainInches = d.RainInches
-		ps.RainEventAt = d.RainEventAt
-		ps.LastRainAt = d.LastRainAt
-		return store.SavePause(p.Path, ps)
+func badCategory(msg string) string {
+	switch {
+	case strings.Contains(msg, "implausible"):
+		return badImplausible
+	case strings.Contains(msg, "stale"):
+		return badStale
+	case strings.Contains(msg, "no samples"):
+		return badEmpty
+	default:
+		return badOther
 	}
-	ps.LastRainAt = d.EventLastRain
-	return store.SavePause(p.Path, ps)
+}
+
+// persist writes ps unless a newer snapshot is already on disk.
+// writeMu is held across the write so an older snapshot cannot finish last.
+func (p *Poller) persist(path string, ps store.PauseState, ver uint64, save func(string, store.PauseState) error) error {
+	if save == nil {
+		save = store.SavePause
+	}
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	if ver <= p.written {
+		return nil
+	}
+	if err := save(path, ps); err != nil {
+		return err
+	}
+	p.written = ver
+	return nil
+}
+
+func (p *Poller) readPauseFile(path string, now time.Time) {
+	p.writeMu.Lock()
+	_, err := store.LoadPause(path, now)
+	p.writeMu.Unlock()
+	if err != nil {
+		p.logf("rain: pause load: %v", err)
+	}
 }
 
 func viewFrom(d engine.PauseSnap) PauseView {

@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,3 +155,298 @@ func TestStatusRainUnavailable(t *testing.T) {
 type errRain string
 
 func (e errRain) Error() string { return string(e) }
+
+func TestStatusRoundsRainInches(t *testing.T) {
+	s := newTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	fake := &rain.Fake{}
+	fake.Set([]rain.Sample{
+		{Time: now.Add(-2 * time.Hour), Inches: 0.1},
+		{Time: now.Add(-time.Hour), Inches: 0.2},
+		{Time: now, Inches: 0},
+	}, nil)
+	p := &rain.Poller{
+		Source: fake,
+		Eng:    s.Eng,
+		Path:   s.Path,
+		Cfg: rain.Config{
+			Enabled: true, GaugeID: "TEST-GAUGE",
+			TriggerInches: 0.25, WindowHours: 24,
+			DryDays: 2, HeavyInches: 1, HeavyDryDays: 4, StaleHours: 7,
+		},
+		Now: func() time.Time { return now },
+	}
+	s.Rain = p
+	p.Poll(context.Background())
+
+	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
+	body := rr.Body.String()
+	if strings.Contains(body, "0.30000000000000004") {
+		t.Fatalf("dust in status %s", body)
+	}
+	if !strings.Contains(body, `"rain_inches":0.3`) || !strings.Contains(body, `"last_total_inches":0.3`) {
+		t.Fatalf("status %s", body)
+	}
+	raw, err := os.ReadFile(store.PausePath(s.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "0.30000000000000004") {
+		t.Fatalf("dust in pause.json %s", raw)
+	}
+	var disk store.PauseState
+	if err := json.Unmarshal(raw, &disk); err != nil {
+		t.Fatal(err)
+	}
+	if disk.RainInches != 0.3 {
+		t.Fatalf("pause.json rain_inches %v raw %s", disk.RainInches, raw)
+	}
+
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 4096)
+	n, err := resp.Body.Read(buf)
+	if n == 0 && err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	sse := string(buf[:n])
+	if strings.Contains(sse, "0.30000000000000004") || !strings.Contains(sse, `"rain_inches":0.3`) || !strings.Contains(sse, `"last_total_inches":0.3`) {
+		t.Fatalf("sse %s", sse)
+	}
+}
+
+func TestStatusWhileRainSaveBlocked(t *testing.T) {
+	s, p, release := newBlockingRain(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	p.Now = func() time.Time { return now }
+	fake := &rain.Fake{}
+	fake.Set([]rain.Sample{{Time: now.Add(-time.Hour), Inches: 0.5}, {Time: now, Inches: 0}}, nil)
+	p.Source = fake
+	p.Cfg = rain.Config{
+		Enabled: true, GaugeID: "TEST-GAUGE",
+		TriggerInches: 0.25, WindowHours: 24,
+		DryDays: 2, HeavyInches: 1, HeavyDryDays: 4, StaleHours: 7,
+	}
+
+	pollDone := make(chan struct{})
+	go func() {
+		p.Poll(context.Background())
+		close(pollDone)
+	}()
+	waitSave(t, release)
+	assertStatusFast(t, s, p)
+	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if rr.Code != 200 {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+	st := decodeMap(t, rr)
+	if st["paused"] != true || st["pause_source"] != "auto" {
+		t.Fatalf("engine pause not visible yet %v", st)
+	}
+	closeRelease(release)
+	select {
+	case <-pollDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("poll did not finish")
+	}
+	disk, err := store.LoadPause(s.Path, now)
+	if err != nil || !disk.Active || disk.Source != "auto" {
+		t.Fatalf("disk %+v %v", disk, err)
+	}
+}
+
+func TestStatusWhileResumeSaveBlocked(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodPost, "/api/pause", map[string]any{"duration_sec": 3600, "reason": "mow"})
+	if rr.Code != 200 {
+		t.Fatalf("pause %d %s", rr.Code, rr.Body.String())
+	}
+	_, gate, _ := newBlockingRainOn(t, s)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodDelete, "/api/pause", nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		done <- rec
+	}()
+	waitSave(t, gate)
+	assertStatusFast(t, s, s.Rain)
+	rr = doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if rr.Code != 200 {
+		t.Fatalf("status %d", rr.Code)
+	}
+	// The hold is already cleared in memory; the save is still blocked.
+	if decodeMap(t, rr)["paused"] != false {
+		t.Fatalf("status %s", rr.Body.String())
+	}
+	closeRelease(gate)
+	rec := waitRecorder(t, done)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resume %d %s", rec.Code, rec.Body.String())
+	}
+	disk, err := store.LoadPause(s.Path, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk.Active || disk.RainClearedAt == nil {
+		t.Fatalf("pause.json %+v", disk)
+	}
+}
+
+func TestInFlightPollDoesNotOverwriteResume(t *testing.T) {
+	s, p, gate := newBlockingRain(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	p.Now = func() time.Time { return now }
+	fake := &rain.Fake{}
+	fake.Set([]rain.Sample{{Time: now.Add(-time.Hour), Inches: 0.5}, {Time: now, Inches: 0}}, nil)
+	p.Source = fake
+	p.Cfg = rain.Config{
+		Enabled: true, GaugeID: "TEST-GAUGE",
+		TriggerInches: 0.25, WindowHours: 24,
+		DryDays: 2, HeavyInches: 1, HeavyDryDays: 4, StaleHours: 7,
+	}
+	pollDone := make(chan struct{})
+	go func() {
+		p.Poll(context.Background())
+		close(pollDone)
+	}()
+	waitSave(t, gate)
+	assertStatusFast(t, s, p)
+	resumeDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest(http.MethodDelete, "/api/pause", nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		resumeDone <- rec
+	}()
+	// Resume is serialized behind the poll snapshot. Status must not wait
+	// on either fsync. Unblock, then the later clear is what remains on disk.
+	assertStatusFast(t, s, p)
+	closeRelease(gate)
+	select {
+	case <-pollDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("poll did not finish")
+	}
+	rec := waitRecorder(t, resumeDone)
+	if rec.Code != 200 {
+		t.Fatalf("resume %d %s", rec.Code, rec.Body.String())
+	}
+	disk, err := store.LoadPause(s.Path, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disk.Active || disk.RainClearedAt == nil {
+		t.Fatalf("older pause overwrote resume %+v", disk)
+	}
+}
+
+func TestManualSaveFailureIs500(t *testing.T) {
+	s := newTestServer(t)
+	p := &rain.Poller{Eng: s.Eng, Path: s.Path}
+	p.SetSaveFuncForTest(func(string, store.PauseState) error {
+		return errRain("disk full")
+	})
+	s.Rain = p
+	rr := doJSON(t, s, http.MethodPost, "/api/pause", map[string]any{"duration_sec": 60})
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "disk full") {
+		t.Fatalf("pause %d %s", rr.Code, rr.Body.String())
+	}
+	rr = doJSON(t, s, http.MethodDelete, "/api/pause", nil)
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), "disk full") {
+		t.Fatalf("resume %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+// blockingSave is a pause writer that waits until release is closed.
+type blockingSave struct {
+	release chan struct{}
+	entered chan struct{}
+	once    sync.Once
+	closed  sync.Once
+}
+
+func (b *blockingSave) save(path string, ps store.PauseState) error {
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return store.SavePause(path, ps)
+}
+
+func (b *blockingSave) close() {
+	b.closed.Do(func() { close(b.release) })
+}
+
+func newBlockingRain(t *testing.T) (*Server, *rain.Poller, *blockingSave) {
+	t.Helper()
+	s := newTestServer(t)
+	p, gate, _ := newBlockingRainOn(t, s)
+	return s, p, gate
+}
+
+func newBlockingRainOn(t *testing.T, s *Server) (*rain.Poller, *blockingSave, chan struct{}) {
+	t.Helper()
+	gate := &blockingSave{release: make(chan struct{}), entered: make(chan struct{})}
+	t.Cleanup(gate.close)
+	p := &rain.Poller{Eng: s.Eng, Path: s.Path, Cfg: rain.Config{Enabled: true, GaugeID: "TEST-GAUGE"}}
+	p.SetSaveFuncForTest(gate.save)
+	s.Rain = p
+	return p, gate, gate.entered
+}
+
+func waitSave(t *testing.T, gate *blockingSave) {
+	t.Helper()
+	waitEntered(t, gate.entered)
+}
+
+func waitEntered(t *testing.T, entered chan struct{}) {
+	t.Helper()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("save did not start")
+	}
+}
+
+func closeRelease(gate *blockingSave) {
+	gate.close()
+}
+
+func assertStatusFast(t *testing.T, s *Server, p *rain.Poller) {
+	t.Helper()
+	start := time.Now()
+	_ = p.Status()
+	if d := time.Since(start); d > 200*time.Millisecond {
+		t.Fatalf("Poller.Status took %s", d)
+	}
+	start = time.Now()
+	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if d := time.Since(start); d > 200*time.Millisecond {
+		t.Fatalf("GET /api/status took %s body %s", d, rr.Body.String())
+	}
+	if rr.Code != 200 {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func waitRecorder(t *testing.T, done chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+	t.Helper()
+	select {
+	case rec := <-done:
+		return rec
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+	return nil
+}

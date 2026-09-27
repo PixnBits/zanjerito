@@ -37,6 +37,6 @@ Example config:
 
 Seed schedule (parity fixture, not the only program): Front West 4 min → Front North 8 min → Front South 8 min. Drip is not in that itinerary.
 
-`rain_pause_exempt` (default false) lets that station keep running during an **automatic** rain pause. The example sets it on Drip Line only. A manual pause still holds every station. See the README section "Automatic rain pause".
+`rain_pause_exempt` (default false) lets that station keep running during an **automatic** rain pause. A manual run of an exempt station (for example drip) from Home is allowed; any other station is refused (HTTP 409) until Resume. The example sets it on Drip Line only. A manual pause still holds every station. See the README section "Automatic rain pause".
 
 Validate on first boot: refuse to run if `active_low` is missing. Confirm chip with `gpiodetect` / `gpioinfo`.

@@ -113,9 +113,6 @@ func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[stri
 	loc = s.location()
 	d := s.Eng.PauseDetail(now)
 	label := schedule.PauseLabel(d.Paused, d.Until, now, loc)
-	if d.AutoRain() {
-		label = schedule.RainPauseLabel(d.RainInches, d.Until, now, loc)
-	}
 	var untilStr any
 	if d.Paused && d.Until != nil {
 		untilStr = d.Until.In(loc).Format(time.RFC3339)
@@ -131,7 +128,10 @@ func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[stri
 		if src == "" {
 			src = engine.PauseSourceManual
 		}
-		inches = d.RainInches
+		inches = rain.RoundInches(d.RainInches)
+	}
+	if d.AutoRain() {
+		label = schedule.RainPauseLabel(inches, d.Until, now, loc)
 	}
 	fields = map[string]any{
 		"paused":       d.Paused,
@@ -164,17 +164,9 @@ func (s *Server) rainBody(loc *time.Location) map[string]any {
 		out["last_ok_at"] = st.LastOK.In(loc).Format(time.RFC3339)
 	}
 	if st.HaveTotal {
-		out["last_total_inches"] = st.LastTotal
+		out["last_total_inches"] = rain.RoundInches(st.LastTotal)
 	}
 	return out
-}
-
-func (s *Server) withRain(fn func()) {
-	if s.Rain != nil {
-		s.Rain.Do(fn)
-		return
-	}
-	fn()
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
@@ -183,8 +175,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	loc, fields := s.pauseFields(now)
 	// Persist auto-expire so disk matches memory after timed pause ends.
 	// Keep rain clear memory; do not wipe rain_cleared_at.
+	// A rain poller writes through its own lock and must not stall this handler.
 	if fields["paused"] != true {
-		if p, err := store.LoadPause(s.Path, now); err == nil && p.Active && !s.Eng.IsPaused(now) {
+		if s.Rain != nil {
+			s.Rain.SyncExpiredPause(now)
+		} else if p, err := store.LoadPause(s.Path, now); err == nil && p.Active && !s.Eng.IsPaused(now) {
 			_ = store.SavePause(s.Path, p.WithoutActive())
 		}
 	}
@@ -653,9 +648,11 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 	// Cancel any active run; valves off. STOP remains separate (cancel-only).
 	_ = s.Eng.Stop()
 	var saveErr error
-	s.withRain(func() {
+	if s.Rain != nil {
+		saveErr = s.Rain.ManualPause(until, reason, now)
+	} else {
 		saveErr = rain.RememberManualPause(s.Eng, s.Path, until, reason, now)
-	})
+	}
 	if saveErr != nil {
 		writeErr(w, http.StatusInternalServerError, saveErr)
 		return
@@ -666,9 +663,11 @@ func (s *Server) handlePauseSet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePauseClear(w http.ResponseWriter, _ *http.Request) {
 	now := time.Now()
 	var saveErr error
-	s.withRain(func() {
+	if s.Rain != nil {
+		saveErr = s.Rain.ManualClear(now)
+	} else {
 		saveErr = rain.RememberManualClear(s.Eng, s.Path, now)
-	})
+	}
 	if saveErr != nil {
 		writeErr(w, http.StatusInternalServerError, saveErr)
 		return

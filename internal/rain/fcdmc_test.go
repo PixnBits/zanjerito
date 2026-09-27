@@ -123,6 +123,50 @@ func TestFCDMCTimeout(t *testing.T) {
 	}
 }
 
+func TestRedactKeepsClosingQuote(t *testing.T) {
+	got := redact(`Post "http://127.0.0.1:9/TEST-GAUGE?x=1": EOF`, "TEST-GAUGE")
+	if got != `Post "<redacted>": EOF` {
+		t.Fatalf("got %q", got)
+	}
+	dial := redact(`Post "http://127.0.0.1:9/x": dial tcp 127.0.0.1:9: connect: connection refused`, "TEST-GAUGE")
+	if dial != `Post "<redacted>": dial tcp <redacted>: connect: connection refused` {
+		t.Fatalf("dial %q", dial)
+	}
+	if strings.Count(dial, `"`)%2 != 0 || strings.Contains(dial, "127.0.0.1") || strings.Contains(dial, "TEST-GAUGE") {
+		t.Fatalf("dial %q", dial)
+	}
+}
+
+func TestFCDMCClosedServerRedacts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	rawURL := srv.URL + "/TEST-GAUGE"
+	host := srv.Listener.Addr().String()
+	srv.Close()
+	src := &FCDMC{
+		URL:     rawURL,
+		Method:  http.MethodPost,
+		Body:    DefaultBody,
+		GaugeID: "TEST-GAUGE",
+		HTTP:    &http.Client{Timeout: time.Second},
+	}
+	_, err := src.Fetch(context.Background())
+	if err == nil {
+		t.Fatal("want error")
+	}
+	msg := err.Error()
+	for _, leak := range []string{"TEST-GAUGE", rawURL, host, "127.0.0.1", "http://", "https://"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("leak %q in %q", leak, msg)
+		}
+	}
+	if strings.Count(msg, `"`)%2 != 0 {
+		t.Fatalf("unbalanced quotes: %q", msg)
+	}
+	if !strings.Contains(msg, `"<redacted>"`) {
+		t.Fatalf("msg %q", msg)
+	}
+}
+
 func TestFCDMCContextCancel(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {

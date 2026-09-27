@@ -1,18 +1,21 @@
 package rain
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
 func testPolicy() Config {
 	return Config{
-		TriggerInches: 0.25,
-		WindowHours:   24,
-		DryDays:       2,
-		HeavyInches:   1,
-		HeavyDryDays:  4,
-		StaleHours:    7,
+		TriggerInches:      0.25,
+		WindowHours:        24,
+		DryDays:            2,
+		HeavyInches:        1,
+		HeavyDryDays:       4,
+		StaleHours:         7,
+		MaxIncrementInches: 2,
+		MaxWindowInches:    6,
 	}
 }
 
@@ -154,5 +157,117 @@ func TestDecideEmpty(t *testing.T) {
 	got := Decide(nil, time.Now(), testPolicy(), PauseView{}, Memory{})
 	if got.Kind != ActionUnavailable {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestDecidePlausibility(t *testing.T) {
+	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
+	cfg := testPolicy()
+	last := now.Add(-time.Hour)
+	until := now.Add(48 * time.Hour)
+	auto := PauseView{
+		Active: true, Until: &until, Reason: "rain", Source: "auto",
+		Inches: 0.4, LastRain: &last, EventAt: &last,
+	}
+
+	boom := Decide([]Sample{{Time: now.Add(-time.Minute), Inches: 99.99}, {Time: now, Inches: 0}}, now, cfg, PauseView{}, Memory{})
+	if boom.Kind != ActionUnavailable || boom.Error != errImplausible {
+		t.Fatalf("99.99 %+v", boom)
+	}
+	// Defaults apply when the caps are left at zero.
+	bare := Config{TriggerInches: 0.25, WindowHours: 24, StaleHours: 7}
+	if got := Decide([]Sample{{Time: now, Inches: 99.99}}, now, bare, PauseView{}, Memory{}); got.Kind != ActionUnavailable || got.Error != errImplausible {
+		t.Fatalf("default caps %+v", got)
+	}
+	held := Decide([]Sample{{Time: now.Add(-time.Minute), Inches: 99.99}}, now, cfg, auto, Memory{})
+	if held.Kind != ActionUnavailable {
+		t.Fatalf("must not extend %+v", held)
+	}
+	past := now.Add(-time.Minute)
+	expired := auto
+	expired.Until = &past
+	if got := Decide([]Sample{{Time: now, Inches: 99.99}}, now, cfg, expired, Memory{}); got.Kind != ActionUnavailable {
+		t.Fatalf("must not clear %+v", got)
+	}
+
+	sum := []Sample{
+		{Time: now.Add(-4 * time.Hour), Inches: 1.9},
+		{Time: now.Add(-3 * time.Hour), Inches: 1.9},
+		{Time: now.Add(-2 * time.Hour), Inches: 1.9},
+		{Time: now.Add(-time.Hour), Inches: 1.9},
+		{Time: now, Inches: 0},
+	}
+	if got := Decide(sum, now, cfg, PauseView{}, Memory{}); got.Kind != ActionUnavailable || got.Error != errImplausible {
+		t.Fatalf("window cap %+v", got)
+	}
+	if got := Decide(sum, now, cfg, auto, Memory{}); got.Kind != ActionUnavailable {
+		t.Fatalf("window cap changed pause %+v", got)
+	}
+
+	exactInc := Decide([]Sample{{Time: last, Inches: 2}, {Time: now, Inches: 0}}, now, cfg, PauseView{}, Memory{})
+	if exactInc.Kind != ActionPause || exactInc.Inches != 2 {
+		t.Fatalf("increment cap should allow 2.0 %+v", exactInc)
+	}
+	exactWin := Decide([]Sample{
+		{Time: now.Add(-3 * time.Hour), Inches: 2},
+		{Time: now.Add(-2 * time.Hour), Inches: 2},
+		{Time: now.Add(-time.Hour), Inches: 2},
+		{Time: now, Inches: 0},
+	}, now, cfg, PauseView{}, Memory{})
+	if exactWin.Kind != ActionPause || exactWin.Total != 6 {
+		t.Fatalf("window cap should allow 6.0 %+v", exactWin)
+	}
+
+	// A glitch outside the window is not an in-window reading.
+	old := Decide([]Sample{{Time: now.Add(-48 * time.Hour), Inches: 99}, {Time: now, Inches: 0}}, now, cfg, PauseView{}, Memory{})
+	if old.Kind != ActionNone {
+		t.Fatalf("old glitch %+v", old)
+	}
+}
+
+func TestDecideFutureRows(t *testing.T) {
+	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
+	cfg := testPolicy()
+	staleAt := now.Add(-8 * time.Hour)
+	far := now.Add(48 * time.Hour)
+	until := now.Add(10 * time.Hour)
+	last := staleAt
+	auto := PauseView{
+		Active: true, Until: &until, Reason: "rain", Source: "auto",
+		Inches: 0.4, LastRain: &last, EventAt: &last,
+	}
+
+	got := Decide([]Sample{{Time: staleAt, Inches: 1}, {Time: far, Inches: 9}}, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionUnavailable || !strings.Contains(got.Error, "stale") {
+		t.Fatalf("stale+future %+v", got)
+	}
+	if got := Decide([]Sample{{Time: staleAt, Inches: 1}, {Time: far, Inches: 9}}, now, cfg, auto, Memory{}); got.Kind != ActionUnavailable || !strings.Contains(got.Error, "stale") {
+		t.Fatalf("stale+future must not clear %+v", got)
+	}
+
+	tip := now.Add(10 * time.Minute)
+	got = Decide([]Sample{{Time: tip, Inches: 0.3}}, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionPause || !got.LastRain.Equal(tip) {
+		t.Fatalf("10 min future %+v", got)
+	}
+	edge := now.Add(futureSkew)
+	got = Decide([]Sample{{Time: edge, Inches: 0.3}}, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionPause || !got.LastRain.Equal(edge) {
+		t.Fatalf("exactly futureSkew %+v", got)
+	}
+
+	beyond := now.Add(futureSkew + time.Second)
+	got = Decide([]Sample{
+		{Time: now.Add(-time.Hour), Inches: 0.10},
+		{Time: beyond, Inches: 50},
+		{Time: now, Inches: 0},
+	}, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionNone || got.Total > 0.11 {
+		t.Fatalf("future rain counted %+v", got)
+	}
+
+	allFar := Decide([]Sample{{Time: far, Inches: 1}}, now, cfg, PauseView{}, Memory{})
+	if allFar.Kind != ActionUnavailable {
+		t.Fatalf("all future %+v", allFar)
 	}
 }

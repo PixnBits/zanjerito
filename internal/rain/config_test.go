@@ -1,6 +1,8 @@
 package rain
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +47,9 @@ func TestLoadExample(t *testing.T) {
 	if cfg.HeavyInches != 1 || cfg.HeavyDryDays != 4 || cfg.StaleHours != 7 {
 		t.Fatalf("heavy/stale %+v", cfg)
 	}
+	if cfg.MaxIncrementInches != 2 || cfg.MaxWindowInches != 6 {
+		t.Fatalf("plausibility caps %+v", cfg)
+	}
 	if cfg.Timeout != 15*time.Second || cfg.PollInterval() != 30*time.Minute {
 		t.Fatalf("timing timeout %s interval %s", cfg.Timeout, cfg.PollInterval())
 	}
@@ -73,6 +78,9 @@ func TestLoadDefaultsAndEnv(t *testing.T) {
 	}
 	if cfg.TriggerInches != 0.25 || cfg.StaleHours != 7 || cfg.DryDays != 2 || cfg.HeavyDryDays != 4 {
 		t.Fatalf("numeric defaults %+v", cfg)
+	}
+	if cfg.MaxIncrementInches != 2 || cfg.MaxWindowInches != 6 {
+		t.Fatalf("plausibility defaults %+v", cfg)
 	}
 
 	fast := filepath.Join(dir, "fast.json")
@@ -136,6 +144,64 @@ func TestLoadDisabledAndMalformed(t *testing.T) {
 	_, err = Load(filepath.Join(dir, "config.json"))
 	if err == nil || !strings.Contains(err.Error(), "gauge_id") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestLoadPlausibilityAndDryDayCap(t *testing.T) {
+	var buf bytes.Buffer
+	prev := configLog
+	configLog = log.New(&buf, "", 0)
+	t.Cleanup(func() { configLog = prev })
+
+	parse := func(body string) Config {
+		t.Helper()
+		cfg, err := parseConfig([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	base := `{"gauge_id":"TEST-GAUGE","url":"https://example.test/rain"`
+	cfg := parse(base + `,"max_increment_inches":0,"max_window_inches":-1}`)
+	if cfg.MaxIncrementInches != 2 || cfg.MaxWindowInches != 6 {
+		t.Fatalf("non-positive caps %+v", cfg)
+	}
+	cfg = parse(base + `,"max_increment_inches":1.5,"max_window_inches":4}`)
+	if cfg.MaxIncrementInches != 1.5 || cfg.MaxWindowInches != 4 {
+		t.Fatalf("explicit caps %+v", cfg)
+	}
+
+	cfg = parse(base + `,"dry_days":30,"heavy_dry_days":90}`)
+	if cfg.DryDays != 14 || cfg.HeavyDryDays != 14 {
+		t.Fatalf("clamp %+v", cfg)
+	}
+	if strings.Count(buf.String(), "capped at 14") != 1 {
+		t.Fatalf("log %q", buf.String())
+	}
+	if strings.Contains(buf.String(), "TEST-GAUGE") || strings.Contains(buf.String(), "example.test") {
+		t.Fatalf("log leaked config %q", buf.String())
+	}
+
+	buf.Reset()
+	cfg = parse(base + `,"dry_days":3,"heavy_dry_days":3}`)
+	if cfg.DryDays != 3 || cfg.HeavyDryDays != 3 {
+		t.Fatalf("under cap %+v", cfg)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("unexpected log %q", buf.String())
+	}
+	cfg = parse(base + `,"dry_days":30,"heavy_dry_days":3}`)
+	if cfg.DryDays != 14 || cfg.HeavyDryDays != 3 {
+		t.Fatalf("mixed %+v", cfg)
+	}
+	// normalized clamps too, but only the loader logs.
+	buf.Reset()
+	got := Config{DryDays: 30, HeavyDryDays: 90}.normalized()
+	if got.DryDays != 14 || got.HeavyDryDays != 14 {
+		t.Fatalf("normalized %+v", got)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("normalized logged %q", buf.String())
 	}
 }
 
