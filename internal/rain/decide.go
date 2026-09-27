@@ -1,6 +1,9 @@
 package rain
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // futureSkew is how far ahead of now a sample may be and still count.
 // Rows further ahead are ignored for staleness and for the window sum.
@@ -195,9 +198,11 @@ func inWindow(s Sample, now time.Time, cfg Config) bool {
 }
 
 // implausible is true when any in-window increment, or the in-window total,
-// is strictly above its cap. Values equal to the cap are allowed.
+// is strictly above its cap in integer hundredths of an inch. Values equal
+// to the cap are allowed (float64 sums of exact hundredths can sit just over
+// the raw cap, e.g. 150×0.04).
 func implausible(samples []Sample, now time.Time, cfg Config, total float64) bool {
-	if total > cfg.MaxWindowInches {
+	if hundredths(total) > hundredths(cfg.MaxWindowInches) {
 		return true
 	}
 	for _, s := range samples {
@@ -208,11 +213,15 @@ func implausible(samples []Sample, now time.Time, cfg Config, total float64) boo
 		if inches < 0 {
 			inches = 0
 		}
-		if inches > cfg.MaxIncrementInches {
+		if hundredths(inches) > hundredths(cfg.MaxIncrementInches) {
 			return true
 		}
 	}
 	return false
+}
+
+func hundredths(v float64) int64 {
+	return int64(math.Round(v * 100))
 }
 
 // sumWindow totals increments in (now-window, now+futureSkew]. Negatives count as 0.

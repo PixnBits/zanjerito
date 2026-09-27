@@ -225,6 +225,52 @@ func TestDecidePlausibility(t *testing.T) {
 	}
 }
 
+func TestDecidePlausibilityHundredths(t *testing.T) {
+	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
+	cfg := testPolicy()
+
+	tips := func(n int, inches float64) []Sample {
+		s := make([]Sample, n+1)
+		for i := 0; i < n; i++ {
+			s[i] = Sample{Time: now.Add(-time.Duration(i+1) * time.Minute), Inches: inches}
+		}
+		s[n] = Sample{Time: now, Inches: 0}
+		return s
+	}
+
+	got := Decide(tips(150, 0.04), now, cfg, PauseView{}, Memory{})
+	if got.Kind == ActionUnavailable {
+		t.Fatalf("150×0.04 should be plausible, %+v", got)
+	}
+	if got.Kind != ActionPause {
+		t.Fatalf("150×0.04 should pause from unpaused, %+v", got)
+	}
+
+	got = Decide(tips(30, 0.20), now, cfg, PauseView{}, Memory{})
+	if got.Kind == ActionUnavailable {
+		t.Fatalf("30×0.20 should be plausible, %+v", got)
+	}
+	if got.Kind != ActionPause {
+		t.Fatalf("30×0.20 should pause, %+v", got)
+	}
+
+	over := tips(150, 0.04)
+	over = append(over, Sample{Time: now.Add(-151 * time.Minute), Inches: 0.01})
+	got = Decide(over, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionUnavailable || got.Error != errImplausible {
+		t.Fatalf("6.01 window %+v", got)
+	}
+
+	got = Decide([]Sample{{Time: now.Add(-time.Hour), Inches: 2.00}, {Time: now, Inches: 0}}, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionPause {
+		t.Fatalf("2.00 increment should pause %+v", got)
+	}
+	got = Decide([]Sample{{Time: now.Add(-time.Hour), Inches: 2.01}, {Time: now, Inches: 0}}, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionUnavailable || got.Error != errImplausible {
+		t.Fatalf("2.01 increment %+v", got)
+	}
+}
+
 func TestDecideFutureRows(t *testing.T) {
 	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
 	cfg := testPolicy()
