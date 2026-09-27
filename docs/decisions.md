@@ -95,6 +95,7 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 ## P2 — Can wait until after skeleton works
 
 ### D10. History / metrics retention
+- **Implementation:** `history.json` beside the config keeps the newest 200 runs from the last 60 days. The engine emits a record only after all-off and after the run is no longer busy (STOP stays instant). `GET /api/history?limit=N`.
 ### D11. Rain skip / weather
 ### D12. Multi-controller / remote access
 

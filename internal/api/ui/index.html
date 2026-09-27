@@ -360,6 +360,35 @@
     }
     .pause-stepper-hint { margin: 8px 0 0; text-align: center; color: var(--muted); font-size: .85rem; }
     #pause-days-go { width: 100%; margin-top: 12px; min-height: 48px; border-radius: 12px; }
+    /* Recent runs — same cream card as schedules */
+    .history-card {
+      background: var(--cream);
+      border-radius: 18px;
+      padding: 4px 16px 8px;
+      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.5) inset,
+        0 2px 8px rgba(58,42,31,.05);
+    }
+    .history-item {
+      padding: 10px 0;
+      border-top: 1px solid color-mix(in srgb, var(--dune) 30%, var(--cream-edge));
+    }
+    .history-item:first-child { border-top: 0; }
+    .history-line { font-size: .98rem; line-height: 1.35; overflow-wrap: anywhere; }
+    .history-detail {
+      color: var(--muted); font-size: .82rem; margin-top: 2px; line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .history-note { color: var(--muted); margin: 10px 0; font-size: .95rem; }
+    .history-more, .history-back {
+      display: inline-flex; align-items: center;
+      background: transparent; border: 0; color: var(--teal);
+      font-weight: 650; font-size: 1rem; min-height: 44px;
+      padding: 8px 0; cursor: pointer; font-family: var(--sans);
+    }
+    #page-history { padding-top: 2px; }
+    #page-history .history-back { margin-bottom: 4px; }
   </style>
 </head>
 <body>
@@ -458,6 +487,11 @@
     </div>
     <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
+    <h1 class="strip-label">Recent runs</h1>
+    <div class="history-card" id="history-card">
+      <div id="history-home"><p class="history-note">No runs yet.</p></div>
+      <button type="button" class="history-more" id="history-see-all">See all</button>
+    </div>
   </section>
   <section id="page-schedules" class="hidden">
     <div class="sched-toolbar">
@@ -467,6 +501,13 @@
     <p class="sub" style="color:var(--muted);font-size:.9rem;margin:0 0 10px">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
+  </section>
+  <section id="page-history" class="hidden">
+    <button type="button" class="history-back" id="history-back">← Back</button>
+    <h1 class="strip-label">Recent runs</h1>
+    <div class="history-card">
+      <div id="history-all"><p class="history-note">No runs yet.</p></div>
+    </div>
   </section>
   <footer class="stop-bar" aria-label="Emergency stop">
     <button type="button" class="stop" id="stop">
@@ -580,7 +621,12 @@
       edit: { id: null, isNew: false },
       // Client run track — API has no remaining_seconds / ends_at
       runTrack: null, // { steps:[{station_id,minutes}], startedAt, endsAt, source }
+      history: [],
+      historyLoaded: false,
+      historyError: "",
+      prevPhase: "",
     };
+    let historyInFlight = null;
     if (new URLSearchParams(location.search).get("mode") === "kiosk") {
       document.documentElement.classList.add("kiosk");
       state.kiosk = true;
@@ -614,9 +660,11 @@
       if (!r.ok) throw new Error((body && body.error) || r.statusText);
       return body;
     }
+    function phaseIsWatering(p) {
+      return !!(p && p !== "Idle" && p !== "Fault");
+    }
     function watering() {
-      const p = state.status.phase || "";
-      return p && p !== "Idle" && p !== "Fault";
+      return phaseIsWatering(state.status.phase || "");
     }
     function stationTitle(id) {
       const st = (state.stations || []).find((s) => s.id === id);
@@ -893,6 +941,7 @@
       return shortStation(next.station_id);
     }
     function paintStatus() {
+      const wasWater = phaseIsWatering(state.prevPhase);
       const s = state.status;
       $("season-tag").textContent = seasonTagLabel();
       $("phase").innerHTML = heroTitle();
@@ -942,6 +991,12 @@
         const pill = el.querySelector(".tile-pill");
         if (pill) pill.textContent = on ? "On" : "Off";
       });
+      if (wasWater && !watering()) {
+        loadHistory();
+        // Writer appends just after Stop returns; one follow-up catches that.
+        setTimeout(loadHistory, 700);
+      }
+      state.prevPhase = (s && s.phase) || "";
     }
     function paintStations() {
       $("stations").innerHTML = "";
@@ -960,6 +1015,7 @@
         $("stations").appendChild(b);
       });
       paintStatus();
+      paintHistory();
     }
     function paintSchedules() {
       const box = $("schedules");
@@ -1289,18 +1345,30 @@
       $("paused-block-dlg").close();
       resumePause().catch((e) => alert(e.message));
     });
-    $("tab-home").addEventListener("click", () => {
+    function showHome() {
       $("page-home").classList.remove("hidden");
       $("page-schedules").classList.add("hidden");
+      $("page-history").classList.add("hidden");
       $("tab-home").classList.add("active");
       $("tab-sched").classList.remove("active");
-    });
+    }
+    $("tab-home").addEventListener("click", showHome);
     $("tab-sched").addEventListener("click", () => {
       $("page-home").classList.add("hidden");
       $("page-schedules").classList.remove("hidden");
+      $("page-history").classList.add("hidden");
       $("tab-home").classList.remove("active");
       $("tab-sched").classList.add("active");
     });
+    $("history-see-all").addEventListener("click", () => {
+      $("page-home").classList.add("hidden");
+      $("page-schedules").classList.add("hidden");
+      $("page-history").classList.remove("hidden");
+      $("tab-home").classList.remove("active");
+      $("tab-sched").classList.remove("active");
+      loadHistory();
+    });
+    $("history-back").addEventListener("click", showHome);
     $("sched-new").addEventListener("click", () => openEditor(null, false));
     $("ed-cancel").addEventListener("click", () => $("sched-dlg").close());
     $("ed-save").addEventListener("click", () => saveEditor().catch((e) => alert(e.message)));
@@ -1334,9 +1402,169 @@
       state.schedules = d.schedules || [];
       paintSchedules();
     }
+    function historyTZ() {
+      return (state.status && state.status.timezone) || TZ;
+    }
+    function tzParts(d) {
+      const map = {};
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: historyTZ(),
+        year: "numeric", month: "short", day: "numeric",
+        weekday: "short",
+        hour: "numeric", minute: "2-digit",
+        hour12: true,
+      });
+      for (const p of fmt.formatToParts(d)) {
+        if (p.type !== "literal") map[p.type] = p.value;
+      }
+      return map;
+    }
+    function tzYMD(d) {
+      const map = {};
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: historyTZ(), year: "numeric", month: "2-digit", day: "2-digit",
+      });
+      for (const p of fmt.formatToParts(d)) {
+        if (p.type !== "literal") map[p.type] = p.value;
+      }
+      return `${map.year}-${map.month}-${map.day}`;
+    }
+    function prevYMD(ymd) {
+      const [y, m, d] = String(ymd || "").split("-").map(Number);
+      const dt = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) - 1));
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(dt.getUTCDate()).padStart(2, "0");
+      return `${dt.getUTCFullYear()}-${mm}-${dd}`;
+    }
+    function tzHour(d) {
+      const map = {};
+      const fmt = new Intl.DateTimeFormat("en-US", {
+        timeZone: historyTZ(), hour: "2-digit", hourCycle: "h23",
+      });
+      for (const p of fmt.formatToParts(d)) {
+        if (p.type !== "literal") map[p.type] = p.value;
+      }
+      let h = Number(map.hour);
+      if (h === 24) h = 0;
+      return h;
+    }
+    function dayPhrase(d) {
+      if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "Earlier";
+      const ymd = tzYMD(d);
+      const today = tzYMD(new Date());
+      if (ymd === today) {
+        const h = tzHour(d);
+        if (h < 12) return "This morning";
+        if (h < 17) return "This afternoon";
+        return "This evening";
+      }
+      if (ymd === prevYMD(today)) return "Yesterday";
+      const map = tzParts(d);
+      return `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim();
+    }
+    function clockPhrase(d) {
+      if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+      const map = tzParts(d);
+      const ap = String(map.dayPeriod || "").toLowerCase();
+      return ap ? `${map.hour}:${map.minute} ${ap}` : `${map.hour}:${map.minute}`;
+    }
+    function formatRunMins(sec) {
+      sec = Number(sec) || 0;
+      if (sec > 0 && sec < 60) return "<1 min";
+      const m = Math.round(sec / 60);
+      if (m === 1) return "1 min";
+      return `${m} min`;
+    }
+    function historyProgramLabel(entry) {
+      if (entry.kind === "manual") {
+        const names = [];
+        for (const s of entry.stations || []) {
+          const n = shortStation(s.station_id);
+          if (n) names.push(n);
+        }
+        return names.length ? names.join(", ") : "Manual";
+      }
+      const p = String(entry.program || "").trim();
+      if (p) return p;
+      return String(entry.program_id || "").trim() || "Program";
+    }
+    function historyOutcome(entry) {
+      const actual = (entry.stations || []).reduce((n, s) => n + (Number(s.actual_sec) || 0), 0);
+      const mins = formatRunMins(actual);
+      if (entry.outcome === "completed") return `${mins} · finished`;
+      if (entry.outcome === "stopped") return `Stopped after ${mins}`;
+      if (entry.outcome === "skipped") {
+        const reason = String(entry.reason || "").trim().toLowerCase();
+        if (reason === "rain") return "Skipped, paused for rain";
+        return "Skipped, paused";
+      }
+      if (entry.outcome === "error") return `Error: ${entry.error || "unknown"}`;
+      return entry.outcome || "";
+    }
+    function historyHeadline(entry) {
+      const d = new Date(entry.started_at);
+      const when = Number.isNaN(d.getTime()) ? "Earlier" : `${dayPhrase(d)} ${clockPhrase(d)}`.trim();
+      return `${esc(when)} · ${esc(historyProgramLabel(entry))} · ${esc(historyOutcome(entry))}`;
+    }
+    function historyDetail(entry) {
+      const skipped = entry.outcome === "skipped";
+      const parts = [];
+      for (const s of entry.stations || []) {
+        const name = shortStation(s.station_id) || s.station_id || "Station";
+        const sec = skipped ? (Number(s.planned_sec) || 0) : (Number(s.actual_sec) || 0);
+        parts.push(`${name} ${formatRunMins(sec)}${skipped ? " planned" : ""}`);
+      }
+      return parts.join(" · ");
+    }
+    function historyItemHTML(entry) {
+      const detail = historyDetail(entry);
+      return `<div class="history-item"><div class="history-line">${historyHeadline(entry)}</div>` +
+        (detail ? `<div class="history-detail">${esc(detail)}</div>` : "") +
+        `</div>`;
+    }
+    function paintHistory() {
+      const home = $("history-home");
+      const all = $("history-all");
+      if (!home || !all) return;
+      const entries = state.history || [];
+      const note = state.historyError ? `<p class="history-note">${esc(state.historyError)}</p>` : "";
+      const homeItems = entries.slice(0, 5).map(historyItemHTML).join("");
+      const allItems = entries.map(historyItemHTML).join("");
+      if (!entries.length && !state.historyError) {
+        home.innerHTML = `<p class="history-note">No runs yet.</p>`;
+        all.innerHTML = `<p class="history-note">No runs yet.</p>`;
+        return;
+      }
+      if (!entries.length) {
+        home.innerHTML = note;
+        all.innerHTML = note;
+        return;
+      }
+      home.innerHTML = note + homeItems;
+      all.innerHTML = note + allItems;
+    }
+    function loadHistory() {
+      if (historyInFlight) return historyInFlight;
+      historyInFlight = (async () => {
+        try {
+          const d = await j("/api/history?limit=200", { cache: "no-store" });
+          if (!d || !Array.isArray(d.entries)) throw new Error("history");
+          state.history = d.entries;
+          state.historyLoaded = true;
+          state.historyError = "";
+        } catch (e) {
+          state.historyError = "Couldn't load recent runs.";
+        } finally {
+          historyInFlight = null;
+          try { paintHistory(); } catch (e) {}
+        }
+      })();
+      return historyInFlight;
+    }
     async function loadStatus() {
       state.status = normalizeStatus(await j("/api/status"));
       paintStatus();
+      if (!state.historyLoaded) loadHistory();
     }
     function hookSSE() {
       try {
@@ -1352,6 +1580,7 @@
     loadStatus();
     loadStations();
     loadSchedules();
+    loadHistory();
     hookSSE();
     setInterval(loadStatus, 4000);
     // Tick relative timer while watering

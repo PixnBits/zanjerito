@@ -14,6 +14,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/api"
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
+	"github.com/PixnBits/zanjerito/internal/history"
 	"github.com/PixnBits/zanjerito/internal/schedule"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
@@ -63,6 +64,17 @@ func main() {
 
 	log.Printf("zanjerito engine ready (driver=%s dry=%v phase=%s)", *driverName, *dry && *driverName == "gpiocdev", eng.Status().Phase)
 
+	// Background, not the signal ctx: Close must still be alive after Stop
+	// so the final record (emitted by the run goroutine) can flush.
+	hist, err := history.Open(store.HistoryPath(*configPath), nil)
+	if err != nil {
+		log.Printf("history: %v (continuing empty)", err)
+	}
+	if hist != nil {
+		hist.Start(context.Background())
+		eng.SetRecorder(hist)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -75,6 +87,7 @@ func main() {
 
 	if *listen != "" {
 		srv := api.New(eng, *configPath)
+		srv.History = hist
 		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			log.Printf("api listening on %s (LAN trust, D7)", *listen)
@@ -88,5 +101,8 @@ func main() {
 	<-ctx.Done()
 	log.Printf("shutdown: Stop + Close")
 	_ = eng.Stop()
+	if hist != nil {
+		hist.Close()
+	}
 	fmt.Fprintln(os.Stderr, "zanjerito stopped")
 }

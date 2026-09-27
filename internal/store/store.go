@@ -86,7 +86,13 @@ func ApplyAndSave(e *engine.Engine, path string, cfg engine.Config) error {
 	return Save(path, File{Config: cfg, Schedules: schedules})
 }
 
-func atomicWriteJSON(path string, v any) error {
+// HistoryPath is history.json beside the config file (same directory as pause.json).
+func HistoryPath(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), "history.json")
+}
+
+// AtomicWriteJSON writes v as indented JSON via a temp file in the same directory, then rename.
+func AtomicWriteJSON(path string, v any) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -125,4 +131,8 @@ func atomicWriteJSON(path string, v any) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func atomicWriteJSON(path string, v any) error {
+	return AtomicWriteJSON(path, v)
 }

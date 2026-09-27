@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/PixnBits/zanjerito/internal/engine"
+	"github.com/PixnBits/zanjerito/internal/history"
 	"github.com/PixnBits/zanjerito/internal/schedule"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
@@ -21,9 +24,10 @@ var uiFS embed.FS
 
 // Server is the LAN REST+JSON+SSE surface (D5/D7). No GraphQL.
 type Server struct {
-	Eng  *engine.Engine
-	Path string
-	mux  *http.ServeMux
+	Eng     *engine.Engine
+	Path    string
+	History *history.Log
+	mux     *http.ServeMux
 }
 
 func New(e *engine.Engine, path string) *Server {
@@ -37,6 +41,7 @@ func New(e *engine.Engine, path string) *Server {
 	s.mux.HandleFunc("POST /api/pause", s.handlePauseSet)
 	s.mux.HandleFunc("DELETE /api/pause", s.handlePauseClear)
 	s.mux.HandleFunc("POST /api/pause/resume", s.handlePauseClear)
+	s.mux.HandleFunc("GET /api/history", s.handleHistory)
 	s.mux.HandleFunc("GET /api/schedules", s.handleSchedulesList)
 	s.mux.HandleFunc("GET /api/schedules/{id}", s.handleScheduleGet)
 	s.mux.HandleFunc("PUT /api/schedules/{id}", s.handleSchedulePut)
@@ -133,6 +138,93 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"reason":          reason,
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// historyStationJSON is one step in GET /api/history.
+// planned_min and actual_min are whole minutes: seconds/60, rounded half away from zero.
+type historyStationJSON struct {
+	StationID  string `json:"station_id"`
+	PlannedSec int    `json:"planned_sec"`
+	ActualSec  int    `json:"actual_sec"`
+	PlannedMin int    `json:"planned_min"`
+	ActualMin  int    `json:"actual_min"`
+}
+
+type historyEntryJSON struct {
+	ID        string               `json:"id"`
+	ProgramID string               `json:"program_id"`
+	Program   string               `json:"program"`
+	Kind      string               `json:"kind"`
+	Stations  []historyStationJSON `json:"stations"`
+	StartedAt string               `json:"started_at"`
+	EndedAt   string               `json:"ended_at"`
+	Outcome   string               `json:"outcome"`
+	Error     string               `json:"error,omitempty"`
+	Reason    string               `json:"reason,omitempty"`
+}
+
+func roundedMin(sec int) int {
+	if sec <= 0 {
+		return 0
+	}
+	return int(math.Round(float64(sec) / 60))
+}
+
+// handleHistory returns newest-first runs. Times are RFC3339 in the config timezone,
+// same as /api/status. Default limit is 50; values above history.MaxEntries are clamped.
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if s.History == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"entries": []historyEntryJSON{}})
+		return
+	}
+	limit, err := historyLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	loc := s.location()
+	src := s.History.List(limit)
+	entries := make([]historyEntryJSON, 0, len(src))
+	for _, e := range src {
+		stations := make([]historyStationJSON, 0, len(e.Stations))
+		for _, st := range e.Stations {
+			stations = append(stations, historyStationJSON{
+				StationID:  st.StationID,
+				PlannedSec: st.PlannedSec,
+				ActualSec:  st.ActualSec,
+				PlannedMin: roundedMin(st.PlannedSec),
+				ActualMin:  roundedMin(st.ActualSec),
+			})
+		}
+		entries = append(entries, historyEntryJSON{
+			ID:        e.ID,
+			ProgramID: e.ProgramID,
+			Program:   e.Program,
+			Kind:      e.Kind,
+			Stations:  stations,
+			StartedAt: e.StartedAt.In(loc).Format(time.RFC3339),
+			EndedAt:   e.EndedAt.In(loc).Format(time.RFC3339),
+			Outcome:   e.Outcome,
+			Error:     e.Error,
+			Reason:    e.Reason,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+func historyLimit(raw string) (int, error) {
+	if raw == "" {
+		return 50, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("limit must be a positive integer")
+	}
+	if n > history.MaxEntries {
+		n = history.MaxEntries
+	}
+	return n, nil
 }
 
 func (s *Server) handleStationsList(w http.ResponseWriter, _ *http.Request) {
