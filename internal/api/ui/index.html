@@ -6,36 +6,37 @@
   <title>Zanjerito</title>
   <style>
     :root {
-      /* Polish v1 Style A — Cards + desert light */
-      --sand: #e8dcc8;
-      --sand-deep: #d9cbb4;
-      --cream: #f7f1e6;
-      --cream-edge: #ebe3d4;
-      --terracotta: #c45c3e;
-      --terracotta-deep: #a8482f;
-      --teal: #2a7a74;
-      --teal-soft: #d5ebe8;
-      --teal-mid: #b8ddd8;
+      /* Polish v1 Style A — Cards + desert light, tuned to the phone frames */
+      --sand: #fff2df;
+      --sand-deep: #f4e4cf;
+      --cream: #fff9ed;
+      --cream-edge: #f0e4d2;
+      --terracotta: #d36b44;
+      --terracotta-deep: #c15d38;
+      --teal: #3d7a72;
+      --teal-soft: #e7f3ef;
+      --teal-mid: #d3ebe4;
       --plum: #6b4a6e;
       --plum-soft: #efe4f0;
-      --ink: #3a2a1f;
-      --muted: #7a6a58;
-      --warn: #c9a24a;
-      --warn-ink: #3a2e10;
-      --warn-bg: #f5e8c8;
+      --ink: #3d2918;
+      --muted: #8d7b68;
+      --warn: #e2b089;
+      --warn-ink: #6a4e3a;
+      --warn-bg: #ffe4d1;
       --off-badge: #9a8a78;
       --out-badge: #8a6a48;
       --out-ink: #5a3a20;
-      --dune: #c4a882;
+      --dune: #c6ad90;
       --dune-deep: #a88868;
       --dune-ink: #b89878;
+      --line: #c9b39a;
       --bg: var(--sand);
       --card: var(--cream);
       --stop: var(--terracotta);
       --go: var(--teal);
       --chip: var(--cream-edge);
       --on: var(--teal);
-      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      --serif: "New York", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
       --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
     .kiosk { font-size: 22px; }
@@ -43,69 +44,70 @@
     * { box-sizing: border-box; }
     body {
       margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
-      /* Clear fixed STOP footer so last card Edit/Duplicate stay fully above it */
-      padding: 12px 12px calc(118px + env(safe-area-inset-bottom, 0px)); max-width: 480px; margin-inline: auto;
+      padding: 14px 16px calc(108px + env(safe-area-inset-bottom, 0px));
+      max-width: 480px; margin-inline: auto;
     }
-    /* Chrome: wordmark + nav */
     .chrome {
-      display: flex; align-items: baseline; justify-content: space-between;
-      gap: 12px; margin: 2px 0 12px; flex-wrap: wrap;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; margin: 2px 0 14px;
     }
     .wordmark {
-      font-family: var(--serif); font-size: 1.45rem; font-weight: 700;
-      letter-spacing: -.01em; color: var(--terracotta); margin: 0; line-height: 1.15;
+      font-family: var(--serif); font-size: 2.15rem; font-weight: 600;
+      letter-spacing: -.02em; color: var(--ink); margin: 0; line-height: 1;
     }
-    .nav { display: flex; gap: 2px; margin: 0; }
+    .nav { display: flex; align-items: center; gap: 0; margin: 0; }
     .nav button {
-      flex: 0 0 auto; min-height: 40px; border-radius: 0; border: 0;
-      background: transparent; color: var(--muted); font-size: 1rem;
-      padding: 8px 12px; border-bottom: 3px solid transparent; font-weight: 500;
+      position: relative;
+      flex: 0 0 auto; min-height: 44px; border-radius: 0; border: 0;
+      background: transparent; color: #b5a494; font-size: 1.02rem;
+      padding: 8px 14px; font-weight: 500; font-family: var(--sans);
     }
-    .nav button.active {
-      color: var(--ink); border-bottom-color: var(--terracotta); font-weight: 650;
-      background: transparent;
+    .nav button + button::before {
+      content: ""; position: absolute; left: 0; top: 28%; bottom: 28%;
+      width: 1px; background: #e3d4c2;
+    }
+    .nav button.active { color: var(--ink); font-weight: 650; background: transparent; }
+    .nav button.active::after {
+      content: ""; position: absolute; left: 22%; right: 22%; bottom: 7px;
+      height: 2.5px; border-radius: 2px; background: var(--terracotta);
     }
     h1 { font-size: 1.05rem; margin: 0 0 8px; font-weight: 650; font-family: var(--serif); }
     /* Hero status card */
     .status {
       position: relative; overflow: hidden;
-      background: var(--cream); border-radius: 22px; padding: 20px 18px 18px;
-      min-height: 11.5rem; border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
+      background: var(--cream); border-radius: 22px; padding: 18px 18px 16px;
+      min-height: 11.2rem; border: 0;
       box-shadow:
-        0 1px 0 rgba(255,255,255,.55) inset,
-        0 2px 8px rgba(58,42,31,.06),
-        0 10px 28px rgba(58,42,31,.05);
+        0 1px 0 rgba(255,255,255,.7) inset,
+        0 10px 28px rgba(90, 55, 30, .05);
     }
-    .status.watering {
-      border-color: color-mix(in srgb, var(--teal) 28%, var(--cream-edge));
-    }
+    .status.watering { }
     .hero-copy {
       position: relative; z-index: 2;
-      max-width: 54%; /* doodle-safe LEFT — generous empty RIGHT for art */
+      max-width: 58%;
     }
     .hero-top {
       display: flex; align-items: center; gap: 8px;
       margin-bottom: 10px;
     }
     .season-tag {
-      display: inline-flex; align-items: center; gap: 7px;
-      font-size: .72rem; color: var(--terracotta); letter-spacing: .08em;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .78rem; color: #9a4a32; letter-spacing: .08em;
       text-transform: uppercase; font-weight: 700;
-      background: color-mix(in srgb, var(--cream-edge) 70%, #fff);
-      border: 1px solid color-mix(in srgb, var(--dune) 45%, var(--cream-edge));
+      background: #f8e7d4;
+      border: 0;
       border-radius: 999px; padding: 5px 11px 5px 8px;
-      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset;
     }
     .season-tag svg {
       width: 14px; height: 14px; flex-shrink: 0;
-      color: var(--terracotta);
+      color: #9a4a32;
     }
     .status .phase {
-      font-family: var(--serif); font-size: 1.9rem; font-weight: 700;
-      line-height: 1.12; margin: 0 0 8px; letter-spacing: -.015em;
+      font-family: var(--serif); font-size: 2.05rem; font-weight: 650;
+      line-height: 1.08; margin: 2px 0 10px; letter-spacing: -.02em;
       color: var(--ink);
     }
-    .status .phase .dot { color: var(--terracotta); font-weight: 700; }
+    .status .phase .dot { color: var(--ink); font-weight: 650; }
     .status .timer {
       display: inline-flex; align-items: center; gap: 8px;
       font-variant-numeric: tabular-nums; font-size: 1.12rem; font-weight: 700;
@@ -119,11 +121,10 @@
     }
     .status .sub.hidden { display: none; }
     .status .next-line {
-      margin-top: 0; padding-top: 12px;
-      border-top: 1px solid color-mix(in srgb, var(--dune) 35%, var(--cream-edge));
-      color: var(--ink); font-size: .95rem;
+      margin-top: 2px; padding-top: 12px;
+      border-top: 1px solid #eadfce;
+      color: var(--ink); font-size: .98rem;
       display: flex; align-items: center; gap: 8px;
-      /* Stays inside hero-copy (left ~55%) — never under doodle; ellipsis only */
       overflow: hidden; white-space: nowrap; max-width: 100%;
     }
     .status .next-line .next-ico {
@@ -134,30 +135,23 @@
     }
     .status .next-line .lbl { color: var(--muted); font-weight: 500; }
     .fault { color: #a8482f; }
-    /* Embossed desert doodle — RIGHT half only; never under text */
+    /* Full-card line art. Text stays in the empty left; sun, waves, dotted dune on the right. */
     .desert-art {
-      position: absolute; right: 2px; top: 8px; bottom: 8px;
-      width: 50%; max-width: 210px;
+      position: absolute; inset: 0;
       pointer-events: none; z-index: 1;
-      /* Soft left fade — art stays RIGHT; text never reaches sun/waves */
-      mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 100%);
-      -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 100%);
     }
-    .desert-art svg {
-      width: 100%; height: 100%; display: block;
-      filter: drop-shadow(0 1px 0 rgba(255,250,240,.55));
-    }
+    .desert-art svg { width: 100%; height: 100%; display: block; }
     /* Station strip — taller vertical tiles, circular icon, Off/On pills */
     .strip-label {
-      margin: 20px 0 10px; font-family: var(--serif); font-size: .78rem;
-      font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+      margin: 18px 2px 10px; font-family: var(--sans); font-size: .8rem;
+      font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: #6f5b48;
     }
     .strip {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px; margin: 0 0 4px;
     }
-    @media (min-width: 400px) {
-      .strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    #stations.strip {
+      grid-template-columns: repeat(auto-fit, minmax(4.7rem, 1fr));
     }
     .chip {
       background: var(--cream-edge); border: 0; color: var(--ink);
@@ -166,74 +160,85 @@
     }
     .chip.on { outline: 3px solid var(--teal); background: var(--teal-soft); color: var(--teal); }
     .station-tile {
-      background: var(--cream); border: 1.5px solid var(--cream-edge); color: var(--ink);
-      border-radius: 18px; padding: 16px 10px 14px;
-      min-height: 128px; cursor: pointer;
+      background: var(--cream); border: 0; color: var(--ink);
+      border-radius: 20px; padding: 14px 6px 12px;
+      min-height: 124px; cursor: pointer;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       gap: 8px; text-align: center;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.5) inset,
-        0 2px 6px rgba(58,42,31,.05);
-      transition: background .15s, border-color .15s, box-shadow .15s;
+      box-shadow: 0 8px 22px rgba(90, 55, 30, .045);
     }
     .station-tile .tile-icon {
-      width: 48px; height: 48px; border-radius: 50%;
+      width: 52px; height: 52px; border-radius: 50%;
       display: grid; place-items: center;
-      background: color-mix(in srgb, var(--cream-edge) 55%, #fff);
-      border: 1.5px solid color-mix(in srgb, var(--dune) 40%, var(--cream-edge));
-      color: var(--ink); flex-shrink: 0;
-      box-shadow: 0 1px 0 rgba(255,255,255,.55) inset;
+      background: #fffdf8;
+      border: 1.5px solid #eadcc8;
+      color: #6d5844; flex-shrink: 0;
     }
-    .station-tile .tile-icon svg { width: 26px; height: 26px; }
+    .station-tile .tile-icon svg { width: 28px; height: 28px; }
     .station-tile .tile-name {
-      font-family: var(--serif); font-weight: 700; font-size: 1.05rem;
-      letter-spacing: -.01em; line-height: 1.1;
+      font-family: var(--serif); font-weight: 650; font-size: 1.12rem;
+      letter-spacing: -.015em; line-height: 1.1;
     }
     .station-tile .tile-pill {
-      display: inline-block; font-family: var(--sans); font-size: .68rem; font-weight: 700;
-      letter-spacing: .06em; text-transform: none;
-      border-radius: 999px; padding: 4px 12px;
-      background: color-mix(in srgb, var(--cream-edge) 85%, var(--muted));
-      color: var(--muted); border: 1px solid color-mix(in srgb, var(--dune) 30%, transparent);
+      display: inline-block; font-family: var(--sans); font-size: .72rem; font-weight: 650;
+      letter-spacing: .01em;
+      border-radius: 999px; padding: 3px 11px;
+      background: #f4e6d4;
+      color: #a08c78; border: 0;
     }
     .station-tile.on {
-      background: var(--teal-soft);
-      border-color: color-mix(in srgb, var(--teal) 45%, var(--cream-edge));
+      background: #e7f3ef;
+      border: 0;
       color: var(--teal);
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.45) inset,
-        0 2px 10px rgba(42,122,116,.14);
+      box-shadow: 0 8px 22px rgba(61, 122, 114, .08);
     }
     .station-tile.on .tile-icon {
-      background: color-mix(in srgb, var(--teal-mid) 70%, #fff);
-      border-color: color-mix(in srgb, var(--teal) 40%, var(--cream-edge));
+      background: #d7eee8;
+      border-color: #c5e4dc;
       color: var(--teal);
     }
-    .station-tile.on .tile-name { color: var(--teal); }
+    .station-tile.on .tile-name { color: var(--ink); }
     .station-tile.on .tile-pill {
-      background: color-mix(in srgb, var(--teal) 18%, var(--teal-soft));
-      color: var(--teal); border-color: color-mix(in srgb, var(--teal) 30%, transparent);
+      background: #d3ebe4;
+      color: var(--teal); border: 0;
     }
-    /* STOP — fixed footer; heavier terracotta; never overlaps Edit/Duplicate */
     .stop-bar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-      padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px));
-      background: linear-gradient(180deg, transparent 0%, var(--sand) 28%, var(--sand) 100%);
+      display: flex; align-items: stretch; gap: 10px;
+      padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+      background: linear-gradient(180deg, rgba(255,242,223,0) 0%, var(--sand) 32%, var(--sand) 100%);
       pointer-events: none;
     }
-    .stop-bar .stop {
-      pointer-events: auto;
-      display: flex; align-items: center; justify-content: center; gap: 12px;
-      width: 100%; max-width: 456px; margin-inline: auto;
-      background: linear-gradient(180deg, #d06648 0%, var(--terracotta) 55%, var(--terracotta-deep) 100%);
-      color: #fff; border: 0; border-radius: 16px; min-height: 62px;
-      font-size: 1.28rem; font-weight: 800; letter-spacing: .1em;
-      box-shadow:
-        0 1px 0 rgba(255,220,200,.25) inset,
-        0 4px 16px rgba(168,72,47,.4),
-        0 1px 0 rgba(58,42,31,.08);
+    .stop-bar > * { pointer-events: auto; }
+    .stop-bar .pause-open {
+      flex: 1.05; min-height: 56px; border-radius: 16px; border: 0;
+      background: var(--cream); color: var(--ink); font-weight: 600; font-size: 1rem;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      box-shadow: 0 8px 20px rgba(90, 55, 30, .06);
+      font-family: var(--sans);
     }
-    .stop-bar .stop svg { width: 18px; height: 18px; opacity: .95; }
+    .stop-bar .pause-open svg { width: 22px; height: 22px; flex-shrink: 0; color: #6d5844; }
+    .stop-bar .pause-open.hidden { display: none; }
+    .stop-bar #sched-new {
+      display: none;
+      flex: 1.25; min-height: 56px; border-radius: 16px; border: 0;
+      background: var(--terracotta); color: #fff; font-weight: 650; font-size: 1.05rem;
+      align-items: center; justify-content: center;
+      box-shadow: 0 8px 18px rgba(211, 107, 68, .28);
+      font-family: var(--sans);
+    }
+    body[data-page="sched"] .stop-bar #pause-open { display: none; }
+    body[data-page="sched"] .stop-bar #sched-new { display: flex; }
+    .stop-bar .stop {
+      flex: 1.15; min-width: 42%;
+      display: flex; align-items: center; justify-content: center; gap: 14px;
+      background: var(--terracotta);
+      color: #fff; border: 0; border-radius: 16px; min-height: 56px;
+      font-size: 1.15rem; font-weight: 700; letter-spacing: .14em;
+      box-shadow: 0 8px 18px rgba(211, 107, 68, .28);
+      font-family: var(--sans);
+    }
+    .stop-bar .stop svg { width: 16px; height: 16px; }
     .stop-bar .stop:active { background: var(--terracotta-deep); }
     /* Dialogs */
     dialog {
@@ -249,45 +254,59 @@
     }
     .go { background: var(--teal); color: #fff; }
     .ghost { background: var(--cream-edge); color: var(--ink); }
-    #sched-new {
-      background: var(--terracotta); color: #fff; font-weight: 650;
-      border-radius: 12px; padding: 0 16px;
-    }
-    /* Schedules — same cream language as Home */
+    #sched-new { }
     .sched {
-      background: var(--cream); border-radius: 18px; padding: 16px 16px 14px; margin-bottom: 12px;
-      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
-      position: relative; overflow: hidden;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.5) inset,
-        0 2px 8px rgba(58,42,31,.05);
+      background: var(--cream); border-radius: 22px; padding: 14px 14px 14px 12px; margin-bottom: 12px;
+      border: 0;
+      display: flex; gap: 12px; align-items: flex-start;
+      box-shadow: 0 8px 22px rgba(90, 55, 30, .045);
     }
-    .sched::after {
-      content: ""; position: absolute; right: 0; bottom: 0; width: 88px; height: 56px;
-      background:
-        radial-gradient(ellipse 36px 22px at 78% 88%, color-mix(in srgb, var(--dune) 28%, transparent), transparent 70%),
-        radial-gradient(ellipse 52px 28px at 95% 100%, color-mix(in srgb, var(--dune-deep) 22%, transparent), transparent 72%),
-        linear-gradient(145deg, transparent 48%, color-mix(in srgb, var(--sand-deep) 40%, transparent) 48%);
-      pointer-events: none; opacity: .85;
-      box-shadow: inset 2px 2px 0 color-mix(in srgb, var(--cream) 40%, transparent);
+    .sched-art {
+      width: 68px; height: 68px; flex: 0 0 68px;
+      display: grid; place-items: center;
+      color: #8d7358;
     }
-    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; position: relative; z-index: 1; }
+    .sched-art svg { width: 58px; height: 58px; display: block; }
+    .sched-main { flex: 1; min-width: 0; }
+    .sched-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
     .sched-title {
-      flex: 1; min-width: 0; font-weight: 700; font-size: 1.12rem; font-family: var(--serif);
-      letter-spacing: -.01em;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-weight: 650; font-size: 1.28rem; font-family: var(--serif);
+      letter-spacing: -.02em; line-height: 1.15;
     }
-    .sched-head > button { flex-shrink: 0; }
-    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; position: relative; z-index: 1; }
-    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; position: relative; z-index: 1; }
+    .sched-when { color: var(--muted); font-size: .95rem; margin-top: 3px; }
+    .sched-links {
+      display: flex; align-items: center; gap: 7px; flex-shrink: 0;
+      color: #c3b3a2; padding-top: 2px;
+    }
+    .sched-links button {
+      background: transparent; border: 0; color: #8d7b68;
+      min-height: 44px; padding: 0 1px; font-size: .95rem; font-family: var(--sans);
+    }
+    .sched-row {
+      display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap;
+    }
+    .sched-next { font-size: .95rem; color: var(--ink); }
+    .switch {
+      width: 46px; height: 28px; border-radius: 999px; border: 0; padding: 0;
+      background: #e4d7c6; position: relative; flex-shrink: 0;
+    }
+    .switch::after {
+      content: ""; position: absolute; top: 3px; left: 3px;
+      width: 22px; height: 22px; border-radius: 50%; background: #fff;
+      box-shadow: 0 1px 3px rgba(60, 40, 20, .18);
+      transition: transform .18s ease;
+    }
+    .switch.on { background: var(--teal); }
+    .switch.on::after { transform: translateX(18px); }
+    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; }
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
     .badge {
       display: inline-block; background: var(--cream-edge); color: var(--ink); border-radius: 999px;
       padding: 4px 10px; font-size: .78rem;
     }
     .badge.off { background: var(--off-badge); color: #fff; }
     .badge.out { background: #f0e0c8; color: var(--out-ink); }
-    .badge.season { background: var(--teal-soft); color: var(--teal); }
-    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; position: relative; z-index: 1; }
+    .badge.season { background: var(--terracotta); color: #fff; font-weight: 650; font-size: .75rem; padding: 4px 10px; }
     .days { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
     .days button {
       min-width: 44px; min-height: 44px; border-radius: 10px; border: 0;
@@ -303,8 +322,8 @@
     .step-row { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; align-items: end; margin-top: 8px; }
     .step-row label { margin-top: 0; }
     .collide {
-      background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
-      margin: 0 0 12px; font-size: .92rem; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+      background: var(--warn-bg); color: var(--warn-ink); border-radius: 16px; padding: 14px 16px;
+      margin: 0 0 14px; font-size: .98rem; border: 0; text-align: center; line-height: 1.35;
     }
     .sched-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .hidden { display: none; }
@@ -327,19 +346,10 @@
     }
     .pause-banner .resume:active { opacity: .88; }
     .rain-hint {
-      color: var(--muted); font-size: .78rem; font-weight: 500;
+      color: #6f5b48; font-size: .82rem; font-weight: 600;
       margin: 0 0 10px;
     }
-    .home-actions {
-      /* Breathing room under hero card; keep Pause out of STOP footer */
-      display: flex; gap: 8px; margin: 16px 0 18px; flex-wrap: wrap;
-    }
-    .home-actions .pause-open {
-      flex: 1; min-height: 48px; border-radius: 14px; border: 1px solid var(--cream-edge);
-      background: var(--cream); color: var(--ink); font-weight: 650; font-size: 1rem;
-      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 8px rgba(58,42,31,.05);
-    }
-    .home-actions .pause-open:active { background: var(--cream-edge); }
+    .home-actions { display: none; }
     .pause-chips { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
     .pause-chips button {
       width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--cream-edge);
@@ -395,7 +405,7 @@
     #page-history .history-back { margin-bottom: 4px; }
   </style>
 </head>
-<body>
+<body data-page="home">
   <header class="chrome">
     <p class="wordmark">Zanjerito</p>
     <nav class="nav">
@@ -435,60 +445,30 @@
         </div>
       </div>
       <div class="desert-art" aria-hidden="true">
-        <!-- Embossed / paper-cut desert: rayed sun, 4 wave ridges, dotted dunes -->
-        <svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMaxYMid meet">
+        <!-- Light line art: rayed sun, three waves, peach mountain -->
+        <svg viewBox="0 0 400 210" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMaxYMax meet">
           <defs>
-            <filter id="emboss" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="1.1" dy="1.4" stdDeviation="0.7" flood-color="#6e5640" flood-opacity="0.42"/>
-              <feDropShadow dx="-0.9" dy="-0.8" stdDeviation="0.45" flood-color="#fffaf0" flood-opacity="0.85"/>
-            </filter>
-            <filter id="cutShadow" x="-15%" y="-15%" width="140%" height="140%">
-              <feDropShadow dx="0.4" dy="2.2" stdDeviation="1.6" flood-color="#5a4534" flood-opacity="0.38"/>
-            </filter>
-            <pattern id="duneDots" width="4" height="4" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="0.7" fill="#9a7a58" fill-opacity="0.45"/>
+            <pattern id="duneDots" width="8" height="8" patternUnits="userSpaceOnUse">
+              <circle cx="1.5" cy="1.6" r="0.95" fill="#e2b08a"/>
             </pattern>
-            <linearGradient id="duneFill" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#e0d0b8"/>
-              <stop offset="100%" stop-color="#c8b090"/>
-            </linearGradient>
-            <linearGradient id="paperGrain" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#f3eadc" stop-opacity="0"/>
-              <stop offset="100%" stop-color="#d4c0a4" stop-opacity="0.18"/>
-            </linearGradient>
+            <clipPath id="duneRight">
+              <path d="M300 156 C316 140, 336 132, 356 142 C370 152, 382 168, 396 184 L396 210 L300 210 Z"/>
+            </clipPath>
           </defs>
-          <rect width="200" height="180" fill="url(#paperGrain)"/>
-          <!-- Rayed sun (circle + ~12 short rays), embossed -->
-          <g filter="url(#emboss)" transform="translate(132,36)" stroke="#a88868" stroke-width="1.9" fill="none" stroke-linecap="round">
-            <circle cx="0" cy="0" r="11" fill="#f0e6d4" fill-opacity="0.35"/>
-            <circle cx="0" cy="0" r="11"/>
-            <path d="M0-18v4M0 14v4M-18 0h4M14 0h4"/>
-            <path d="M-12.7-12.7l2.8 2.8M10-10l2.8-2.8M10 10l2.8 2.8M-12.7 12.7l2.8-2.8"/>
-            <path d="M-6.9-16.6l1.5 3.6M6.9-16.6l-1.5 3.6M-6.9 16.6l1.5-3.6M6.9 16.6l-1.5-3.6"/>
-            <path d="M-16.6-6.9l3.6 1.5M16.6-6.9l-3.6 1.5M-16.6 6.9l3.6-1.5M16.6 6.9l-3.6-1.5" opacity="0.85"/>
+          <g fill="none" stroke="#d4c2ae" stroke-width="1.55" stroke-linecap="round" transform="translate(338,44)">
+            <circle cx="0" cy="0" r="12"/>
+            <path d="M0-20v5M0 15v5M-20 0h5M15 0h5"/>
+            <path d="M-14.1-14.1l3.6 3.6M10.5-10.5l3.6-3.6M10.5 10.5l3.6 3.6M-14.1 14.1l3.6-3.6"/>
           </g>
-          <!-- Four parallel wave ridges (recessed grooves) -->
-          <g filter="url(#emboss)" fill="none" stroke="#a88868" stroke-width="2.2" stroke-linecap="round" opacity="0.9">
-            <path d="M78 78 C98 70, 118 86, 138 76 C158 66, 178 80, 198 72"/>
-            <path d="M78 90 C98 82, 118 98, 138 88 C158 78, 178 92, 198 84"/>
-            <path d="M78 102 C98 94, 118 110, 138 100 C158 90, 178 104, 198 96"/>
-            <path d="M78 114 C98 106, 118 122, 138 112 C158 102, 178 116, 198 108"/>
+          <g fill="none" stroke="#d4c2ae" stroke-width="1.45" stroke-linecap="round">
+            <path d="M168 108c16-6 26 6 42 0s26 6 42 0 26 6 42 0 24 6 40 0"/>
+            <path d="M168 122c16-6 26 6 42 0s26 6 42 0 26 6 42 0 24 6 40 0"/>
+            <path d="M168 136c16-6 26 6 42 0s26 6 42 0 26 6 42 0 24 6 40 0"/>
           </g>
-          <!-- Paper-cut dunes with cut-out shadow + dotted fill -->
-          <g filter="url(#cutShadow)">
-            <path d="M70 180 C95 148, 118 152, 145 138 C160 148, 175 142, 200 128 L200 180 Z"
-                  fill="url(#duneFill)" stroke="#a88868" stroke-width="1.2"/>
-            <path d="M145 138 C160 148, 175 142, 200 128 L200 180 L145 180 Z" fill="url(#duneDots)"/>
-            <path d="M40 180 C70 155, 95 160, 120 150 C135 162, 155 158, 175 150 L175 180 Z"
-                  fill="#ddd0ba" stroke="#a88868" stroke-width="1.1" opacity="0.92"/>
-          </g>
-          <!-- Soft highlight lip on dunes (paper edge) -->
-          <path d="M70 180 C95 148, 118 152, 145 138" fill="none" stroke="#fff8ee" stroke-width="1.4" stroke-opacity="0.55" stroke-linecap="round"/>
+          <path d="M236 210 C252 198, 266 180, 284 170 C298 162, 306 174, 318 186 C330 164, 348 146, 372 140 C386 152, 396 168, 408 184 L408 210 Z" fill="#f6d4b8"/>
+          <path d="M300 156 C316 140, 336 132, 356 142 C370 152, 382 168, 396 184 L396 210 L300 210 Z" fill="url(#duneDots)" clip-path="url(#duneRight)"/>
         </svg>
       </div>
-    </div>
-    <div class="home-actions" id="home-actions">
-      <button type="button" class="pause-open" id="pause-open">Pause for rain</button>
     </div>
     <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
@@ -499,12 +479,8 @@
     </div>
   </section>
   <section id="page-schedules" class="hidden">
-    <div class="sched-toolbar">
-      <h1 style="margin:0">Schedules</h1>
-      <button type="button" class="edit" id="sched-new">+ Add program</button>
-    </div>
-    <p class="sub" style="color:var(--muted);font-size:.9rem;margin:0 0 10px">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
+    <h1 class="strip-label">Schedules</h1>
     <div id="schedules"></div>
   </section>
   <section id="page-history" class="hidden">
@@ -515,10 +491,18 @@
     </div>
   </section>
   <footer class="stop-bar" aria-label="Emergency stop">
+    <button type="button" class="pause-open" id="pause-open">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M7.2 15.2h9.8a3.4 3.4 0 0 0 .3-6.8 4.7 4.7 0 0 0-9.1-1.3 3.1 3.1 0 0 0-1 8.1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M8.5 17.6v2.1M12 17.6v2.1M15.5 17.6v2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <span>Pause for rain</span>
+    </button>
+    <button type="button" class="add-prog edit" id="sched-new">+ Add program</button>
     <button type="button" class="stop" id="stop">
       <span>STOP</span>
       <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
-        <rect x="3.5" y="3.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.8"/>
+        <rect x="3.2" y="3.2" width="11.6" height="11.6" rx="1.6" stroke="currentColor" stroke-width="1.6"/>
       </svg>
     </button>
   </footer>
@@ -614,11 +598,16 @@
     let pauseDaysPicked = 3;
     const DROP_SVG = `<svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 2.2 C9 2.2 3.8 8.2 3.8 11.2 A5.2 5.2 0 0 0 14.2 11.2 C14.2 8.2 9 2.2 9 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.2 11.4c0 1.4 1.1 2.2 1.8 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".7"/></svg>`;
     const ICONS = {
-      west: `<svg viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M13 3.5v2.2M13 20.3v2.2M3.5 13h2.2M20.3 13h2.2M6.2 6.2l1.6 1.6M18.2 18.2l1.6 1.6M18.2 7.8l1.6-1.6M6.2 19.8l1.6-1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-      north: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 4.5 L21 20.5 H5 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 11v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-      south: `<svg viewBox="0 0 26 26" fill="none"><path d="M8 21 V12 C8 8.5 10.2 6 13 6 s5 2.5 5 6 v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10.5 21h5M13 6 V3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="16.5" cy="10" r="1.3" fill="currentColor"/></svg>`,
-      drip: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.5 16.8c0 2 1.5 3.2 2.5 3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".75"/></svg>`,
+      west: `<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 10c2.1-1.8 3.4 1.8 5.5 0s3.4 1.8 5.5 0 3.4 1.8 5.5 0"/><path d="M4 14.5c2.1-1.8 3.4 1.8 5.5 0s3.4 1.8 5.5 0 3.4 1.8 5.5 0"/><path d="M4 19c2.1-1.8 3.4 1.8 5.5 0s3.4 1.8 5.5 0 3.4 1.8 5.5 0"/></svg>`,
+      north: `<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2.6c0 0-3.3 4.8-3.3 6.8a3.3 3.3 0 0 0 6.6 0c0-2-3.3-6.8-3.3-6.8z"/><path d="M4 16.2c2.1-1.6 3.4 1.6 5.5 0s3.4 1.6 5.5 0 3.4 1.6 5.5 0"/><path d="M4 19.6c2.1-1.6 3.4 1.6 5.5 0s3.4 1.6 5.5 0 3.4 1.6 5.5 0"/><path d="M4 23c2.1-1.6 3.4 1.6 5.5 0s3.4 1.6 5.5 0 3.4 1.6 5.5 0"/></svg>`,
+      south: `<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5h16"/><path d="M8.2 9.5v6.2a5.8 5.8 0 0 0 11.6 0V9.5"/><path d="M5.2 20.2h17.6"/></svg>`,
+      drip: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.2 C13 3.2 6 11.6 6 16.2 A7 7 0 0 0 20 16.2 C20 11.6 13 3.2 13 3.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
       default: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    };
+    const SCHED_ART = {
+      sunhill: `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="33" cy="14" r="4"/><path d="M33 5.5v2.3M33 20.2v2.3M24.5 14h2.3M39.2 14H41.5M26.8 7.8l1.6 1.6M37.6 18.6l1.6 1.6M37.6 9.4l1.6-1.6M26.8 20.2l1.6-1.6"/><path d="M6 54 L22 36 L36 52 L50 28 L64 54"/></svg>`,
+      cactus: `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M32 56 V18"/><path d="M32 40 H22 a6 6 0 0 1-6-6 V28"/><path d="M32 30 H44 a6 6 0 0 0 6-6 V16"/><path d="M12 54c6 4 12 2 16 0"/><path d="M30 56c7 3 12 1 18-1"/></svg>`,
+      drip: `<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M32 10c0 0-14 18-14 28a14 14 0 0 0 28 0c0-10-14-28-14-28z"/></svg>`,
     };
     const state = {
       status: { phase: "Idle", stations_on: [] },
@@ -799,11 +788,58 @@
       if (sch.ends_on && ymd > sch.ends_on) return false;
       return true;
     }
+    function prettyDate(ymd) {
+      const m = String(ymd || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return ymd || "";
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      return `${months[Number(m[2]) - 1] || m[2]} ${Number(m[3])}`;
+    }
+    function prettyClock(hhmm) {
+      const clock = parseHHMM(hhmm);
+      if (!clock) return hhmm || "";
+      const ap = clock.h >= 12 ? "PM" : "AM";
+      const h = clock.h % 12 || 12;
+      return `${h}:${String(clock.m).padStart(2, "0")}${ap}`;
+    }
+    function prettyFire(label) {
+      const m = String(label || "").match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/);
+      if (!m) return label || "";
+      const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+      const wd = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][dt.getUTCDay()];
+      return `${wd} ${prettyClock(m[4] + ":" + m[5])}`;
+    }
     function seasonLabel(sch) {
       if (sch.starts_on || sch.ends_on) {
-        return `${sch.starts_on || "…"}–${sch.ends_on || "…"}`;
+        return `${prettyDate(sch.starts_on) || "…"}–${prettyDate(sch.ends_on) || "…"}`;
       }
-      return "Year-round";
+      return "All year"; // Year-round window, household label
+    }
+    function displayProgramName(sch) {
+      const n = programName(sch);
+      if (/[•·]/.test(n)) return n;
+      return n.replace(/\s+(summer|winter|spring|fall|autumn|all year|year-round)$/i, (_full, w) => {
+        const word = String(w).toLowerCase() === "autumn" ? "Fall"
+          : String(w).replace(/\b\w/g, (c) => c.toUpperCase());
+        return " • " + word;
+      });
+    }
+    function seasonChip(sch) {
+      const blob = `${sch.note || ""} ${sch.id || ""}`.toLowerCase();
+      const words = [["summer","Summer"],["winter","Winter"],["spring","Spring"],["fall","Fall"],["autumn","Fall"]];
+      for (const [k, label] of words) if (blob.includes(k)) return label;
+      return "";
+    }
+    function schedArtKey(sch) {
+      const blob = `${sch.note || ""} ${sch.id || ""} ${(sch.steps || []).map((s) => s.station_id).join(" ")}`.toLowerCase();
+      if (blob.includes("drip")) return "drip";
+      if (blob.includes("winter") || blob.includes("cactus")) return "cactus";
+      return "sunhill";
+    }
+    function nextPretty(sch) {
+      const raw = nextFireLabel(sch);
+      const nice = prettyFire(raw);
+      if (!nice || nice === "No start time" || nice === "None in window") return nice;
+      return "Next " + nice;
     }
     function weekdayMatches(sch, wd) {
       const days = sch.weekdays || [];
@@ -845,7 +881,7 @@
         if (!best || label < best.label) best = { label, name: shortProgramName(sch) };
       }
       if (!best) return "None in window";
-      return `${best.label} · ${best.name}`;
+      return `${prettyFire(best.label)} · ${best.name}`;
     }
     function weekdaysOverlap(a, b) {
       const A = (a.weekdays || []).map((d) => String(d).toLowerCase());
@@ -874,10 +910,14 @@
         box.textContent = "";
         return;
       }
-      const bits = pairs.map(([a, b]) =>
-        `${programName(a)} and ${programName(b)} both at ${a.start}`);
-      box.textContent = "Soft warning: enabled programs share a start time on overlapping days — " +
-        bits.join("; ") + ". Engine skips if already watering (D13). Save is still allowed.";
+      const bits = pairs.map(([a, b]) => {
+        const start = [a.starts_on || "0000-01-01", b.starts_on || "0000-01-01"].sort().pop();
+        const end = [a.ends_on || "9999-12-31", b.ends_on || "9999-12-31"].sort()[0];
+        const dated = (a.starts_on || a.ends_on) && (b.starts_on || b.ends_on) && start <= end;
+        const tail = dated ? ` ${prettyDate(start)}–${prettyDate(end)}` : ` at ${prettyClock(a.start)}`;
+        return `${programName(a)} overlaps ${programName(b)}${tail}`;
+      });
+      box.textContent = bits.join(" · ");
       box.classList.remove("hidden");
     }
     function paintPauseBanner() {
@@ -1003,20 +1043,22 @@
         sub.textContent = "";
         sub.classList.add("hidden");
         const nxt = nextWhileWatering(info);
-        $("next-text").textContent = nxt || "—";
+        if (nxt) {
+          $("next-text").textContent = nxt;
+          $("next-line").classList.remove("hidden");
+        } else {
+          $("next-line").classList.add("hidden");
+        }
       } else {
         timer.textContent = "";
         timer.classList.add("hidden");
+        $("next-line").classList.remove("hidden");
         if (s.last_error) {
           sub.textContent = s.last_error;
           sub.classList.remove("hidden");
-        } else if (isPaused()) {
-          const lab = pauseUntilLabel();
-          sub.textContent = "Phoenix · " + lab.charAt(0).toLowerCase() + lab.slice(1);
-          sub.classList.remove("hidden");
         } else {
-          sub.textContent = "Phoenix · ready";
-          sub.classList.remove("hidden");
+          sub.textContent = "";
+          sub.classList.add("hidden");
         }
         $("next-text").textContent = isPaused() ? "Schedules skip while paused" : globalNextLabel();
       }
@@ -1062,21 +1104,31 @@
         const el = document.createElement("article");
         el.className = "sched";
         const out = !inSeasonNow(sch, today);
-        const onBadge = sch.enabled
-          ? `<span class="badge">On</span>`
-          : `<span class="badge off">Off</span>`;
-        const seasonBadge = `<span class="badge season">${esc(seasonLabel(sch))}</span>`;
-        const outBadge = out ? `<span class="badge out">Out of season</span>` : "";
+        const art = SCHED_ART[schedArtKey(sch)] || SCHED_ART.sunhill;
+        const titled = displayProgramName(sch);
+        let when = out ? "Out of season" : seasonLabel(sch);
+        if (!out && (when === "All year" || when === "Year-round") && /all year|year-round/i.test(titled)) when = "";
+        const chip = !out ? seasonChip(sch) : "";
+        const next = !out ? nextPretty(sch) : "";
         el.innerHTML = `
-          <div class="sched-head">
-            <div class="sched-title">${esc(programName(sch))}</div>
-            <button type="button" class="ghost" data-toggle>${sch.enabled ? "Disable" : "Enable"}</button>
-          </div>
-          <div class="sched-meta">Next: ${esc(nextFireLabel(sch))}</div>
-          <div class="badges">${onBadge}${seasonBadge}${outBadge}</div>
-          <div class="row-actions">
-            <button type="button" class="go edit" data-edit>Edit</button>
-            <button type="button" class="ghost edit" data-dup>Duplicate</button>
+          <div class="sched-art" aria-hidden="true">${art}</div>
+          <div class="sched-main">
+            <div class="sched-top">
+              <div style="min-width:0">
+                <div class="sched-title">${esc(titled)}</div>
+                ${when ? `<div class="sched-when">${esc(when)}</div>` : ""}
+              </div>
+              <div class="sched-links edit">
+                <button type="button" data-edit>Edit</button>
+                <span aria-hidden="true">|</span>
+                <button type="button" data-dup>Duplicate</button>
+              </div>
+            </div>
+            <div class="sched-row">
+              <button type="button" class="switch${sch.enabled ? " on" : ""}" data-toggle aria-pressed="${sch.enabled ? "true" : "false"}" aria-label="${sch.enabled ? "Enabled" : "Disabled"}"></button>
+              ${next ? `<span class="sched-next">${esc(next)}</span>` : ""}
+              ${chip ? `<span class="badge season">${esc(chip)}</span>` : ""}
+            </div>
           </div>`;
         el.querySelector("[data-toggle]").addEventListener("click", () => toggleEnabled(sch));
         el.querySelector("[data-edit]").addEventListener("click", () => openEditor(sch, false));
@@ -1387,6 +1439,7 @@
       resumePause().catch((e) => alert(e.message));
     });
     function showHome() {
+      document.body.dataset.page = "home";
       $("page-home").classList.remove("hidden");
       $("page-schedules").classList.add("hidden");
       $("page-history").classList.add("hidden");
@@ -1395,6 +1448,7 @@
     }
     $("tab-home").addEventListener("click", showHome);
     $("tab-sched").addEventListener("click", () => {
+      document.body.dataset.page = "sched";
       $("page-home").classList.add("hidden");
       $("page-schedules").classList.remove("hidden");
       $("page-history").classList.add("hidden");
@@ -1402,6 +1456,7 @@
       $("tab-sched").classList.add("active");
     });
     $("history-see-all").addEventListener("click", () => {
+      document.body.dataset.page = "history";
       $("page-home").classList.add("hidden");
       $("page-schedules").classList.add("hidden");
       $("page-history").classList.remove("hidden");
@@ -1534,7 +1589,7 @@
       const mins = formatRunMins(actual);
       if (entry.outcome === "completed") return `${mins} · finished`;
       if (entry.outcome === "stopped") {
-        if (actual > 0 && actual < 60) return "Stopped after under a minute";
+        if (actual < 60) return "Stopped after under a minute";
         return `Stopped after ${mins}`;
       }
       if (entry.outcome === "refused") return "Refused (lockout mode)";
