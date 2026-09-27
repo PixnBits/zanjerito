@@ -15,6 +15,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
 	"github.com/PixnBits/zanjerito/internal/history"
+	"github.com/PixnBits/zanjerito/internal/rain"
 	"github.com/PixnBits/zanjerito/internal/schedule"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
@@ -57,9 +58,11 @@ func main() {
 
 	if ps, err := store.LoadPause(*configPath, time.Now()); err != nil {
 		log.Printf("pause load: %v (continuing unpaused)", err)
-	} else if ps.Active {
-		eng.SetPause(ps.Until, ps.Reason)
-		log.Printf("pause restored (until=%v reason=%q)", ps.Until, ps.Reason)
+	} else {
+		rain.ApplyStoredPause(eng, ps)
+		if ps.Active {
+			log.Printf("pause restored (until=%v reason=%q source=%q)", ps.Until, ps.Reason, ps.Source)
+		}
 	}
 
 	log.Printf("zanjerito engine ready (driver=%s dry=%v phase=%s)", *driverName, *dry && *driverName == "gpiocdev", eng.Status().Phase)
@@ -85,9 +88,15 @@ func main() {
 	go runner.Loop(ctx, time.Second)
 	log.Printf("schedule runner ticking (America/Phoenix, %s)", *configPath)
 
+	rainPoller, err := rain.Start(ctx, eng, *configPath)
+	if err != nil {
+		log.Printf("rain: disabled: %v", err)
+	}
+
 	if *listen != "" {
 		srv := api.New(eng, *configPath)
 		srv.History = hist
+		srv.Rain = rainPoller
 		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			log.Printf("api listening on %s (LAN trust, D7)", *listen)

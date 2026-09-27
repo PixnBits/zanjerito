@@ -26,6 +26,8 @@ func TestUIHomeEmbedded(t *testing.T) {
 		"Until tomorrow morning", "2 days", "1 week", "Until further notice", "Pick days…",
 		"pause-stepper", "pause-days-minus", "pause-days-plus",
 		"PAUSE_MAX_DAYS = 14", "PAUSE_MIN_DAYS = 1", "tomorrow_morning", "paused_label",
+		"Paused for rain", "Rain data unavailable", "pause_source", "rain_pause_exempt",
+		"formatRainInches", "rain-hint",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)

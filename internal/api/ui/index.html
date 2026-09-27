@@ -326,6 +326,10 @@
       min-height: 44px; padding: 0 16px; font-weight: 700; font-size: 1rem;
     }
     .pause-banner .resume:active { opacity: .88; }
+    .rain-hint {
+      color: var(--muted); font-size: .78rem; font-weight: 500;
+      margin: 0 0 10px;
+    }
     .home-actions {
       /* Breathing room under hero card; keep Pause out of STOP footer */
       display: flex; gap: 8px; margin: 16px 0 18px; flex-wrap: wrap;
@@ -404,6 +408,7 @@
     <button type="button" class="resume" id="pause-resume">Resume</button>
   </div>
   <section id="page-home">
+    <p id="rain-hint" class="rain-hint hidden" hidden>Rain data unavailable</p>
     <div class="status" id="status">
       <div class="hero-copy">
         <div class="hero-top">
@@ -650,7 +655,27 @@
         paused_until: d.paused_until ?? d.PausedUntil ?? null,
         paused_label: d.paused_label ?? d.PausedLabel ?? "",
         reason: d.reason || d.Reason || "",
+        pause_source: d.pause_source || d.PauseSource || "",
+        rain_inches: Number(d.rain_inches ?? d.RainInches ?? 0) || 0,
+        last_rain_at: d.last_rain_at ?? d.LastRainAt ?? null,
+        rain: d.rain || d.Rain || { enabled: false, unavailable: false },
       };
+    }
+    function formatRainInches(n) {
+      const v = Number(n);
+      if (!Number.isFinite(v) || v < 0) return "0.0";
+      const r = Math.round(v * 100) / 100;
+      const s = r.toFixed(2);
+      return s.endsWith("0") ? r.toFixed(1) : s;
+    }
+    function paintRainHint() {
+      const el = $("rain-hint");
+      if (!el) return;
+      const rain = (state.status && state.status.rain) || {};
+      const show = !!(rain.enabled && rain.unavailable);
+      el.hidden = !show;
+      el.classList.toggle("hidden", !show);
+      el.textContent = show ? "Rain data unavailable" : "";
     }
     async function j(url, opt) {
       const r = await fetch(url, opt);
@@ -862,12 +887,24 @@
         banner.classList.remove("visible");
         banner.hidden = true;
         if (openBtn) openBtn.classList.remove("hidden");
+        paintRainHint();
         return;
       }
       banner.hidden = false;
       banner.classList.add("visible");
-      $("pause-msg").textContent = pauseUntilLabel() + " · schedules held";
+      const s = state.status || {};
+      let msg = pauseUntilLabel() + " · schedules held";
+      if (s.pause_source === "auto" && s.reason === "rain") {
+        if (s.paused_label && String(s.paused_label).indexOf("Paused for rain") === 0) {
+          msg = s.paused_label;
+        } else {
+          const tail = pauseUntilLabel().replace(/^Paused until\s+/, "");
+          msg = "Paused for rain (" + formatRainInches(s.rain_inches) + " in) until " + tail;
+        }
+      }
+      $("pause-msg").textContent = msg;
       if (openBtn) openBtn.classList.add("hidden");
+      paintRainHint();
     }
     /** Infer active itinerary + remaining for timer / Next-station. */
     function activeRunInfo() {
@@ -1198,8 +1235,12 @@
       });
       await loadSchedules();
     }
+    function rainPauseAllows(st) {
+      const s = state.status || {};
+      return !!(isPaused() && s.pause_source === "auto" && s.reason === "rain" && st && st.rain_pause_exempt);
+    }
     function openRun(st) {
-      if (isPaused()) {
+      if (isPaused() && !rainPauseAllows(st)) {
         $("paused-block-msg").textContent =
           "Paused for rain — resume before running " + shortStation(st.id) + ".";
         $("paused-block-dlg").showModal();

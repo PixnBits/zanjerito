@@ -29,12 +29,14 @@ Example config:
   "stations": [
     { "id": "front-west",  "title": "Front West",  "color": "red",    "bcm": 5,  "physical": 29, "wiringPi": 21 },
     { "id": "front-north", "title": "Front North", "color": "yellow", "bcm": 6,  "physical": 31, "wiringPi": 22 },
-    { "id": "drip",        "title": "Drip Line",   "color": "blue",   "bcm": 13, "physical": 33, "wiringPi": 23 },
+    { "id": "drip",        "title": "Drip Line",   "color": "blue",   "bcm": 13, "physical": 33, "wiringPi": 23, "rain_pause_exempt": true },
     { "id": "front-south", "title": "Front South", "color": "green",  "bcm": 19, "physical": 35, "wiringPi": 24 }
   ]
 }
 ```
 
 Seed schedule (parity fixture, not the only program): Front West 4 min → Front North 8 min → Front South 8 min. Drip is not in that itinerary.
+
+`rain_pause_exempt` (default false) lets that station keep running during an **automatic** rain pause. A manual run of an exempt station (for example drip) from Home is allowed; any other station is refused (HTTP 409) until Resume. The example sets it on Drip Line only. A manual pause still holds every station. See the README section "Automatic rain pause".
 
 Validate on first boot: refuse to run if `active_low` is missing. Confirm chip with `gpiodetect` / `gpioinfo`.

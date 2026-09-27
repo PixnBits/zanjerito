@@ -40,6 +40,8 @@ Writes:
 
 Edit `zanjerito.env` — set `LISTEN` to **this Pi’s LAN address** (not `0.0.0.0`), e.g. `192.168.1.8:8080`. `DRIVER=gpiocdev` on the Pi (post-cutover). `fake` for laptop. `dualrun` / rollback: [cutover.md](./cutover.md).
 
+Automatic rain pause reads `rain.local.json` beside `config.json` (or the path in `ZANJERITO_RAIN_CONFIG`). The install script does not write it. Copy `config/rain.local.example.json`, replace `<GAUGE_ID>`, and do not commit the local file. See the README section "Automatic rain pause".
+
 ## Enable + LAN UI
 
 ```sh

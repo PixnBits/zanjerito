@@ -45,6 +45,34 @@ func TestPauseAutoExpire(t *testing.T) {
 	}
 }
 
+func TestPauseExpireKeepsRainMemory(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.json")
+	past := time.Now().Add(-time.Minute)
+	cleared := time.Now().Add(-2 * time.Hour)
+	last := time.Now().Add(-48 * time.Hour)
+	in := PauseState{
+		Active: true, Until: &past, Reason: "rain", Source: "auto",
+		RainInches: 0.4, LastRainAt: &last, RainClearedAt: &cleared,
+	}
+	if err := SavePause(cfg, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := LoadPause(cfg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Active || out.Reason != "" || out.Source != "" {
+		t.Fatalf("expire should drop the hold, %+v", out)
+	}
+	if out.RainClearedAt == nil || !out.RainClearedAt.Equal(cleared) {
+		t.Fatalf("cleared at %+v", out.RainClearedAt)
+	}
+	if out.LastRainAt == nil || !out.LastRainAt.Equal(last) {
+		t.Fatalf("last rain %+v", out.LastRainAt)
+	}
+}
+
 func TestPauseMissingFile(t *testing.T) {
 	out, err := LoadPause(filepath.Join(t.TempDir(), "cfg.json"), time.Now())
 	if err != nil || out.Active {
