@@ -1,0 +1,45 @@
+{
+  "t": "daily",
+  "l": "azXX",
+  "s": "2026-09-24T00:00",
+  "i": "P2D",
+  "errors": [],
+  "n": "Test Station",
+  "a": "TS",
+  "data": [
+    {
+      "datetime": "2026-09-24",
+      "date_doy": "267",
+      "date_year": "2026",
+      "eto_azmet": "5.0",
+      "eto_azmet_in": "0.20",
+      "precip_total_mm": "0.0",
+      "meta_needs_review": "0",
+      "meta_station_id": "azXX",
+      "meta_station_name": "Test Station",
+      "air_temp_max": "35.0"
+    },
+    {
+      "datetime": "2026-09-25",
+      "date_doy": "268",
+      "date_year": "2026",
+      "eto_azmet": "6.35",
+      "eto_azmet_in": "0.25",
+      "precip_total_mm": "1.2",
+      "meta_needs_review": "0",
+      "meta_station_id": "azXX",
+      "meta_station_name": "Test Station"
+    },
+    {
+      "datetime": "2026-09-26",
+      "date_doy": "269",
+      "date_year": "2026",
+      "eto_azmet": "",
+      "eto_azmet_in": "0.18",
+      "precip_total_mm": "0.0",
+      "meta_needs_review": "1",
+      "meta_station_id": "azXX",
+      "meta_station_name": "Test Station"
+    }
+  ]
+}

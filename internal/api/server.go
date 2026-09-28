@@ -17,6 +17,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/history"
 	"github.com/PixnBits/zanjerito/internal/rain"
 	"github.com/PixnBits/zanjerito/internal/schedule"
+	"github.com/PixnBits/zanjerito/internal/soil"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
 
@@ -30,7 +31,13 @@ type Server struct {
 	History *history.Log
 	// Rain is nil when automatic rain pause is disabled.
 	Rain *rain.Poller
-	mux  *http.ServeMux
+	// Soil is nil when the display-only soil estimate is disabled or the file is invalid.
+	Soil *soil.Poller
+	// SoilConfigErr is a short parse message when soil.local.json exists but is invalid.
+	// Empty when the file is missing, disabled, or the estimate is running.
+	// It must not contain a station id, URL, or filesystem path.
+	SoilConfigErr string
+	mux           *http.ServeMux
 }
 
 func New(e *engine.Engine, path string) *Server {
@@ -45,6 +52,7 @@ func New(e *engine.Engine, path string) *Server {
 	s.mux.HandleFunc("DELETE /api/pause", s.handlePauseClear)
 	s.mux.HandleFunc("POST /api/pause/resume", s.handlePauseClear)
 	s.mux.HandleFunc("GET /api/history", s.handleHistory)
+	s.mux.HandleFunc("GET /api/soil", s.handleSoil)
 	s.mux.HandleFunc("GET /api/schedules", s.handleSchedulesList)
 	s.mux.HandleFunc("GET /api/schedules/{id}", s.handleScheduleGet)
 	s.mux.HandleFunc("PUT /api/schedules/{id}", s.handleSchedulePut)
@@ -272,6 +280,46 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// NoteSoil records a soil.Start result. A missing file leaves Soil nil and
+// SoilConfigErr empty. An invalid file keeps Soil nil and sets SoilConfigErr.
+func (s *Server) NoteSoil(p *soil.Poller, err error) {
+	if s == nil {
+		return
+	}
+	s.Soil = nil
+	s.SoilConfigErr = ""
+	if err == nil {
+		s.Soil = p
+		return
+	}
+	s.SoilConfigErr = soil.PublicConfigError(err)
+}
+
+func (s *Server) handleSoil(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	loc := s.location()
+	now := time.Now()
+	if s.Soil != nil && s.Soil.Now != nil {
+		now = s.Soil.Now()
+	}
+	if s.Soil == nil {
+		v := soil.DisabledView("no soil.local.json", now, loc)
+		if msg := soil.SanitizeConfigMessage(s.SoilConfigErr); msg != "" {
+			v.Reason = "soil.local.json invalid"
+			v.ConfigError = msg
+		}
+		writeJSON(w, http.StatusOK, v)
+		return
+	}
+	var stations []engine.StationConfig
+	if f, err := s.load(); err == nil {
+		stations = f.Stations
+	}
+	hist := s.History.List(0)
+	rainDays, rainOK := s.Rain.DailyRain(loc)
+	writeJSON(w, http.StatusOK, s.Soil.View(stations, hist, rainDays, rainOK, now, loc))
 }
 
 func historyLimit(raw string) (int, error) {

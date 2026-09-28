@@ -15,3 +15,7 @@ lib
 
 # Local rain gauge config (copy from config/rain.local.example.json; never commit)
 rain.local.json
+
+# Local soil estimate config (copy from config/soil.local.example.json; never commit)
+soil.local.json
+soil-et.json

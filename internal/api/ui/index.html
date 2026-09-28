@@ -379,6 +379,16 @@
       border-top: 1px solid color-mix(in srgb, var(--dune) 30%, var(--cream-edge));
     }
     .history-item:first-child { border-top: 0; }
+    #soil-wrap { margin: 16px 0 4px; }
+    .soil-bar {
+      margin-top: 6px; height: 4px; border-radius: 999px;
+      background: color-mix(in srgb, var(--dune) 30%, var(--cream-edge));
+      overflow: hidden;
+    }
+    .soil-bar > span {
+      display: block; height: 100%; background: var(--teal); border-radius: 999px;
+    }
+    #run-soil { margin: 8px 0 0; }
     .history-line { font-size: .98rem; line-height: 1.35; overflow-wrap: anywhere; }
     .history-detail {
       color: var(--muted); font-size: .82rem; margin-top: 2px; line-height: 1.35;
@@ -492,6 +502,12 @@
     </div>
     <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
+    <div id="soil-wrap" class="hidden" hidden>
+      <h1 class="strip-label">Soil water</h1>
+      <div class="history-card" id="soil-card">
+        <div id="soil-card-body"></div>
+      </div>
+    </div>
     <h1 class="strip-label">Recent runs</h1>
     <div class="history-card" id="history-card">
       <div id="history-home"><p class="history-note">No runs yet.</p></div>
@@ -524,6 +540,7 @@
   </footer>
   <dialog id="run-dlg">
     <p id="run-msg"></p>
+    <p id="run-soil" class="history-detail" hidden></p>
     <div class="strip" id="durs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
     <menu>
       <button type="button" class="ghost" id="run-cancel">Cancel</button>
@@ -630,6 +647,7 @@
       historyLoaded: false,
       historyError: "",
       prevPhase: "",
+      soil: null,
     };
     let historyInFlight = null;
     if (new URLSearchParams(location.search).get("mode") === "kiosk") {
@@ -1248,6 +1266,7 @@
       }
       state.pick = st;
       $("run-msg").textContent = "Run " + shortStation(st.id) + " for…";
+      paintRunSoil(st);
       const durs = $("durs");
       durs.innerHTML = "";
       [1, 5, 10].forEach((m) => {
@@ -1625,12 +1644,147 @@
         });
       } catch (e) {}
     }
+    function soilEtKnown(d) {
+      return !!(d && d.et_known === true && d.et && d.et.last_ok_at);
+    }
+    function soilInches(n) {
+      const v = Number(n);
+      return (Number.isFinite(v) ? v : 0).toFixed(2);
+    }
+    function soilWindowLine(z, d, withET) {
+      const days = Number(d && d.window_days);
+      let s = "Rain " + soilInches(z.rain_total_inches) + " in";
+      if (withET) s += " · ET " + soilInches(z.et_total_inches) + " in";
+      if (Number.isFinite(days) && days > 0) {
+        s += ", last " + days + " " + (days === 1 ? "day" : "days");
+      }
+      return s;
+    }
+    function soilUpdatedStamp(d) {
+      if (!d) return "";
+      if (d.et && d.et.last_ok_at) return d.et.last_ok_at;
+      if (d.et_known && d.updated_at) return d.updated_at;
+      return "";
+    }
+    function paintSoil() {
+      const wrap = $("soil-wrap");
+      const box = $("soil-card-body");
+      if (!wrap || !box) return;
+      const d = state.soil;
+      if (!d || d.enabled !== true) {
+        if (d && d.reason === "soil.local.json invalid") {
+          wrap.hidden = false;
+          wrap.classList.remove("hidden");
+          box.innerHTML = `<p class="history-detail">Soil settings file has an error (see log)</p>`;
+          return;
+        }
+        wrap.hidden = true;
+        wrap.classList.add("hidden");
+        box.innerHTML = "";
+        return;
+      }
+      wrap.hidden = false;
+      wrap.classList.remove("hidden");
+      const known = soilEtKnown(d);
+      const zones = d.zones || [];
+      let anyUnmeasured = false;
+      zones.forEach((z) => { if (!z.rate_measured) anyUnmeasured = true; });
+      let rows = "";
+      if (!known) {
+        if (d.rain_known) {
+          rows = zones.map((z) => {
+            const name = shortStation(z.station_id);
+            return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
+              `<div class="history-detail">${esc(soilWindowLine(z, d, false))}</div></div>`;
+          }).join("");
+        }
+      } else {
+        rows = zones.map((z) => {
+          const name = shortStation(z.station_id);
+          if (!z.rate_measured) {
+            return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
+              `<div class="history-detail">${esc(soilWindowLine(z, d, true))}</div></div>`;
+          }
+          const pctN = Number(z.percent);
+          if (!Number.isFinite(pctN)) {
+            return `<div class="history-item"><div class="history-line">${esc(name)}</div></div>`;
+          }
+          const pct = Math.max(0, Math.min(100, Math.round(pctN)));
+          return `<div class="history-item"><div class="history-line">${esc(name)} · ${pct}% of capacity</div>` +
+            `<div class="soil-bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>`;
+        }).join("");
+      }
+      let notes = (known ? `<p class="history-detail">estimate</p>` : "") + rows;
+      if (!known) {
+        notes += `<p class="history-detail">No ET data yet</p>`;
+      }
+      if (d.et && d.et.unavailable) {
+        const since = d.et.since ? clockPhrase(new Date(d.et.since)) : "";
+        notes += `<p class="history-detail">ET unavailable since ${esc(since)}</p>`;
+      }
+      if (anyUnmeasured) {
+        notes += `<p class="history-detail">Measure sprinkler output to enable</p>`;
+      }
+      const stamp = soilUpdatedStamp(d);
+      if (stamp) {
+        notes += `<p class="history-detail">Updated ${esc(clockPhrase(new Date(stamp)))}</p>`;
+      }
+      box.innerHTML = notes;
+    }
+    function paintRunSoil(st) {
+      const el = $("run-soil");
+      if (!el) return;
+      const d = state.soil;
+      if (!d || d.enabled !== true || !st) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      const z = (d.zones || []).find((x) => x.station_id === st.id);
+      if (!z) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      el.hidden = false;
+      if (!soilEtKnown(d) || (z.rate_measured && !Number.isFinite(Number(z.percent)))) {
+        el.textContent = "Soil estimate: no ET data yet";
+        return;
+      }
+      const stamp = soilUpdatedStamp(d);
+      const updated = stamp ? clockPhrase(new Date(stamp)) : "";
+      if (z.rate_measured) {
+        const cap = (Number(z.capacity_inches) || 0).toFixed(2);
+        const pct = Math.round(Number(z.percent));
+        el.textContent = "Soil estimate: " + pct + "% of " + cap + " in" +
+          (updated ? " · updated " + updated : "");
+      } else {
+        el.textContent = "Soil estimate: rate not measured · " + soilWindowLine(z, d, true);
+      }
+    }
+    async function loadSoil() {
+      try {
+        const d = await j("/api/soil", { cache: "no-store" });
+        state.soil = d;
+        paintSoil();
+      } catch (e) {
+        if (!state.soil) {
+          const wrap = $("soil-wrap");
+          if (wrap) {
+            wrap.hidden = true;
+            wrap.classList.add("hidden");
+          }
+        }
+      }
+    }
     loadStatus();
     loadStations();
     loadSchedules();
     loadHistory();
+    loadSoil();
     hookSSE();
     setInterval(loadStatus, 4000);
+    setInterval(loadSoil, 5 * 60 * 1000);
     // Tick relative timer while watering
     setInterval(() => { if (watering()) paintStatus(); }, 1000);
   </script>
