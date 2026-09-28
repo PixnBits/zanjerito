@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.4 · 2026-09-12  
 **Repo:** [PixnBits/zanjerito](https://github.com/PixnBits/zanjerito)  
-**Working branch for this rewrite:** `rewrite/vision` (keeps `fancy-vibes` / `mvp-bash` intact as reference)  
+**Working branch for this rewrite:** `rewrite/vision` (kept then-trunk `fancy-vibes` and `mvp-bash` intact while this was drafted). Trunk is now `main` (`fancy-vibes` until 2026-09-27; that history is part of `main`). The bash MVP is preserved at tag `bash-mvp`.  
 **Companions:** [decisions.md](./decisions.md) · [architecture.md](./architecture.md) · [pin-map.md](./pin-map.md) · [ui-directions.md](./ui-directions.md)  
 **Codename etymology:** *Zanjero* is Spanish for “ditch rider.” Since the late 1800s, zanjeros opened head gates so water reached fields and faucets. Zanjerito is a small, reliable local zanjero for a home drip system.
 
@@ -16,7 +16,7 @@ Zanjerito is a **Raspberry Pi–hosted irrigation controller**: a small local Go
 
 ## 2. Why rewrite now
 
-The Node/`fancy-vibes` stack was the right trade for **human** authoring before strong coding LMs: familiar TS, Fastify, GraphQL, React. The target has shifted.
+The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) was the right trade for **human** authoring before strong coding LMs: familiar TS, Fastify, GraphQL, React. The target has shifted.
 
 | Then | Now |
 |---|---|
@@ -24,7 +24,7 @@ The Node/`fancy-vibes` stack was the right trade for **human** authoring before 
 | GraphQL because it was interesting | **REST + JSON + SSE** — small, clear, cheap on-device |
 | UI as a first sketch | **Direction D hybrid** with stakeholder feedback; current UI is prototype only |
 
-`mvp-bash` remains the **production truth today**. `fancy-vibes` remains the **behavioral and domain reference** (stations, power enable, schedules, overlap). Neither branch is the destination.
+The bash MVP (preserved at tag `bash-mvp`) was the **production truth** when this was drafted. The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) remains the **behavioral and domain reference** (stations, power enable, schedules, overlap). Neither was the destination.
 
 ---
 
@@ -75,7 +75,7 @@ The Node/`fancy-vibes` stack was the right trade for **human** authoring before 
 - Cloud account, phone push vendor lock-in, or mandatory internet.
 - Multi-site fleet / multi-tenant SaaS.
 - ML weather/ET optimization (interesting later; not cutover).
-- Keeping GraphQL, React, or the `fancy-vibes` page structure.
+- Keeping GraphQL, React, or the `fancy-vibes` page structure (that stack was trunk until 2026-09-27; its history is now part of `main`).
 - Pixel-perfect reuse of the current UI.
 - Wall screen as an MVP deliverable (it is v1).
 
@@ -100,18 +100,19 @@ The Node/`fancy-vibes` stack was the right trade for **human** authoring before 
 
 ## 7. Current system (as-is)
 
-### 7.1 Production: `mvp-bash`
+### 7.1 Production at draft time: bash MVP (tag `bash-mvp`)
 
 - `startup.sh` — configure pins as outputs, default **off**.
 - `channel.sh <wiringPiChannel> <minutes>` — drop 24VAC, all off, enable 24VAC, run one channel, then shut down.
 - `front.sh` — **golden program / parity fixture:** Front West 4m, Front North 8m, Front South 8m. Drip channel exists but is not in this program.
 - Paths assume `/home/pi/zanjerito/`. WiringPi channel numbers in scripts.
 
-### 7.2 Reference app: `fancy-vibes`
+### 7.2 Reference app: Node/React (lived on `fancy-vibes`, trunk until 2026-09-27; history now on `main`)
 
 - Fastify + Mercurius (GraphQL) + React/urql; Node 22; `rpi-gpio` intended but **`fake-rpi-gpio` still wired in**.
 - Stations + 24VAC power enable; schedules with ~2s overlap; in-memory config.
 - Physical pin numbering in code; comments map to wiringPi used by bash.
+- `server/` and `client/` remain in the tree.
 
 ### 7.3 Hardware assumptions
 
@@ -183,7 +184,7 @@ Open / proposed choices live in [decisions.md](./decisions.md).
 1. **Record vision** (this PRD + decisions + architecture + pin map + UI directions) on `rewrite/vision`.
 2. **Confirm** proposed P0/P1 decisions (or field-test D2) — see [decisions.md](./decisions.md).
 3. **Implement** on a follow-on branch (e.g. `rewrite/go`): runtime skeleton → GPIO → schedules → API → UI → systemd → dual-run → parity → cutover.
-4. Keep `fancy-vibes` and `mvp-bash` as read-only references until cutover notes say otherwise.
+4. Keep the Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) and the bash MVP (preserved at tag `bash-mvp`) as read-only references.
 
 Work runs on Nick’s connected Linux machine (not Cloud Agents). Specialist bots review and implement against these docs.
 
@@ -191,8 +192,8 @@ Work runs on Nick’s connected Linux machine (not Cloud Agents). Specialist bot
 
 ## 13. References in-repo
 
-- `mvp-bash`: `startup.sh`, `channel.sh`, `front.sh`
-- `fancy-vibes`: `server/stations.ts`, `server/scheduling.ts`, `server/server.ts`, `client/`
+- bash MVP (preserved at tag `bash-mvp`): `startup.sh`, `channel.sh`, `front.sh`
+- Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`; `server/` and `client/` remain in the tree): `server/stations.ts`, `server/scheduling.ts`, `server/server.ts`, `client/`
 - [decisions.md](./decisions.md) — prioritized decisions
 - [architecture.md](./architecture.md) — runtime layers, state machine, API sketch
 - [pin-map.md](./pin-map.md) — this hardware’s pin table + example config

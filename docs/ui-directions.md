@@ -4,7 +4,7 @@
 **Companion:** [prd.md](./prd.md) · [decisions.md](./decisions.md)  
 **Selected (decided):** **Direction D — hybrid strip** (Nick, 2026-09-12)
 
-The `fancy-vibes` React UI was a learning prototype (stations list, schedules, GraphiQL). It is a reference for *capabilities*, not layout or brand.
+The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) was a learning prototype (stations list, schedules, GraphiQL). It is a reference for *capabilities*, not layout or brand. `server/` and `client/` remain in the tree.
 
 ---
 

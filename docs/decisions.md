@@ -19,7 +19,7 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 
 ### D2. Valve sequencing policy vs bash
 - **Status:** decided → **overlap default; isolation configurable** (2026-09-12)
-- **Context:** Bash drops 24VAC and fully offs between channels (flow slams shut — hammer risk). `fancy-vibes` overlaps ~2s while keeping power on (two solenoids briefly, anti-hammer). Nick: water hammer is the bigger danger.
+- **Context:** Bash drops 24VAC and fully offs between channels (flow slams shut — hammer risk). The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) overlaps ~2s while keeping power on (two solenoids briefly, anti-hammer). Nick: water hammer is the bigger danger.
 - **Choice:**
   - Default: `sequencing: overlap`, `overlap_ms: 2000`. 24VAC stays up for the itinerary. Next station ON, then previous OFF. If duration < overlap, shrink overlap.
   - Config enum per schedule (or global fallback): `overlap | isolate`.

@@ -1012,10 +1012,10 @@
           sub.classList.remove("hidden");
         } else if (isPaused()) {
           const lab = pauseUntilLabel();
-          sub.textContent = "Phoenix · " + lab.charAt(0).toLowerCase() + lab.slice(1);
+          sub.textContent = lab;
           sub.classList.remove("hidden");
         } else {
-          sub.textContent = "Phoenix · ready";
+          sub.textContent = "Ready";
           sub.classList.remove("hidden");
         }
         $("next-text").textContent = isPaused() ? "Schedules skip while paused" : globalNextLabel();
