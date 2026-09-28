@@ -31,9 +31,13 @@ type Server struct {
 	History *history.Log
 	// Rain is nil when automatic rain pause is disabled.
 	Rain *rain.Poller
-	// Soil is nil when the display-only soil estimate is disabled.
+	// Soil is nil when the display-only soil estimate is disabled or the file is invalid.
 	Soil *soil.Poller
-	mux  *http.ServeMux
+	// SoilConfigErr is a short parse message when soil.local.json exists but is invalid.
+	// Empty when the file is missing, disabled, or the estimate is running.
+	// It must not contain a station id, URL, or filesystem path.
+	SoilConfigErr string
+	mux           *http.ServeMux
 }
 
 func New(e *engine.Engine, path string) *Server {
@@ -278,6 +282,21 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
 }
 
+// NoteSoil records a soil.Start result. A missing file leaves Soil nil and
+// SoilConfigErr empty. An invalid file keeps Soil nil and sets SoilConfigErr.
+func (s *Server) NoteSoil(p *soil.Poller, err error) {
+	if s == nil {
+		return
+	}
+	s.Soil = nil
+	s.SoilConfigErr = ""
+	if err == nil {
+		s.Soil = p
+		return
+	}
+	s.SoilConfigErr = soil.PublicConfigError(err)
+}
+
 func (s *Server) handleSoil(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	loc := s.location()
@@ -286,7 +305,12 @@ func (s *Server) handleSoil(w http.ResponseWriter, _ *http.Request) {
 		now = s.Soil.Now()
 	}
 	if s.Soil == nil {
-		writeJSON(w, http.StatusOK, soil.DisabledView("no soil.local.json", now, loc))
+		v := soil.DisabledView("no soil.local.json", now, loc)
+		if msg := soil.SanitizeConfigMessage(s.SoilConfigErr); msg != "" {
+			v.Reason = "soil.local.json invalid"
+			v.ConfigError = msg
+		}
+		writeJSON(w, http.StatusOK, v)
 		return
 	}
 	var stations []engine.StationConfig

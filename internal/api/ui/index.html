@@ -1644,12 +1644,40 @@
         });
       } catch (e) {}
     }
+    function soilEtKnown(d) {
+      return !!(d && d.et_known === true && d.et && d.et.last_ok_at);
+    }
+    function soilInches(n) {
+      const v = Number(n);
+      return (Number.isFinite(v) ? v : 0).toFixed(2);
+    }
+    function soilWindowLine(z, d, withET) {
+      const days = Number(d && d.window_days);
+      let s = "Rain " + soilInches(z.rain_total_inches) + " in";
+      if (withET) s += " · ET " + soilInches(z.et_total_inches) + " in";
+      if (Number.isFinite(days) && days > 0) {
+        s += ", last " + days + " " + (days === 1 ? "day" : "days");
+      }
+      return s;
+    }
+    function soilUpdatedStamp(d) {
+      if (!d) return "";
+      if (d.et && d.et.last_ok_at) return d.et.last_ok_at;
+      if (d.et_known && d.updated_at) return d.updated_at;
+      return "";
+    }
     function paintSoil() {
       const wrap = $("soil-wrap");
       const box = $("soil-card-body");
       if (!wrap || !box) return;
       const d = state.soil;
-      if (!d || !d.enabled) {
+      if (!d || d.enabled !== true) {
+        if (d && d.reason === "soil.local.json invalid") {
+          wrap.hidden = false;
+          wrap.classList.remove("hidden");
+          box.innerHTML = `<p class="history-detail">Soil settings file has an error (see log)</p>`;
+          return;
+        }
         wrap.hidden = true;
         wrap.classList.add("hidden");
         box.innerHTML = "";
@@ -1657,20 +1685,39 @@
       }
       wrap.hidden = false;
       wrap.classList.remove("hidden");
+      const known = soilEtKnown(d);
       const zones = d.zones || [];
       let anyUnmeasured = false;
-      const rows = zones.map((z) => {
-        const name = shortStation(z.station_id);
-        if (!z.rate_measured) {
-          anyUnmeasured = true;
-          return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
-            `<div class="history-detail">${esc("rain & ET only")}</div></div>`;
+      zones.forEach((z) => { if (!z.rate_measured) anyUnmeasured = true; });
+      let rows = "";
+      if (!known) {
+        if (d.rain_known) {
+          rows = zones.map((z) => {
+            const name = shortStation(z.station_id);
+            return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
+              `<div class="history-detail">${esc(soilWindowLine(z, d, false))}</div></div>`;
+          }).join("");
         }
-        const pct = Math.max(0, Math.min(100, Math.round(Number(z.percent) || 0)));
-        return `<div class="history-item"><div class="history-line">${esc(name)} · ${pct}% of capacity</div>` +
-          `<div class="soil-bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>`;
-      }).join("");
-      let notes = `<p class="history-detail">estimate</p>` + rows;
+      } else {
+        rows = zones.map((z) => {
+          const name = shortStation(z.station_id);
+          if (!z.rate_measured) {
+            return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
+              `<div class="history-detail">${esc(soilWindowLine(z, d, true))}</div></div>`;
+          }
+          const pctN = Number(z.percent);
+          if (!Number.isFinite(pctN)) {
+            return `<div class="history-item"><div class="history-line">${esc(name)}</div></div>`;
+          }
+          const pct = Math.max(0, Math.min(100, Math.round(pctN)));
+          return `<div class="history-item"><div class="history-line">${esc(name)} · ${pct}% of capacity</div>` +
+            `<div class="soil-bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>`;
+        }).join("");
+      }
+      let notes = (known ? `<p class="history-detail">estimate</p>` : "") + rows;
+      if (!known) {
+        notes += `<p class="history-detail">No ET data yet</p>`;
+      }
       if (d.et && d.et.unavailable) {
         const since = d.et.since ? clockPhrase(new Date(d.et.since)) : "";
         notes += `<p class="history-detail">ET unavailable since ${esc(since)}</p>`;
@@ -1678,8 +1725,9 @@
       if (anyUnmeasured) {
         notes += `<p class="history-detail">Measure sprinkler output to enable</p>`;
       }
-      if (d.updated_at) {
-        notes += `<p class="history-detail">Updated ${esc(clockPhrase(new Date(d.updated_at)))}</p>`;
+      const stamp = soilUpdatedStamp(d);
+      if (stamp) {
+        notes += `<p class="history-detail">Updated ${esc(clockPhrase(new Date(stamp)))}</p>`;
       }
       box.innerHTML = notes;
     }
@@ -1687,7 +1735,7 @@
       const el = $("run-soil");
       if (!el) return;
       const d = state.soil;
-      if (!d || !d.enabled || !st) {
+      if (!d || d.enabled !== true || !st) {
         el.hidden = true;
         el.textContent = "";
         return;
@@ -1699,18 +1747,19 @@
         return;
       }
       el.hidden = false;
-      const updated = d.updated_at ? clockPhrase(new Date(d.updated_at)) : "";
+      if (!soilEtKnown(d) || (z.rate_measured && !Number.isFinite(Number(z.percent)))) {
+        el.textContent = "Soil estimate: no ET data yet";
+        return;
+      }
+      const stamp = soilUpdatedStamp(d);
+      const updated = stamp ? clockPhrase(new Date(stamp)) : "";
       if (z.rate_measured) {
         const cap = (Number(z.capacity_inches) || 0).toFixed(2);
-        const pct = Math.round(Number(z.percent) || 0);
+        const pct = Math.round(Number(z.percent));
         el.textContent = "Soil estimate: " + pct + "% of " + cap + " in" +
           (updated ? " · updated " + updated : "");
       } else {
-        const inp = z.inputs || {};
-        const rainIn = (Number(inp.rain_inches) || 0).toFixed(2);
-        const etIn = (Number(inp.et_ref_inches) || 0).toFixed(2);
-        el.textContent = "Soil estimate: rate not measured · rain " + rainIn +
-          " in, ET " + etIn + " in today";
+        el.textContent = "Soil estimate: rate not measured · " + soilWindowLine(z, d, true);
       }
     }
     async function loadSoil() {

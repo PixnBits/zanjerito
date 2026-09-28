@@ -2,14 +2,21 @@ package soil
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 )
+
+// ErrNoConfig means soil.local.json is not on disk.
+// Load and Start wrap the underlying fs.ErrNotExist so either errors.Is works.
+var ErrNoConfig = errors.New("no soil.local.json")
 
 const (
 	envConfig = "ZANJERITO_SOIL_CONFIG"
@@ -83,19 +90,119 @@ func CachePath(configPath string) string {
 	return filepath.Join(filepath.Dir(configPath), "soil-et.json")
 }
 
-// Load reads the soil file. A missing file returns a disabled config and a nil
-// error. enabled:false is disabled with a nil error. Malformed JSON, or an
-// enabled file without azmet_station and a valid url, returns an error; callers
-// must not poll. Error text does not include the AZMET station id or URL.
+// Load reads the soil file. A missing file returns ErrNoConfig (and fs.ErrNotExist).
+// enabled:false is disabled with a nil error. Malformed JSON, or an enabled file
+// without azmet_station and a valid url, returns an error; callers must not poll.
+// Error text does not include the AZMET station id or URL.
 func Load(configPath string) (Config, error) {
 	b, err := os.ReadFile(Path(configPath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Config{}, nil
+			return Config{}, fmt.Errorf("%w: %w", ErrNoConfig, err)
 		}
 		return Config{}, fmt.Errorf("soil: config: %w", err)
 	}
 	return parseConfig(b)
+}
+
+// PublicConfigError is the short config_error string for a Load or Start error.
+// A missing file and a nil error yield "". The text has no station id, URL, or path.
+func PublicConfigError(err error) string {
+	if err == nil || errors.Is(err, ErrNoConfig) || errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return SanitizeConfigMessage(syn.Error())
+	}
+	var ute *json.UnmarshalTypeError
+	if errors.As(err, &ute) {
+		return SanitizeConfigMessage(jsonTypeMessage(ute))
+	}
+	msg := err.Error()
+	msg = strings.TrimPrefix(msg, "soil: config: ")
+	return SanitizeConfigMessage(msg)
+}
+
+// SanitizeConfigMessage drops filesystem paths from a config error.
+// A path collapses to "soil.local.json invalid" so the API cannot echo it.
+func SanitizeConfigMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return ""
+	}
+	if strings.Contains(msg, "/") || strings.Contains(msg, `\`) {
+		return "soil.local.json invalid"
+	}
+	return msg
+}
+
+func jsonTypeMessage(e *json.UnmarshalTypeError) string {
+	if e == nil {
+		return "invalid JSON type"
+	}
+	field := knownConfigField(e.Field)
+	if field == "" {
+		return "invalid JSON type"
+	}
+	want := jsonWant(e.Type)
+	switch want {
+	case "array", "object":
+		return field + ": must be an " + want
+	default:
+		return field + ": must be a " + want
+	}
+}
+
+func knownConfigField(field string) string {
+	known := []string{
+		"inches_per_hour",
+		"capacity_inches",
+		"max_daily_et_inches",
+		"timeout_seconds",
+		"azmet_station",
+		"poll_seconds",
+		"crop_factor",
+		"window_days",
+		"poll_hours",
+		"azmet_url",
+		"enabled",
+		"zones",
+	}
+	best := ""
+	for _, name := range known {
+		if field == name || strings.HasSuffix(field, "."+name) {
+			if len(name) > len(best) {
+				best = name
+			}
+		}
+	}
+	return best
+}
+
+func jsonWant(t reflect.Type) string {
+	if t == nil {
+		return "value"
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "bool"
+	case reflect.Float32, reflect.Float64,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "number"
+	case reflect.Slice, reflect.Array:
+		return "array"
+	case reflect.Map, reflect.Struct:
+		return "object"
+	default:
+		return "value"
+	}
 }
 
 func parseConfig(b []byte) (Config, error) {

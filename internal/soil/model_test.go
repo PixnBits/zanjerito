@@ -71,7 +71,7 @@ func TestNoPriorETUnknown(t *testing.T) {
 		t.Fatalf("rain should still apply %+v", series[0])
 	}
 	if series[0].Balance != 1.0 {
-		t.Fatalf("at capacity after rain-only with no ET drain? wait rain 0.1 on full cap stays 1.0, got %v", series[0].Balance)
+		t.Fatalf("balance = %v, want 1.0", series[0].Balance)
 	}
 }
 
@@ -190,5 +190,28 @@ func TestEstimateEngineOrderAndTodayInputs(t *testing.T) {
 	}
 	if zones[0].Inputs.RainKnown || zones[1].Inputs.RainKnown {
 		t.Fatal("rain unknown")
+	}
+}
+
+func TestWindowRainAndETTotals(t *testing.T) {
+	loc := phoenix(t)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	cfg := Config{Enabled: true, WindowDays: 1, CropFactor: 0.6, Capacity: 1, MaxDailyET: 0.6}.normalized()
+	stations := []engine.StationConfig{{ID: "front-north", Title: "Front North"}}
+	et := []DayET{{Date: "2026-09-26", ETInches: 0.20}, {Date: "2026-09-27", ETInches: 0.20}}
+	rain := map[string]float64{"2026-09-26": 0.15, "2026-09-27": 0.25}
+	zones := Estimate(cfg, stations, et, rain, true, nil, now, loc)
+	if len(zones) != 1 {
+		t.Fatalf("zones %d", len(zones))
+	}
+	// Modelled days are today and the previous window_days. Crop ET is 0.20*0.6 per day.
+	if zones[0].RainTotalInches != 0.40 || zones[0].ETTotalInches != 0.24 {
+		t.Fatalf("totals rain %v et %v", zones[0].RainTotalInches, zones[0].ETTotalInches)
+	}
+	if zones[0].Inputs.RainInches != 0.25 {
+		t.Fatalf("today rain %v", zones[0].Inputs.RainInches)
+	}
+	if zones[0].Percent == nil || zones[0].BalanceInches == nil {
+		t.Fatal("known ET should publish percent and balance")
 	}
 }

@@ -38,14 +38,22 @@ type ETStatus struct {
 	LastOKAt    *string `json:"last_ok_at"`
 }
 
-// View is GET /api/soil. Disabled responses use Reason "no soil.local.json".
+// View is GET /api/soil.
+// A missing file uses Reason "no soil.local.json". An invalid file uses
+// Reason "soil.local.json invalid" plus ConfigError.
+// UpdatedAt is the last successful ET fetch, or null when there has not been one.
+// ETKnown is true only after a successful fetch that includes a day in the window.
 type View struct {
-	Enabled   bool       `json:"enabled"`
-	Reason    string     `json:"reason,omitempty"`
-	UpdatedAt string     `json:"updated_at"`
-	ET        ETStatus   `json:"et"`
-	RainKnown bool       `json:"rain_known"`
-	Zones     []ZoneView `json:"zones"`
+	Enabled     bool       `json:"enabled"`
+	Reason      string     `json:"reason,omitempty"`
+	ConfigError string     `json:"config_error,omitempty"`
+	ETKnown     bool       `json:"et_known"`
+	ETReason    string     `json:"et_reason,omitempty"`
+	UpdatedAt   *string    `json:"updated_at"`
+	WindowDays  int        `json:"window_days,omitempty"`
+	ET          ETStatus   `json:"et"`
+	RainKnown   bool       `json:"rain_known"`
+	Zones       []ZoneView `json:"zones"`
 }
 
 type diskET struct {
@@ -76,13 +84,15 @@ type Poller struct {
 	days         []DayET
 	have         bool
 	loggedReview bool
+	tried        bool
 
 	writeMu sync.Mutex
 	written uint64
 }
 
-// Start loads soil config beside configPath. A missing or disabled file
-// returns nil, nil. A malformed file returns an error and does not poll.
+// Start loads soil config beside configPath. A missing file returns
+// ErrNoConfig (also fs.ErrNotExist). A disabled file returns nil, nil.
+// A malformed file returns an error and does not poll.
 // On success it polls once in the background loop until ctx is cancelled.
 // Logs omit the AZMET station id and URL.
 func Start(ctx context.Context, configPath string, loc *time.Location) (*Poller, error) {
@@ -196,6 +206,7 @@ func (p *Poller) SeedCacheForTest(days []DayET, at time.Time) {
 	p.st.Since = nil
 	p.st.LastError = ""
 	p.badCat = ""
+	p.tried = true
 }
 
 // DaysForTest returns a copy of the last-good ET cache.
@@ -326,6 +337,7 @@ func badCategory(msg string) string {
 }
 
 func (p *Poller) observeBad(msg, cat string, now time.Time) string {
+	p.tried = true
 	changed := !p.st.Unavailable || p.badCat != cat
 	if !p.st.Unavailable {
 		t := now.UTC()
@@ -353,6 +365,7 @@ func (p *Poller) observeBad(msg, cat string, now time.Time) string {
 func (p *Poller) observeGood(now time.Time) string {
 	wasBad := p.st.Unavailable
 	t := now.UTC()
+	p.tried = true
 	p.st.Enabled = true
 	p.st.Unavailable = false
 	p.st.LastError = ""
@@ -401,6 +414,7 @@ func (p *Poller) loadCache() {
 	p.mu.Lock()
 	p.days = cloneDays(doc.Days)
 	p.have = true
+	p.tried = true
 	if !doc.UpdatedAt.IsZero() {
 		t := doc.UpdatedAt.UTC()
 		p.st.LastOK = &t
@@ -430,7 +444,7 @@ func rfc3339Ptr(t *time.Time, loc *time.Location) *string {
 }
 
 // DisabledView is GET /api/soil when the feature is off.
-func DisabledView(reason string, now time.Time, loc *time.Location) View {
+func DisabledView(reason string, _ time.Time, loc *time.Location) View {
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -440,7 +454,7 @@ func DisabledView(reason string, now time.Time, loc *time.Location) View {
 	return View{
 		Enabled:   false,
 		Reason:    reason,
-		UpdatedAt: now.In(loc).Format(time.RFC3339),
+		UpdatedAt: nil,
 		ET:        ETStatus{},
 		Zones:     []ZoneView{},
 	}
@@ -458,6 +472,7 @@ func (p *Poller) View(stations []engine.StationConfig, hist []history.Entry, rai
 	p.mu.Lock()
 	cfg := p.Cfg
 	days := cloneDays(p.days)
+	tried := p.tried
 	st := p.st
 	if st.LastOK != nil {
 		t := *st.LastOK
@@ -469,17 +484,25 @@ func (p *Poller) View(stations []engine.StationConfig, hist []history.Entry, rai
 	}
 	p.mu.Unlock()
 
-	updated := now
-	if st.LastOK != nil {
-		updated = *st.LastOK
-	}
+	cfg = cfg.normalized()
+	dates := windowDates(now, loc, cfg.WindowDays)
+	etKnown := st.LastOK != nil && etDayInWindow(days, dates)
 	zones := Estimate(cfg, stations, days, rainByDate, rainKnown, hist, now, loc)
 	if zones == nil {
 		zones = []ZoneView{}
 	}
+	if !etKnown {
+		for i := range zones {
+			zones[i].Percent = nil
+			zones[i].BalanceInches = nil
+		}
+	}
 	return View{
-		Enabled:   true,
-		UpdatedAt: updated.In(loc).Format(time.RFC3339),
+		Enabled:    true,
+		ETKnown:    etKnown,
+		ETReason:   etReason(tried, st, etKnown),
+		UpdatedAt:  rfc3339Ptr(st.LastOK, loc),
+		WindowDays: cfg.WindowDays,
 		ET: ETStatus{
 			Unavailable: st.Unavailable,
 			Since:       rfc3339Ptr(st.Since, loc),
@@ -487,5 +510,51 @@ func (p *Poller) View(stations []engine.StationConfig, hist []history.Entry, rai
 		},
 		RainKnown: rainKnown,
 		Zones:     zones,
+	}
+}
+
+func etDayInWindow(days []DayET, dates []string) bool {
+	if len(days) == 0 || len(dates) == 0 {
+		return false
+	}
+	want := make(map[string]struct{}, len(dates))
+	for _, d := range dates {
+		want[d] = struct{}{}
+	}
+	for _, d := range days {
+		if d.Date == "" {
+			continue
+		}
+		if _, ok := want[d.Date]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func etReason(tried bool, st Status, known bool) string {
+	if known {
+		return ""
+	}
+	if st.LastOK == nil && !tried && !st.Unavailable {
+		return "waiting for first ET fetch"
+	}
+	reason := "no ET data yet"
+	if st.Unavailable || st.LastError != "" {
+		reason += " (" + etErrorClass(st.LastError) + ")"
+	}
+	return reason
+}
+
+func etErrorClass(msg string) string {
+	switch {
+	case strings.Contains(msg, "rate-limited"):
+		return "rate-limited"
+	case strings.Contains(msg, "implausible"):
+		return "implausible ET"
+	case strings.Contains(msg, "no observations"):
+		return "no observations"
+	default:
+		return "AZMET unavailable"
 	}
 }

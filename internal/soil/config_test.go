@@ -2,6 +2,10 @@ package soil
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,11 +17,14 @@ import (
 func TestLoadMissingDisabled(t *testing.T) {
 	t.Setenv(envConfig, "")
 	cfg, err := Load(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrNoConfig) || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing: %v", err)
 	}
 	if cfg.Enabled {
 		t.Fatal("missing file should disable")
+	}
+	if PublicConfigError(err) != "" {
+		t.Fatalf("config_error %q", PublicConfigError(err))
 	}
 }
 
@@ -176,6 +183,67 @@ func TestLoadInvalidValues(t *testing.T) {
 	}
 	if strings.Contains(logText, "https://") {
 		t.Fatalf("log leaked url %q", logText)
+	}
+}
+
+func TestStartMissingDisabledAndInvalid(t *testing.T) {
+	t.Setenv(envConfig, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p, err := Start(ctx, filepath.Join(t.TempDir(), "config.json"), time.UTC)
+	if p != nil || !errors.Is(err, ErrNoConfig) || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing p=%v err=%v", p, err)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "soil.local.json"), []byte(`{"enabled":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err = Start(ctx, filepath.Join(dir, "config.json"), time.UTC)
+	if p != nil || err != nil {
+		t.Fatalf("disabled p=%v err=%v", p, err)
+	}
+
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "malformed", body: `{`, want: "unexpected end of JSON input"},
+		{name: "station type", body: `{"azmet_station":123}`, want: "azmet_station: must be a string"},
+		{
+			name: "rate type",
+			body: `{"azmet_station":"azXX","azmet_url":"https://example.test/v1","zones":{"front-north":{"inches_per_hour":"fast"}}}`,
+			want: "inches_per_hour: must be a number",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := t.TempDir()
+			if err := os.WriteFile(filepath.Join(d, "soil.local.json"), []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			p, err := Start(ctx, filepath.Join(d, "config.json"), time.UTC)
+			if p != nil || err == nil || errors.Is(err, ErrNoConfig) || errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("p=%v err=%v", p, err)
+			}
+			if strings.Contains(err.Error(), "azXX") || strings.Contains(err.Error(), "example.test") || strings.Contains(err.Error(), "fast") {
+				t.Fatalf("logged error leaked: %v", err)
+			}
+			msg := PublicConfigError(err)
+			if msg != tc.want {
+				t.Fatalf("config_error %q want %q (err %v)", msg, tc.want, err)
+			}
+			if strings.Contains(msg, "/") || strings.Contains(msg, "azXX") {
+				t.Fatalf("config_error %q", msg)
+			}
+		})
+	}
+
+	pathErr := fmt.Errorf("soil: config: open /tmp/zanjerito/soil.local.json: permission denied")
+	if msg := PublicConfigError(pathErr); msg != "soil.local.json invalid" || strings.Contains(msg, "/") || strings.Contains(msg, "tmp") {
+		t.Fatalf("path msg %q", msg)
 	}
 }
 

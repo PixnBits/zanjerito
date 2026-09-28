@@ -102,7 +102,7 @@ func main() {
 		}
 	}
 	soilPoller, err := soil.Start(ctx, *configPath, loc)
-	if err != nil {
+	if msg := soil.PublicConfigError(err); msg != "" {
 		log.Printf("soil: disabled: %v", err)
 	}
 
@@ -110,7 +110,7 @@ func main() {
 		srv := api.New(eng, *configPath)
 		srv.History = hist
 		srv.Rain = rainPoller
-		srv.Soil = soilPoller
+		srv.NoteSoil(soilPoller, err)
 		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			log.Printf("api listening on %s (LAN trust, D7)", *listen)

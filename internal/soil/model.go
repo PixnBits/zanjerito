@@ -31,14 +31,18 @@ type Inputs struct {
 }
 
 // ZoneView is one engine station's estimate.
+// Percent and BalanceInches are null when the caller does not yet know ET.
+// RainTotalInches and ETTotalInches sum the modelled window (crop ET, not reference).
 type ZoneView struct {
-	StationID      string  `json:"station_id"`
-	Title          string  `json:"title"`
-	BalanceInches  float64 `json:"balance_inches"`
-	CapacityInches float64 `json:"capacity_inches"`
-	Percent        int     `json:"percent"`
-	RateMeasured   bool    `json:"rate_measured"`
-	Inputs         Inputs  `json:"inputs"`
+	StationID       string   `json:"station_id"`
+	Title           string   `json:"title"`
+	BalanceInches   *float64 `json:"balance_inches"`
+	CapacityInches  float64  `json:"capacity_inches"`
+	Percent         *int     `json:"percent"`
+	RateMeasured    bool     `json:"rate_measured"`
+	RainTotalInches float64  `json:"rain_total_inches"`
+	ETTotalInches   float64  `json:"et_total_inches"`
+	Inputs          Inputs   `json:"inputs"`
 }
 
 // dayResult is one modelled local day. Tests inspect it.
@@ -184,6 +188,15 @@ func runBalance(z Zone, dates []string, etByDate map[string]float64, rainByDate 
 	return bal, series
 }
 
+func seriesTotals(series []dayResult) (rain, et float64) {
+	var r, e float64
+	for _, d := range series {
+		r += d.RainInches
+		e += d.ETInches
+	}
+	return roundInches(r), roundInches(e)
+}
+
 func percentFull(balance, capacity float64) int {
 	if capacity <= 0 {
 		return 0
@@ -225,14 +238,19 @@ func zoneView(st engine.StationConfig, z Zone, series []dayResult, balance float
 			WateringInches: roundedPtr(last.WateringInches),
 		}
 	}
+	bal := roundInches(balance)
+	pct := percentFull(balance, z.Capacity)
+	rainTotal, etTotal := seriesTotals(series)
 	return ZoneView{
-		StationID:      st.ID,
-		Title:          title,
-		BalanceInches:  roundInches(balance),
-		CapacityInches: roundInches(z.Capacity),
-		Percent:        percentFull(balance, z.Capacity),
-		RateMeasured:   z.InchesPerHour != nil,
-		Inputs:         in,
+		StationID:       st.ID,
+		Title:           title,
+		BalanceInches:   &bal,
+		CapacityInches:  roundInches(z.Capacity),
+		Percent:         &pct,
+		RateMeasured:    z.InchesPerHour != nil,
+		RainTotalInches: rainTotal,
+		ETTotalInches:   etTotal,
+		Inputs:          in,
 	}
 }
 

@@ -94,13 +94,13 @@ The model is a capped daily bucket. For each zone and each local day `d` in a ro
 balance(d) = max(0, min(capacity, balance(d-1) + rain(d) + watering(d) - ETo(d) * crop_factor))
 ```
 
-`balance` before the first modelled day is **capacity** (the spin-up assumption: the soil is treated as full `window_days` ago). Until that window has filled with real rain, ET, and watering, the number is a starting guess, not a measurement.
+`balance` before the first modelled day is **capacity** (the spin-up assumption: the soil is treated as full `window_days` ago). Until that window has filled with real rain, ET, and watering, the number is a starting guess, not a measurement. Home does not show that guess as a percent until ET for the window is known.
 
-- **ETo** is daily reference ET from AZMET (`eto_azmet` millimetres ÷ 25.4; `eto_azmet_in` if millimetres are missing). Today's row is often unpublished; the last earlier good day is carried forward. A day with no earlier ET is treated as 0 ET and marked unknown. A daily ETo below 0 or above `max_daily_et_inches` rejects that fetch; the previous good cache is kept.
+- **ETo** is daily reference ET from AZMET (`eto_azmet` millimetres ÷ 25.4; `eto_azmet_in` if millimetres are missing). Today's row is often unpublished; the last earlier good day is carried forward. A day with no earlier ET is treated as 0 ET and marked unknown. A daily ETo below 0 or above `max_daily_et_inches` rejects that fetch; the previous good cache is kept. Until a fetch has succeeded and at least one ET day falls in the window, `percent` and `balance_inches` are null.
 - **Rain** reuses the last good FCDMC gauge fetch (no second gauge request). If rain pause is off or has no good data, rain is 0 and marked unknown.
-- **Watering** sums `completed` and `stopped` history `ActualSec` for that station on the local `StartedAt` date: `ActualSec / 3600 * inches_per_hour`. `skipped`, `refused`, and `error` do not add water. If `inches_per_hour` is null, watering is omitted and the card says rain & ET only.
+- **Watering** sums `completed` and `stopped` history `ActualSec` for that station on the local `StartedAt` date: `ActualSec / 3600 * inches_per_hour`. `skipped`, `refused`, and `error` do not add water. If `inches_per_hour` is null, watering is omitted. The card then shows that zone's rain and crop-ET totals for the modelled window (for example "Rain 0.40 in · ET 1.68 in, last 14 days", using `window_days`) and "Measure sprinkler output to enable".
 
-Copy `config/soil.local.example.json` to `soil.local.json` in the same directory as your config file. Set `azmet_station` to your AZMET id (the example uses `azXX`). Do not commit `soil.local.json`. `ZANJERITO_SOIL_CONFIG` overrides that path. If the file is missing, or `enabled` is false, the estimate is off: no polling, `GET /api/soil` returns `enabled: false` with reason `no soil.local.json`, and Home hides the card. A malformed file is logged and the feature stays off.
+Copy `config/soil.local.example.json` to `soil.local.json` in the same directory as your config file. Set `azmet_station` to your AZMET id (the example uses `azXX`). Do not commit `soil.local.json`. `ZANJERITO_SOIL_CONFIG` overrides that path. If the file is missing, or `enabled` is false, the estimate is off: no polling, `GET /api/soil` returns `enabled: false` with reason `no soil.local.json` and no `config_error`, and Home hides the card. If the file is invalid (malformed or empty JSON, wrong types, missing station, bad URL), the error is logged, polling stays off, and `GET /api/soil` returns `enabled: false`, reason `soil.local.json invalid`, and `config_error` with a short parse message. That message does not include the station id, the URL, or a filesystem path. Home shows "Soil settings file has an error (see log)".
 
 Defaults (also the example file):
 
@@ -115,6 +115,10 @@ Defaults (also the example file):
 | `inches_per_hour` | `null` | Sprinkler output. Null/absent is unknown — never guessed. Valid `(0, 10]`. |
 
 `GET /api/soil` is computed from the in-memory ET cache, the rain poller's last good samples, and `history.List`. The handler does not call AZMET. The AZMET station id is not in API output or info logs. The phone UI only requests `/api/soil` (same origin).
+
+`et_known` is true only when `et.last_ok_at` is set and at least one ET day in the window is known. Otherwise it is false. `et_reason` is `waiting for first ET fetch` while that first attempt has not finished, and `no ET data yet` after a failed or empty fetch (optionally with a short class such as AZMET unavailable). While `et_known` is false, each zone's `percent` and `balance_inches` are JSON null. Per-zone rain and ET inputs are still present, and rain totals may still be shown. Home shows one line, "No ET data yet", and no percent or bar, plus "ET unavailable since …" when the feed is down. The run dialog says "Soil estimate: no ET data yet". `updated_at` is the last successful ET fetch, the same instant as `et.last_ok_at`, or null if there has never been one. It is not the current time and not the time of a failed attempt.
+
+`window_days` is the configured window. Each zone has `rain_total_inches` and `et_total_inches`: rain and crop ET summed over the days the model actually runs (the previous `window_days` plus today).
 
 ### Tuna-can test (application rate)
 
