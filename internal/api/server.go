@@ -17,6 +17,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/history"
 	"github.com/PixnBits/zanjerito/internal/rain"
 	"github.com/PixnBits/zanjerito/internal/schedule"
+	"github.com/PixnBits/zanjerito/internal/soil"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
 
@@ -30,6 +31,8 @@ type Server struct {
 	History *history.Log
 	// Rain is nil when automatic rain pause is disabled.
 	Rain *rain.Poller
+	// Soil is nil when the display-only soil estimate is disabled.
+	Soil *soil.Poller
 	mux  *http.ServeMux
 }
 
@@ -45,6 +48,7 @@ func New(e *engine.Engine, path string) *Server {
 	s.mux.HandleFunc("DELETE /api/pause", s.handlePauseClear)
 	s.mux.HandleFunc("POST /api/pause/resume", s.handlePauseClear)
 	s.mux.HandleFunc("GET /api/history", s.handleHistory)
+	s.mux.HandleFunc("GET /api/soil", s.handleSoil)
 	s.mux.HandleFunc("GET /api/schedules", s.handleSchedulesList)
 	s.mux.HandleFunc("GET /api/schedules/{id}", s.handleScheduleGet)
 	s.mux.HandleFunc("PUT /api/schedules/{id}", s.handleSchedulePut)
@@ -272,6 +276,26 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+func (s *Server) handleSoil(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	loc := s.location()
+	now := time.Now()
+	if s.Soil != nil && s.Soil.Now != nil {
+		now = s.Soil.Now()
+	}
+	if s.Soil == nil {
+		writeJSON(w, http.StatusOK, soil.DisabledView("no soil.local.json", now, loc))
+		return
+	}
+	var stations []engine.StationConfig
+	if f, err := s.load(); err == nil {
+		stations = f.Stations
+	}
+	hist := s.History.List(0)
+	rainDays, rainOK := s.Rain.DailyRain(loc)
+	writeJSON(w, http.StatusOK, s.Soil.View(stations, hist, rainDays, rainOK, now, loc))
 }
 
 func historyLimit(raw string) (int, error) {

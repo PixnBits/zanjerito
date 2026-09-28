@@ -17,6 +17,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/history"
 	"github.com/PixnBits/zanjerito/internal/rain"
 	"github.com/PixnBits/zanjerito/internal/schedule"
+	"github.com/PixnBits/zanjerito/internal/soil"
 	"github.com/PixnBits/zanjerito/internal/store"
 )
 
@@ -93,10 +94,23 @@ func main() {
 		log.Printf("rain: disabled: %v", err)
 	}
 
+	loc, locErr := time.LoadLocation(cfg.Timezone)
+	if locErr != nil {
+		loc, locErr = time.LoadLocation("America/Phoenix")
+		if locErr != nil {
+			loc = time.FixedZone("MST", -7*3600)
+		}
+	}
+	soilPoller, err := soil.Start(ctx, *configPath, loc)
+	if err != nil {
+		log.Printf("soil: disabled: %v", err)
+	}
+
 	if *listen != "" {
 		srv := api.New(eng, *configPath)
 		srv.History = hist
 		srv.Rain = rainPoller
+		srv.Soil = soilPoller
 		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			log.Printf("api listening on %s (LAN trust, D7)", *listen)

@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "azmet_station": "azXX",
+  "azmet_url": "https://api.azmet.arizona.edu/v1/observations/daily",
+  "timeout_seconds": 15,
+  "poll_hours": 6,
+  "window_days": 14,
+  "max_daily_et_inches": 0.6,
+  "crop_factor": 0.6,
+  "capacity_inches": 1.0,
+  "zones": {
+    "front-west": { "inches_per_hour": null },
+    "front-north": { "inches_per_hour": null },
+    "drip": { "inches_per_hour": null },
+    "front-south": { "inches_per_hour": null }
+  }
+}

@@ -83,3 +83,50 @@ A manual pause (any reason, including an indefinite one) is left alone: automati
 A short manual pause can end while qualifying rain is still inside the rolling window (24 hours by default). If an automatic pause already covered that rain and the user replaced it or pressed Resume, the event is remembered and does not pause again; that memory is still there after a restart. If the rain fell while a manual pause was already active, so this rain never became an automatic pause, the next poll after the manual pause ends starts the automatic pause. A restart in between restores the manual pause, and the poll after that pause ends can still start the automatic one.
 
 While an automatic rain pause is active, schedules water only stations with `rain_pause_exempt: true` and skip the rest (recorded as skipped, reason `rain`). The example drip station is exempt. Home still allows a manual run of an exempt station (for example drip). Any other station is refused with HTTP 409 until Resume. A manual pause still refuses every station, including exempt ones. Home shows the automatic pause on the same banner as a manual pause, for example "Paused for rain (0.4 in) until Tue morning". A small "Rain data unavailable" line appears on Home only when the feature is on and the latest fetch failed, is stale, or is implausible. Status JSON adds `pause_source`, `rain_inches`, `last_rain_at`, and a `rain` object. It does not include the gauge id or the gauge URL.
+
+## Soil water estimate (display only)
+
+Home can show a per-zone soil-water **estimate**. It never starts, stops, skips, or pauses watering. Rain pause, lockout, STOP, the scheduler, and run history behave exactly as they did without this feature.
+
+The model is a capped daily bucket. For each zone and each local day `d` in a rolling window (oldest to newest, including today):
+
+```text
+balance(d) = max(0, min(capacity, balance(d-1) + rain(d) + watering(d) - ETo(d) * crop_factor))
+```
+
+`balance` before the first modelled day is **capacity** (the spin-up assumption: the soil is treated as full `window_days` ago). Until that window has filled with real rain, ET, and watering, the number is a starting guess, not a measurement.
+
+- **ETo** is daily reference ET from AZMET (`eto_azmet` millimetres ÷ 25.4; `eto_azmet_in` if millimetres are missing). Today's row is often unpublished; the last earlier good day is carried forward. A day with no earlier ET is treated as 0 ET and marked unknown. A daily ETo below 0 or above `max_daily_et_inches` rejects that fetch; the previous good cache is kept.
+- **Rain** reuses the last good FCDMC gauge fetch (no second gauge request). If rain pause is off or has no good data, rain is 0 and marked unknown.
+- **Watering** sums `completed` and `stopped` history `ActualSec` for that station on the local `StartedAt` date: `ActualSec / 3600 * inches_per_hour`. `skipped`, `refused`, and `error` do not add water. If `inches_per_hour` is null, watering is omitted and the card says rain & ET only.
+
+Copy `config/soil.local.example.json` to `soil.local.json` in the same directory as your config file. Set `azmet_station` to your AZMET id (the example uses `azXX`). Do not commit `soil.local.json`. `ZANJERITO_SOIL_CONFIG` overrides that path. If the file is missing, or `enabled` is false, the estimate is off: no polling, `GET /api/soil` returns `enabled: false` with reason `no soil.local.json`, and Home hides the card. A malformed file is logged and the feature stays off.
+
+Defaults (also the example file):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `crop_factor` | 0.6 | Crop coefficient. Generic starting point; adjust per zone. Valid `(0, 1.5]`. |
+| `capacity_inches` | 1.0 | Bucket size in inches. Generic starting point; adjust per zone. Valid `(0, 12]`. |
+| `window_days` | 14 | Days modelled. Fetch asks for `window_days+1` days starting `today - window_days`. |
+| `max_daily_et_inches` | 0.6 | Daily ETo above this (or below 0) is implausible. |
+| `poll_hours` | 6 | How often to fetch. Set `poll_seconds` to override in tests. |
+| `timeout_seconds` | 15 | HTTP client timeout. |
+| `inches_per_hour` | `null` | Sprinkler output. Null/absent is unknown — never guessed. Valid `(0, 10]`. |
+
+`GET /api/soil` is computed from the in-memory ET cache, the rain poller's last good samples, and `history.List`. The handler does not call AZMET. The AZMET station id is not in API output or info logs. The phone UI only requests `/api/soil` (same origin).
+
+### Tuna-can test (application rate)
+
+Until you measure a zone, leave `inches_per_hour` null.
+
+1. Place several straight-sided cans (tuna cans work) around the zone.
+2. Run that station for 15 minutes.
+3. Measure the average depth in the cans, in inches.
+4. `inches_per_hour = depth * 4`.
+
+Example zone entry after a 0.20 in catch in 15 minutes:
+
+```json
+"front-north": { "inches_per_hour": 0.8, "crop_factor": 0.6, "capacity_inches": 1.0 }
+```

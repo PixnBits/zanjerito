@@ -53,6 +53,11 @@ type Poller struct {
 	badCat string
 	seq    uint64 // bumped under mu for each snapshot
 
+	// lastGood is the newest fetch that Decide treated as usable
+	// (not empty, stale, or implausible). DailyRain copies it.
+	lastGood []Sample
+	haveGood bool
+
 	// writeMu serializes pause.json writes. Status never takes it.
 	writeMu sync.Mutex
 	written uint64 // highest version successfully persisted; writeMu only
@@ -128,6 +133,37 @@ func (p *Poller) SetSaveFuncForTest(fn func(path string, ps store.PauseState) er
 	p.mu.Lock()
 	p.save = fn
 	p.mu.Unlock()
+}
+
+// DailyRain sums last-good incremental samples by local calendar date.
+// ok is false when the poller is nil or no usable fetch has been cached.
+// The map is a copy. Negatives count as 0. loc nil uses America/Phoenix.
+func (p *Poller) DailyRain(loc *time.Location) (map[string]float64, bool) {
+	if p == nil {
+		return nil, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.haveGood {
+		return nil, false
+	}
+	if loc == nil {
+		var err error
+		loc, err = time.LoadLocation(phoenixTZ)
+		if err != nil {
+			loc = time.FixedZone("MST", -7*3600)
+		}
+	}
+	out := make(map[string]float64, len(p.lastGood))
+	for _, s := range p.lastGood {
+		day := s.Time.In(loc).Format("2006-01-02")
+		inches := s.Inches
+		if inches < 0 {
+			inches = 0
+		}
+		out[day] += inches
+	}
+	return out, true
 }
 
 // Status returns a copy of the feed health. Enabled is true when a poller exists.
@@ -229,6 +265,10 @@ func (p *Poller) Poll(ctx context.Context) {
 	} else {
 		detail := p.Eng.PauseRaw()
 		action := Decide(samples, now, p.Cfg, viewFrom(detail), memoryFrom(detail))
+		if action.Kind != ActionUnavailable {
+			p.lastGood = cloneSamples(samples)
+			p.haveGood = true
+		}
 		ps, ver, doSave, loadFile, logs = p.applyLocked(now, action)
 	}
 	path = p.Path
@@ -423,4 +463,13 @@ func viewFrom(d engine.PauseSnap) PauseView {
 
 func memoryFrom(d engine.PauseSnap) Memory {
 	return Memory{ClearedAt: d.RainClearedAt, LastEventRain: d.EventLastRain}
+}
+
+func cloneSamples(in []Sample) []Sample {
+	if in == nil {
+		return []Sample{}
+	}
+	out := make([]Sample, len(in))
+	copy(out, in)
+	return out
 }
