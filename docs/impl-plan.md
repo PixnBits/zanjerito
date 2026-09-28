@@ -1,7 +1,7 @@
 # Zanjerito — Implementation plan (v1)
 
 **Status:** Active · 2026-09-12  
-**Base:** `fancy-vibes` (vision docs merged via PR #3)  
+**Base:** `main` (`fancy-vibes` was trunk until 2026-09-27; its history is now part of `main`; vision docs merged via PR #3)  
 **Working branch family:** `rewrite/go*`  
 **Companions:** [prd.md](./prd.md) · [architecture.md](./architecture.md) · [decisions.md](./decisions.md)
 

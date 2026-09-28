@@ -40,13 +40,12 @@ Primary path is the Go binary (same as production):
 ```sh
 git clone https://github.com/PixnBits/zanjerito.git
 cd zanjerito
-git checkout fancy-vibes
 make build
 ./zanjerito -config config/config.example.json -driver=fake -listen 127.0.0.1:8080
 # phone UI: http://127.0.0.1:8080/
 ```
 
-The older Node 14 / GraphiQL app under this tree is a **behavioral reference** only (not the production UI or Developing default). Prefer the embedded Direction D UI served by the Go binary.
+The older Node 14 / GraphiQL app under this tree (`server/`, `client/`) is a **behavioral reference** only (not the production UI or Developing default). Prefer the embedded Direction D UI served by the Go binary.
 
 ## Run history
 
