@@ -70,14 +70,17 @@ func windowDates(now time.Time, loc *time.Location, windowDays int) []string {
 	}
 	t := now.In(loc)
 	today := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
-	start := today.AddDate(0, 0, -windowDays)
-	out := make([]string, 0, windowDays+1)
+	// Exactly windowDays local dates ending today: oldest is today-(windowDays-1).
+	start := today.AddDate(0, 0, -(windowDays - 1))
+	out := make([]string, 0, windowDays)
 	for d := start; !d.After(today); d = d.AddDate(0, 0, 1) {
 		out = append(out, d.Format("2006-01-02"))
 	}
 	return out
 }
 
+// windowStart is the AZMET fetch start: one local day before the modelled
+// window, so the fetch can include a spin-up day that is not summed.
 func windowStart(now time.Time, loc *time.Location, windowDays int) time.Time {
 	if loc == nil {
 		loc = time.UTC

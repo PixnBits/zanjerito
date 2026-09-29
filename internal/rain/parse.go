@@ -18,7 +18,7 @@ const phoenixTZ = "America/Phoenix"
 
 // ParseFCDMC reads an FCDMC ALERT precipitation page. Rows in the body are
 // newest-first; the result is oldest-first. loc nil uses America/Phoenix.
-// Negative increments are stored as 0. Unparseable lines are skipped.
+// Negative increments are kept as-is. Unparseable lines are skipped.
 // Zero parsed rows returns an error containing "no samples".
 func ParseFCDMC(r io.Reader, loc *time.Location) ([]Sample, error) {
 	if loc == nil {
@@ -44,9 +44,6 @@ func ParseFCDMC(r io.Reader, loc *time.Location) ([]Sample, error) {
 		inc, err := strconv.ParseFloat(m[4], 64)
 		if err != nil {
 			continue
-		}
-		if inc < 0 {
-			inc = 0
 		}
 		samples = append(samples, Sample{Time: when, Inches: inc})
 	}

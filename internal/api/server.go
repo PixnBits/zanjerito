@@ -29,8 +29,12 @@ type Server struct {
 	Eng     *engine.Engine
 	Path    string
 	History *history.Log
-	// Rain is nil when automatic rain pause is disabled.
+	// Rain is nil when automatic rain pause is disabled or rain.local.json is invalid.
 	Rain *rain.Poller
+	// RainConfigErr is a short parse message when rain.local.json exists but is invalid.
+	// Empty when the file is missing, disabled, or the poller is running.
+	// It must not contain a gauge id, URL, or filesystem path.
+	RainConfigErr string
 	// Soil is nil when the display-only soil estimate is disabled or the file is invalid.
 	Soil *soil.Poller
 	// SoilConfigErr is a short parse message when soil.local.json exists but is invalid.
@@ -157,6 +161,9 @@ func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[stri
 func (s *Server) rainBody(loc *time.Location) map[string]any {
 	out := map[string]any{"enabled": false, "unavailable": false}
 	if s.Rain == nil {
+		if msg := rain.SanitizeConfigMessage(s.RainConfigErr); msg != "" {
+			out["config_error"] = msg
+		}
 		return out
 	}
 	st := s.Rain.Status()
@@ -165,11 +172,14 @@ func (s *Server) rainBody(loc *time.Location) map[string]any {
 	if st.LastError != "" {
 		out["last_error"] = st.LastError
 	}
+	if loc == nil {
+		loc = time.UTC
+	}
 	if st.LastOK != nil {
-		if loc == nil {
-			loc = time.UTC
-		}
 		out["last_ok_at"] = st.LastOK.In(loc).Format(time.RFC3339)
+	}
+	if st.Since != nil {
+		out["since"] = st.Since.In(loc).Format(time.RFC3339)
 	}
 	if st.HaveTotal {
 		out["last_total_inches"] = rain.RoundInches(st.LastTotal)
@@ -280,6 +290,21 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+}
+
+// NoteRain records a rain.Start result. A missing file leaves Rain nil and
+// RainConfigErr empty. An invalid file keeps Rain nil and sets RainConfigErr.
+func (s *Server) NoteRain(p *rain.Poller, err error) {
+	if s == nil {
+		return
+	}
+	s.Rain = nil
+	s.RainConfigErr = ""
+	if err == nil {
+		s.Rain = p
+		return
+	}
+	s.RainConfigErr = rain.PublicConfigError(err)
 }
 
 // NoteSoil records a soil.Start result. A missing file leaves Soil nil and

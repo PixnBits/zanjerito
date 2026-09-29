@@ -18,6 +18,8 @@ func TestUIHistoryHooks(t *testing.T) {
 		"historyLoaded", "historyInFlight", "No runs yet.",
 		"Refused (lockout mode)", "under a minute",
 		"AbortController", "setTimeout(() => ac.abort(), 5000)",
+		"if (sec <= 0) continue",
+		"Stopped after under a minute",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
@@ -25,5 +27,8 @@ func TestUIHistoryHooks(t *testing.T) {
 	}
 	if strings.Contains(body, "setInterval(loadHistory") {
 		t.Fatal("ui must not poll history on its own interval")
+	}
+	if strings.Contains(body, "Stopped after 0 min") {
+		t.Fatal("must not print Stopped after 0 min")
 	}
 }

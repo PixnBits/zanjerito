@@ -193,6 +193,35 @@ func TestEstimateEngineOrderAndTodayInputs(t *testing.T) {
 	}
 }
 
+func TestWindowDatesFourteenLocalDays(t *testing.T) {
+	loc := phoenix(t)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	got := windowDates(now, loc, 14)
+	if len(got) != 14 {
+		t.Fatalf("len %d %v", len(got), got)
+	}
+	if got[0] != "2026-09-14" || got[len(got)-1] != "2026-09-27" {
+		t.Fatalf("phoenix noon %v", got)
+	}
+
+	now = time.Date(2026, 9, 28, 0, 15, 0, 0, loc)
+	got = windowDates(now, loc, 14)
+	if len(got) != 14 || got[0] != "2026-09-15" || got[len(got)-1] != "2026-09-28" {
+		t.Fatalf("phoenix after midnight %v", got)
+	}
+
+	// Just after local midnight in a zone east of UTC, so the UTC date is still yesterday.
+	east := time.FixedZone("test-east", 14*3600)
+	now = time.Date(2026, 9, 28, 0, 15, 0, 0, east)
+	if now.UTC().Format("2006-01-02") == "2026-09-28" {
+		t.Fatalf("utc should differ from local, utc %s", now.UTC())
+	}
+	got = windowDates(now, east, 14)
+	if len(got) != 14 || got[0] != "2026-09-15" || got[len(got)-1] != "2026-09-28" {
+		t.Fatalf("east midnight %v utc %s", got, now.UTC().Format("2006-01-02"))
+	}
+}
+
 func TestWindowRainAndETTotals(t *testing.T) {
 	loc := phoenix(t)
 	now := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
@@ -204,8 +233,8 @@ func TestWindowRainAndETTotals(t *testing.T) {
 	if len(zones) != 1 {
 		t.Fatalf("zones %d", len(zones))
 	}
-	// Modelled days are today and the previous window_days. Crop ET is 0.20*0.6 per day.
-	if zones[0].RainTotalInches != 0.40 || zones[0].ETTotalInches != 0.24 {
+	// Modelled window is exactly window_days local dates ending today.
+	if zones[0].RainTotalInches != 0.25 || zones[0].ETTotalInches != 0.12 {
 		t.Fatalf("totals rain %v et %v", zones[0].RainTotalInches, zones[0].ETTotalInches)
 	}
 	if zones[0].Inputs.RainInches != 0.25 {
