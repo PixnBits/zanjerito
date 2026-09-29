@@ -407,7 +407,6 @@ func TestUISoilStrings(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, need := range []string{
-		"Soil water",
 		"estimate",
 		"Measure sprinkler output to enable",
 		"ET unavailable since",
@@ -416,13 +415,29 @@ func TestUISoilStrings(t *testing.T) {
 		"et_known",
 		"Soil settings file has an error",
 		", last ",
-		"Soil estimate: no ET data yet",
+		"Soil estimate:",
 		"rain_total_inches",
 		"et_total_inches",
 		"window_days",
+		"Soil about",
+		"tile-soil",
+		"fell in the last",
+		"rain-strip",
+		"total_72h_inches",
+		"Math.min(100",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
+		}
+	}
+	for _, gone := range []string{
+		"Soil water",
+		`id="soil-card"`,
+		`id="soil-wrap"`,
+		"Soil estimate: no ET data yet",
+	} {
+		if strings.Contains(body, gone) {
+			t.Fatalf("ui still has %q", gone)
 		}
 	}
 	for _, leak := range []string{"api.azmet.arizona.edu", "azXX"} {

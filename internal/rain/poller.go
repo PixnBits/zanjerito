@@ -135,6 +135,22 @@ func (p *Poller) SetSaveFuncForTest(fn func(path string, ps store.PauseState) er
 	p.mu.Unlock()
 }
 
+// TotalSince sums positive increments of the last good fetch in
+// (now-d, now+futureSkew]. ok is false when p is nil, no usable last-good
+// fetch is cached, or the feed is currently unavailable. Unlike DailyRain,
+// an unavailable feed does not keep publishing the previous total.
+func (p *Poller) TotalSince(d time.Duration, now time.Time) (float64, bool) {
+	if p == nil {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.haveGood || p.st.Unavailable {
+		return 0, false
+	}
+	return sumPositiveSince(p.lastGood, d, now), true
+}
+
 // DailyRain sums last-good incremental samples by local calendar date.
 // ok is false when the poller is nil or no usable fetch has been cached.
 // The map is a copy. Negatives count as 0. loc nil uses America/Phoenix.

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -437,6 +438,217 @@ func assertStatusFast(t *testing.T, s *Server, p *rain.Poller) {
 	}
 	if rr.Code != 200 {
 		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestStatusRainStrip(t *testing.T) {
+	base := rain.Config{
+		Enabled: true, GaugeID: "00000",
+		TriggerInches: 0.25, WindowHours: 24,
+		DryDays: 2, HeavyInches: 1, HeavyDryDays: 4, StaleHours: 7,
+	}
+
+	t.Run("disabled", func(t *testing.T) {
+		s := newTestServer(t)
+		rainObj, strip, body := statusRain(t, s)
+		if rainObj["enabled"] != false || strip["show"] != false {
+			t.Fatalf("disabled %s", body)
+		}
+		if _, ok := rainObj["total_72h_inches"]; ok {
+			t.Fatalf("72h present when disabled %s", body)
+		}
+		if _, ok := rainObj["total_24h_inches"]; ok {
+			t.Fatalf("24h present when disabled %s", body)
+		}
+		if !strings.Contains(body, `"rain_strip"`) {
+			t.Fatalf("missing rain_strip %s", body)
+		}
+	})
+
+	t.Run("below floor", func(t *testing.T) {
+		s := newTestServer(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		pollRainAt(t, s, now, []rain.Sample{
+			{Time: now.Add(-2 * time.Hour), Inches: 0.04},
+			{Time: now, Inches: 0},
+		}, base)
+		rainObj, strip, body := statusRain(t, s)
+		if strip["show"] != false || strip["hours"] != float64(72) {
+			t.Fatalf("strip %v body %s", strip, body)
+		}
+		nearIn(t, rainObj["total_72h_inches"], 0.04)
+		nearIn(t, rainObj["total_24h_inches"], 0.04)
+		nearIn(t, strip["inches"], 0.04)
+	})
+
+	t.Run("recent rain", func(t *testing.T) {
+		s := newTestServer(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		pollRainAt(t, s, now, []rain.Sample{
+			{Time: now.Add(-90 * time.Hour), Inches: 0.5},
+			{Time: now.Add(-2 * time.Hour), Inches: 0.05},
+			{Time: now, Inches: 0},
+		}, base)
+		rainObj, strip, body := statusRain(t, s)
+		if strings.Contains(body, "00000") {
+			t.Fatalf("status leaked gauge id %s", body)
+		}
+		if strip["show"] != true || strip["hours"] != float64(24) {
+			t.Fatalf("strip %v body %s", strip, body)
+		}
+		nearIn(t, strip["inches"], 0.05)
+		nearIn(t, rainObj["total_72h_inches"], 0.05)
+		nearIn(t, rainObj["total_24h_inches"], 0.05)
+		nearIn(t, rainObj["last_total_inches"], 0.05)
+		if !strings.Contains(body, `"total_72h_inches"`) || !strings.Contains(body, `"rain_strip"`) {
+			t.Fatalf("missing fields %s", body)
+		}
+	})
+
+	t.Run("only older than a day", func(t *testing.T) {
+		s := newTestServer(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		pollRainAt(t, s, now, []rain.Sample{
+			{Time: now.Add(-40 * time.Hour), Inches: 0.08},
+			{Time: now, Inches: 0},
+		}, base)
+		rainObj, strip, body := statusRain(t, s)
+		if strip["show"] != true || strip["hours"] != float64(72) {
+			t.Fatalf("strip %v body %s", strip, body)
+		}
+		nearIn(t, strip["inches"], 0.08)
+		nearIn(t, rainObj["total_72h_inches"], 0.08)
+		nearIn(t, rainObj["total_24h_inches"], 0)
+		st := decodeMap(t, doJSON(t, s, http.MethodGet, "/api/status", nil))
+		if st["paused"] == true {
+			t.Fatalf("0.08 outside the pause window should not pause %s", body)
+		}
+	})
+
+	t.Run("unavailable", func(t *testing.T) {
+		s := newTestServer(t)
+		fake := &rain.Fake{}
+		fake.Set(nil, errRain("fetch failed"))
+		p := &rain.Poller{
+			Source: fake, Eng: s.Eng, Path: s.Path, Cfg: base,
+		}
+		s.Rain = p
+		p.Poll(context.Background())
+		rainObj, strip, body := statusRain(t, s)
+		if rainObj["enabled"] != true || rainObj["unavailable"] != true || strip["show"] != false {
+			t.Fatalf("unavailable %s", body)
+		}
+		if _, ok := rainObj["total_72h_inches"]; ok {
+			t.Fatalf("total present while unavailable %s", body)
+		}
+	})
+
+	t.Run("outage hides previous total", func(t *testing.T) {
+		s := newTestServer(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		fake := &rain.Fake{}
+		fake.Set([]rain.Sample{
+			{Time: now.Add(-time.Hour), Inches: 0.2},
+			{Time: now, Inches: 0},
+		}, nil)
+		p := &rain.Poller{
+			Source: fake, Eng: s.Eng, Path: s.Path, Cfg: base,
+			Now: func() time.Time { return now },
+		}
+		s.Rain = p
+		p.Poll(context.Background())
+		fake.Set(nil, errRain("fetch failed"))
+		p.Poll(context.Background())
+		rainObj, strip, body := statusRain(t, s)
+		if rainObj["unavailable"] != true || strip["show"] != false {
+			t.Fatalf("outage %s", body)
+		}
+		if _, ok := rainObj["total_72h_inches"]; ok {
+			t.Fatalf("stale total published %s", body)
+		}
+	})
+
+	t.Run("rain pause hides strip", func(t *testing.T) {
+		s := newTestServer(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		pollRainAt(t, s, now, []rain.Sample{
+			{Time: now.Add(-time.Hour), Inches: 0.4},
+			{Time: now, Inches: 0},
+		}, base)
+		rainObj, strip, body := statusRain(t, s)
+		st := decodeMap(t, doJSON(t, s, http.MethodGet, "/api/status", nil))
+		if st["pause_source"] != "auto" || strip["show"] != false {
+			t.Fatalf("pause strip %v status %v body %s", strip, st["pause_source"], body)
+		}
+		nearIn(t, rainObj["total_72h_inches"], 0.4)
+		nearIn(t, strip["inches"], 0.4)
+	})
+
+	t.Run("above one inch is not capped", func(t *testing.T) {
+		s := newTestServer(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		cfg := base
+		cfg.TriggerInches = 5
+		cfg.HeavyInches = 5
+		pollRainAt(t, s, now, []rain.Sample{
+			{Time: now.Add(-time.Hour), Inches: 1.25},
+			{Time: now, Inches: 0},
+		}, cfg)
+		_, strip, body := statusRain(t, s)
+		if strip["show"] != true || strip["hours"] != float64(24) {
+			t.Fatalf("strip %v body %s", strip, body)
+		}
+		nearIn(t, strip["inches"], 1.25)
+		if strip["inches"] == float64(1) {
+			t.Fatalf("capped %v", strip)
+		}
+	})
+}
+
+func statusRain(t *testing.T, s *Server) (rainObj, strip map[string]any, body string) {
+	t.Helper()
+	rr := doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if rr.Code != 200 {
+		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
+	}
+	body = rr.Body.String()
+	st := decodeMap(t, rr)
+	var ok bool
+	rainObj, ok = st["rain"].(map[string]any)
+	if !ok {
+		t.Fatalf("rain %v", st["rain"])
+	}
+	strip, ok = st["rain_strip"].(map[string]any)
+	if !ok {
+		t.Fatalf("rain_strip %v body %s", st["rain_strip"], body)
+	}
+	return rainObj, strip, body
+}
+
+func pollRainAt(t *testing.T, s *Server, now time.Time, samples []rain.Sample, cfg rain.Config) {
+	t.Helper()
+	fake := &rain.Fake{}
+	fake.Set(samples, nil)
+	cfg.Enabled = true
+	if cfg.GaugeID == "" {
+		cfg.GaugeID = "00000"
+	}
+	p := &rain.Poller{
+		Source: fake,
+		Eng:    s.Eng,
+		Path:   s.Path,
+		Cfg:    cfg,
+		Now:    func() time.Time { return now },
+	}
+	s.Rain = p
+	p.Poll(context.Background())
+}
+
+func nearIn(t *testing.T, got any, want float64) {
+	t.Helper()
+	g, ok := got.(float64)
+	if !ok || math.Abs(g-want) > 0.001 {
+		t.Fatalf("got %v (%T) want %v", got, got, want)
 	}
 }
 
