@@ -333,6 +333,21 @@ static cJSON *parse_root(const char *json)
     return cJSON_Parse(json);
 }
 
+/* NaN, ±inf, or more than 1000 inches is not a usable rain total. */
+static int rain_inches_ok(double v)
+{
+    if (v != v) {
+        return 0;
+    }
+    if (v != 0.0 && v + v == v) {
+        return 0;
+    }
+    if (v > 1000.0) {
+        return 0;
+    }
+    return 1;
+}
+
 int zk_parse_status(const char *json, zk_status_t *out)
 {
     cJSON *root;
@@ -394,14 +409,18 @@ int zk_parse_status(const char *json, zk_status_t *out)
         out->rain.have_totals = 0;
         out->rain.total_24h = 0;
         out->rain.total_72h = 0;
-        if (jnum(rain, "total_24h_inches", &out->rain.total_24h)) {
-            /* keep */
-        } else {
+        if (!jnum(rain, "total_24h_inches", &out->rain.total_24h)) {
             out->rain.total_24h = 0;
         }
         if (jnum(rain, "total_72h_inches", &out->rain.total_72h)) {
             out->rain.have_totals = 1;
         } else {
+            out->rain.total_72h = 0;
+        }
+        if (out->rain.have_totals &&
+            (!rain_inches_ok(out->rain.total_24h) || !rain_inches_ok(out->rain.total_72h))) {
+            out->rain.have_totals = 0;
+            out->rain.total_24h = 0;
             out->rain.total_72h = 0;
         }
     }

@@ -45,8 +45,10 @@ typedef struct {
 
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t g_mu;
-static pthread_cond_t g_cv;
+static pthread_cond_t g_cv; /* poll thread */
+static pthread_cond_t g_act_cv; /* action thread */
 static pthread_t g_th;
+static pthread_t g_act_th;
 
 static store_t g_snap;
 static uint32_t g_version;
@@ -65,7 +67,12 @@ static int g_force_status;
 
 static int g_stop;
 static int g_running;
-static int g_thread_alive;
+static int g_poll_alive;
+static int g_act_alive;
+static int g_inflight;
+static uint32_t g_inflight_seq;
+static zk_act_kind_t g_inflight_kind;
+static char g_inflight_body[BODY_MAX];
 static int g_fixture;
 static int g_force_stale; /* shots only */
 static int g_allow_writes;
@@ -143,6 +150,7 @@ static void init_sync(void)
     pthread_condattr_init(&attr);
     pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     pthread_cond_init(&g_cv, &attr);
+    pthread_cond_init(&g_act_cv, &attr);
     pthread_condattr_destroy(&attr);
     if (pipe(fds) != 0) {
         g_wake_r = -1;
@@ -184,6 +192,11 @@ static void reset_locked(void)
     g_force_status = 0;
     g_stop = 0;
     g_running = 0;
+    g_poll_alive = 0;
+    g_act_alive = 0;
+    g_inflight = 0;
+    g_inflight_seq = 0;
+    g_inflight_body[0] = 0;
     g_fixture = 0;
     g_allow_writes = 0;
     g_live_clock = 0;
@@ -356,21 +369,107 @@ static int dispatch_action(int allow, const char *base, zk_act_kind_t kind, cons
 static void publish_result(const qitem_t *job, int code, int http_status, int repoll)
 {
     pthread_mutex_lock(&g_mu);
-    if (job->seq == g_latest) {
-        g_res.pending = 0;
-        g_res.done = 1;
-        g_res.code = code;
-        g_res.http_status = http_status;
-        g_res.kind = job->kind;
-        g_res.seq = job->seq;
+    {
+        /* Coalesced submits move g_inflight_seq. The copy in job stays at dequeue. */
+        uint32_t seq = job->seq;
+        if (g_inflight) {
+            seq = g_inflight_seq;
+            g_inflight = 0;
+            g_inflight_seq = 0;
+        }
+        if (seq == g_latest) {
+            g_res.pending = 0;
+            g_res.done = 1;
+            g_res.code = code;
+            g_res.http_status = http_status;
+            g_res.kind = job->kind;
+            g_res.seq = seq;
+        }
+        if (repoll) {
+            g_force_status = 1;
+            pthread_cond_signal(&g_cv);
+        }
+        arm_wake_locked();
     }
-    if (repoll) {
-        g_force_status = 1;
-    }
-    pthread_cond_signal(&g_cv);
-    arm_wake_locked();
     pthread_mutex_unlock(&g_mu);
     call_platform_wake();
+}
+
+static int act_same(zk_act_kind_t ak, const char *abody, zk_act_kind_t bk, const char *bbody)
+{
+    if (ak != bk) {
+        return 0;
+    }
+    if (ak == ZK_ACT_PAUSE) {
+        if (!abody) {
+            abody = "";
+        }
+        if (!bbody) {
+            bbody = "";
+        }
+        return strcmp(abody, bbody) == 0;
+    }
+    return ak == ZK_ACT_STOP || ak == ZK_ACT_RESUME;
+}
+
+/* A repeat of the queued or in-flight job is not posted again.
+ * seq is the submit the UI is waiting on; publish reports that one result. */
+static int coalesce_locked(zk_act_kind_t kind, const char *body, uint32_t seq)
+{
+    int i;
+    if (g_inflight && act_same(g_inflight_kind, g_inflight_body, kind, body)) {
+        g_inflight_seq = seq;
+        return 1;
+    }
+    for (i = 0; i < g_q_len; i++) {
+        qitem_t *it = &g_q[(g_q_head + i) % ACT_Q];
+        if (!act_same(it->kind, it->body, kind, body)) {
+            continue;
+        }
+        it->seq = seq;
+        return 1;
+    }
+    return 0;
+}
+
+static void run_job(const qitem_t *job);
+
+static void pend_locked(zk_act_kind_t kind, uint32_t seq)
+{
+    g_res.pending = 1;
+    g_res.done = 0;
+    g_res.code = 0;
+    g_res.http_status = 0;
+    g_res.kind = kind;
+    g_res.seq = seq;
+}
+
+/* POSTs only. Sockets are opened inside zk_actions / zk_http for this thread. */
+static void *action_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        qitem_t job;
+
+        pthread_mutex_lock(&g_mu);
+        while (!g_stop && g_q_len == 0) {
+            pthread_cond_wait(&g_act_cv, &g_mu);
+        }
+        if (g_stop) {
+            pthread_mutex_unlock(&g_mu);
+            break;
+        }
+        job = g_q[g_q_head];
+        g_q_head = (g_q_head + 1) % ACT_Q;
+        g_q_len--;
+        g_inflight = 1;
+        g_inflight_kind = job.kind;
+        memcpy(g_inflight_body, job.body, sizeof g_inflight_body);
+        g_inflight_seq = job.seq;
+        pthread_mutex_unlock(&g_mu);
+        run_job(&job);
+    }
+    return NULL;
 }
 
 static void run_job(const qitem_t *job)
@@ -388,6 +487,7 @@ static void run_job(const qitem_t *job)
     publish_result(job, rc, st, rc == ZK_OK);
 }
 
+/* GETs only. Does not dequeue actions and does not share a socket with them. */
 static void *worker_main(void *arg)
 {
     int status_ms = status_poll_ms();
@@ -403,20 +503,13 @@ static void *worker_main(void *arg)
     for (;;) {
         int do_status = 0;
         int do_slow = 0;
-        int have_job = 0;
-        qitem_t job;
 
         pthread_mutex_lock(&g_mu);
         if (g_stop) {
             pthread_mutex_unlock(&g_mu);
             break;
         }
-        if (g_q_len > 0) {
-            job = g_q[g_q_head];
-            g_q_head = (g_q_head + 1) % ACT_Q;
-            g_q_len--;
-            have_job = 1;
-        } else {
+        {
             int64_t now = mono_ms();
             if (g_force_status || now >= next_status) {
                 g_force_status = 0;
@@ -437,10 +530,6 @@ static void *worker_main(void *arg)
         }
         pthread_mutex_unlock(&g_mu);
 
-        if (have_job) {
-            run_job(&job);
-            continue;
-        }
         if (do_status) {
             poll_status(buf);
             next_status = mono_ms() + status_ms;
@@ -620,14 +709,31 @@ int zk_data_start(const zk_app_t *app)
     zk_str_copy(g_base, sizeof g_base, app->api);
     g_fixture = 0;
     g_running = 1;
-    g_thread_alive = 1;
     g_stop = 0;
+    g_poll_alive = 1;
+    g_act_alive = 1;
     pthread_mutex_unlock(&g_mu);
     rc = pthread_create(&g_th, NULL, worker_main, NULL);
     if (rc != 0) {
         pthread_mutex_lock(&g_mu);
         g_running = 0;
-        g_thread_alive = 0;
+        g_poll_alive = 0;
+        g_act_alive = 0;
+        pthread_mutex_unlock(&g_mu);
+        return ZK_ERR_IO;
+    }
+    rc = pthread_create(&g_act_th, NULL, action_main, NULL);
+    if (rc != 0) {
+        pthread_mutex_lock(&g_mu);
+        g_stop = 1;
+        g_act_alive = 0;
+        pthread_cond_broadcast(&g_cv);
+        pthread_cond_broadcast(&g_act_cv);
+        pthread_mutex_unlock(&g_mu);
+        pthread_join(g_th, NULL);
+        pthread_mutex_lock(&g_mu);
+        g_poll_alive = 0;
+        g_running = 0;
         pthread_mutex_unlock(&g_mu);
         return ZK_ERR_IO;
     }
@@ -636,25 +742,32 @@ int zk_data_start(const zk_app_t *app)
 
 void zk_data_stop(void)
 {
-    int alive;
+    int poll_alive;
+    int act_alive;
 
     ensure_init();
     pthread_mutex_lock(&g_mu);
     g_stop = 1;
-    alive = g_thread_alive;
+    poll_alive = g_poll_alive;
+    act_alive = g_act_alive;
     pthread_cond_broadcast(&g_cv);
+    pthread_cond_broadcast(&g_act_cv);
     pthread_mutex_unlock(&g_mu);
-    if (alive) {
+    if (poll_alive) {
         pthread_join(g_th, NULL);
-        pthread_mutex_lock(&g_mu);
-        g_thread_alive = 0;
-        pthread_mutex_unlock(&g_mu);
+    }
+    if (act_alive) {
+        pthread_join(g_act_th, NULL);
     }
     pthread_mutex_lock(&g_mu);
+    g_poll_alive = 0;
+    g_act_alive = 0;
     g_running = 0;
     g_q_head = 0;
     g_q_len = 0;
     g_force_status = 0;
+    g_inflight = 0;
+    g_inflight_seq = 0;
     pthread_mutex_unlock(&g_mu);
 }
 
@@ -771,6 +884,11 @@ void zk_data_submit_action(zk_act_kind_t kind, const char *json_body)
         }
         return;
     }
+    if (coalesce_locked(kind, item.body, item.seq)) {
+        pend_locked(kind, item.seq);
+        pthread_mutex_unlock(&g_mu);
+        return;
+    }
     if (g_q_len >= ACT_Q) {
         g_res.pending = 0;
         g_res.done = 1;
@@ -783,13 +901,8 @@ void zk_data_submit_action(zk_act_kind_t kind, const char *json_body)
     }
     g_q[(g_q_head + g_q_len) % ACT_Q] = item;
     g_q_len++;
-    g_res.pending = 1;
-    g_res.done = 0;
-    g_res.code = 0;
-    g_res.http_status = 0;
-    g_res.kind = kind;
-    g_res.seq = g_seq;
-    pthread_cond_signal(&g_cv);
+    pend_locked(kind, item.seq);
+    pthread_cond_signal(&g_act_cv);
     pthread_mutex_unlock(&g_mu);
 }
 

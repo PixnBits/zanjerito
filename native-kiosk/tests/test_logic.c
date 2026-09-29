@@ -210,6 +210,80 @@ static void test_rain_strip(void)
     TEQ_I(zk_rain_strip_visible(&st), 0);
 }
 
+static int plain_number(const char *s)
+{
+    int dot = 0;
+    if (!s || !s[0]) {
+        return 0;
+    }
+    for (; *s; s++) {
+        if (*s == '.') {
+            if (dot) {
+                return 0;
+            }
+            dot = 1;
+            continue;
+        }
+        if (*s < '0' || *s > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void expect_inches(double v, const char *want)
+{
+    char buf[64];
+    zk_fmt_inches(v, buf, sizeof buf);
+    TEQ_S(buf, want);
+    TCHECK(plain_number(buf), "inches [%s]", buf);
+    TCHECK(strchr(buf, '-') == NULL, "negative inches [%s]", buf);
+}
+
+/* Broken totals must not print a wrapped negative or "inf"/"nan". */
+static void test_inches_extreme(void)
+{
+    double pos = strtod("1e999", NULL);
+    double neg = strtod("-1e999", NULL);
+    double nanv = strtod("nan", NULL);
+    double big = strtod("1e30", NULL);
+    zk_status_t st;
+    char strip[96];
+
+    expect_inches(pos, "999.99");
+    expect_inches(neg, "0.0");
+    expect_inches(nanv, "0.0");
+    expect_inches(big, "999.99");
+    expect_inches(999.99, "999.99");
+
+    memset(&st, 0, sizeof st);
+    st.rain.enabled = 1;
+    st.rain.have_totals = 1;
+    st.rain.total_24h = pos;
+    st.rain.total_72h = pos;
+    zk_rain_strip_text(&st, strip, sizeof strip);
+    TCHECK(strstr(strip, "999.99 in fell") == strip, "strip [%s]", strip);
+    TCHECK(strchr(strip, '-') == NULL, "strip [%s]", strip);
+
+    st.rain.total_24h = neg;
+    st.rain.total_72h = neg;
+    zk_rain_strip_text(&st, strip, sizeof strip);
+    TCHECK(strchr(strip, '-') == NULL, "neg strip [%s]", strip);
+    TCHECK(plain_number(strip) == 0, "strip should keep its words");
+    TCHECK(strstr(strip, "0.0 in fell") != NULL, "neg strip [%s]", strip);
+
+    st.rain.total_24h = nanv;
+    st.rain.total_72h = nanv;
+    zk_rain_strip_text(&st, strip, sizeof strip);
+    TCHECK(strchr(strip, '-') == NULL, "nan strip [%s]", strip);
+    TCHECK(strstr(strip, "nan") == NULL && strstr(strip, "inf") == NULL, "nan strip [%s]", strip);
+
+    st.rain.total_24h = big;
+    st.rain.total_72h = big;
+    zk_rain_strip_text(&st, strip, sizeof strip);
+    TCHECK(strstr(strip, "999.99 in fell") == strip, "big strip [%s]", strip);
+}
+
 static void test_soil(void)
 {
     zk_soil_t so;
@@ -343,6 +417,7 @@ int main(void)
 {
     test_next_run_tables();
     test_rain_strip();
+    test_inches_extreme();
     test_soil();
     test_pause_preview();
     test_run_infer();

@@ -41,12 +41,12 @@ From `native-kiosk/`:
 | `make fetch-lvgl` | Clone the pinned LVGL tree if `.cache/lvgl` is missing |
 | `make host` | `build/zan-kiosk-host` for this machine |
 | `make arm` | Static 32-bit ARM hard-float binary `build/zan-kiosk-arm` via Docker (`debian:bookworm-slim`, `gcc-arm-linux-gnueabihf`, `-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard -static`) |
-| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`) |
+| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`) |
 | `make e2e` | Build the host binary, then `tests/e2e.sh` |
 | `make check` | `test` then `e2e` |
 | `make shots` | Host build, then `zan-kiosk-host --shot-all build/shots --fixtures-root tests/fixtures` |
 
-`make arm` links `-static`. The linker warns that `getaddrinfo` in a statically linked glibc binary still needs the matching NSS shared libraries at runtime. A numeric `--api` host such as `127.0.0.1` is parsed with `inet_pton` and does not use that path.
+`make arm` links `-static`. The linker warns that `getaddrinfo` in a statically linked glibc binary still needs the matching NSS shared libraries at runtime. A numeric `--api` host such as `127.0.0.1` is parsed with `inet_pton` and does not use that path. A hostname is resolved with `getaddrinfo`, which has no timeout: a slow resolver stalls that request until the lookup returns. On the kiosk, use an IPv4 literal.
 
 ### Regenerate assets
 
@@ -118,21 +118,34 @@ Example against a daemon already listening on localhost (nothing in this tree st
 
 | Binary | Covers |
 |---|---|
-| `test_json` | Parse every fixture; garbage and defaults; wall-clock parse and advance |
-| `test_logic` | Next run, rain strip, soil percent, pause-preview bodies, run inference, pause title and until text |
+| `test_json` | Parse every fixture; garbage and defaults; non-finite or huge rain totals hide the strip; wall-clock parse and advance |
+| `test_logic` | Next run, rain strip, soil percent, pause-preview bodies, run inference, pause title and until text; inches clamp for NaN, inf, and huge values |
 | `test_layout` | Every screen, no overlap, hit testing, STOP 264/304 px tall and tallest, other targets at least 107 px, picker chips 255×188, 267 px/in |
 | `test_http` | GET and POST to a localhost stub; read-only stop does not connect; cancel, pause, and resume paths; timeout; oversized body; non-`http` URL rejected |
 | `test_data` | Status poll and slow polls; stale after the stub stops; fixture load opens no socket; read-only actions do not POST; writes POST cancel, pause, and resume and repoll status; `zk_data_get` does not block on a slow stub |
+| `test_stop_latency` | STOP is posted while a GET is in flight; a repeated STOP or resume is one POST; identical pause bodies collapse; a different pause is still sent; the queue still overflows; read-only sends no POST |
 
 `ZK_POLL_MS_STATUS` overrides the 2 second status poll inside those data tests. It is not a user-facing flag.
 
-`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured.
+`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured. It also checks that extra taps just after pause OK do not send a second pause, that two STOP confirms about a second apart are one cancel when that POST is slow, and that STOP is logged while GETs are delayed. The stub takes `--get-delay SEC` and `--post-delay SEC` and serves each connection on its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
+
+## Behaviour
+
+In HTTP mode a poll thread GETs `/api/status` about every 2 seconds and `/api/stations`, `/api/schedules`, and `/api/soil` about every 30 seconds. STOP, pause, and resume run on a second thread. That thread opens its own sockets and does not wait for a poll to finish, so STOP is not stuck behind a slow GET. After a write succeeds, status is polled again.
+
+A second STOP is not posted while one is already queued or in flight. Resume is treated the same way. A pause is skipped only when the same body is already queued or in flight; a different pause body is sent. The screen still gets one result for the submit it is waiting on. The queue holds 8 actions; one more reports overflow and sends nothing.
+
+Read-only mode does not open a socket for those POSTs. Fixture mode loads the scenario from disk: no threads and no socket.
+
+STOP and pause are sent only after OK, and only with `--allow-writes`. Pause OK closes the picker and returns to the base screen. For 700 ms after OK, taps on a pause chip or on OK/Cancel are ignored, so a stray tap cannot open or confirm another pause or STOP. Resume sends as soon as Resume is tapped. Cancel sends nothing.
+
+A hostname in `--api` is resolved with `getaddrinfo`, which has no timeout. A slow resolver stalls that request. Use an IPv4 literal on the kiosk (`inet_pton` handles numeric hosts).
 
 ## Safety
 
 The default is read-only. Mutating calls are not sent, and the screen says so.
 
-The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pause/resume`. They are sent only with `--allow-writes`. STOP and pause are sent only after the on-screen OK. Cancel sends nothing. Resume is sent when the Resume button is tapped. The URL is never compiled in. This tree does not change the daemon. Writes are tested only against the local stub (`tools/stub_server.py` and `test_http` / `test_data`), not against a real controller.
+The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pause/resume`. The URL is never compiled in. This tree does not change the daemon. Writes are tested only against the local stub (`tools/stub_server.py`, `test_http`, `test_data`, and `test_stop_latency`), not against a real controller.
 
 ## Raspberry Pi
 
@@ -143,6 +156,7 @@ On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do
 ## Known gaps
 
 - No daemon `GET /api/kiosk`. The client polls `/api/status`, `/api/stations`, `/api/schedules`, and `/api/soil`.
+- `getaddrinfo` has no timeout. A hostname in `--api` can stall one request for as long as the resolver takes. Use an IPv4 literal on the kiosk.
 - Next-run and remaining time are computed in the client. The daemon does not send those fields.
 - Hold to edit is not implemented (toast only).
 - No systemd unit.

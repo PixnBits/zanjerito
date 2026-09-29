@@ -6,7 +6,9 @@ import argparse
 import os
 import signal
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 GET_MAP = {
     "/api/status": "status.json",
@@ -14,6 +16,17 @@ GET_MAP = {
     "/api/schedules": "schedules.json",
     "/api/soil": "soil.json",
 }
+
+
+def _nap(seconds: float) -> None:
+    if seconds <= 0:
+        return
+    end = time.monotonic() + seconds
+    while True:
+        left = end - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(0.05 if left > 0.05 else left)
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -28,10 +41,25 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.path,
             body.decode("utf-8", "replace"),
         )
-        with open(self.server.log_path, "a", encoding="utf-8") as f:
-            f.write(line)
+        ts_line = "%.6f %s %s\n" % (time.monotonic(), self.command, self.path)
+        with self.server.log_lock:
+            with open(self.server.log_path, "a", encoding="utf-8") as f:
+                f.write(line)
+            with open(self.server.log_path + ".ts", "a", encoding="utf-8") as f:
+                f.write(ts_line)
+
+    def _send(self, data: bytes) -> None:
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
 
     def do_GET(self) -> None:
+        _nap(self.server.get_delay)
         name = GET_MAP.get(self.path)
         if not name:
             self.send_error(404)
@@ -43,20 +71,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
         except OSError:
             self.send_error(404)
             return
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._send(data)
 
     def do_POST(self) -> None:
         self._record()
-        body = b"{}"
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        _nap(self.server.post_delay)
+        self._send(b"{}")
 
     def do_PUT(self) -> None:
         self.do_POST()
@@ -65,20 +85,31 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.do_POST()
 
 
+class FixtureServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--dir", required=True, help="scenario fixture directory")
     p.add_argument("--log", required=True, help="append POST/PUT/DELETE lines here")
     p.add_argument("--port", type=int, default=0)
+    p.add_argument("--get-delay", type=float, default=0, help="seconds to hold each GET")
+    p.add_argument("--post-delay", type=float, default=0, help="seconds to hold each POST after logging it")
     args = p.parse_args()
 
-    httpd = HTTPServer(("127.0.0.1", args.port), FixtureHandler)
+    httpd = FixtureServer(("127.0.0.1", args.port), FixtureHandler)
     httpd.fixture_dir = os.path.abspath(args.dir)
     httpd.log_path = args.log
+    httpd.log_lock = threading.Lock()
+    httpd.get_delay = args.get_delay if args.get_delay > 0 else 0.0
+    httpd.post_delay = args.post_delay if args.post_delay > 0 else 0.0
     log_dir = os.path.dirname(os.path.abspath(args.log))
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
     open(args.log, "a", encoding="utf-8").close()
+    open(args.log + ".ts", "a", encoding="utf-8").close()
 
     def _die(signum, frame):
         os._exit(0)

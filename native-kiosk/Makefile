@@ -10,7 +10,7 @@ BUILD = build
 
 SANITIZE := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c -o /dev/null - >/dev/null 2>&1 && echo -fsanitize=address,undefined)
 
-TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data
+TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency
 
 HOST_CC := gcc
 ARM_CC ?= arm-linux-gnueabihf-gcc
@@ -59,6 +59,7 @@ test: $(TEST_BINS)
 	$(BUILD)/test_layout
 	$(BUILD)/test_http
 	$(BUILD)/test_data
+	$(BUILD)/test_stop_latency
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -77,6 +78,9 @@ $(BUILD)/test_http: tests/test_http.c $(SRC_CORE) $(CJSON) | $(BUILD)
 
 $(BUILD)/test_data: tests/test_data.c $(SRC_CORE) $(SRC_DATA) $(CJSON) | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -pthread -o $@ tests/test_data.c $(SRC_CORE) $(SRC_DATA) $(CJSON)
+
+$(BUILD)/test_stop_latency: tests/test_stop_latency.c $(SRC_CORE) $(SRC_DATA) $(CJSON) | $(BUILD)
+	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -pthread -o $@ tests/test_stop_latency.c $(SRC_CORE) $(SRC_DATA) $(CJSON)
 
 fetch-lvgl:
 	tools/fetch-lvgl.sh

@@ -60,16 +60,33 @@ void zk_fmt_step(int step_index0, int step_count, char *out, size_t cap)
 
 void zk_fmt_inches(double v, char *out, size_t cap)
 {
+    double scaled;
     double r;
+    int hundredths;
     char s[32];
     size_t n;
     if (!out || cap == 0) {
         return;
     }
-    if (!(v == v) || v < 0) { /* NaN or negative */
+    /* NaN, negatives, and -inf become 0. Do not cast those to int. */
+    if (!(v == v) || v < 0) {
         v = 0;
+    } else if (v > 999.99) {
+        /* +inf and anything the strip cannot show. */
+        v = 999.99;
     }
-    r = (double)((int)(v * 100.0 + 0.5)) / 100.0;
+    scaled = v * 100.0 + 0.5;
+    if (scaled > 99999.0) {
+        scaled = 99999.0;
+    }
+    hundredths = (int)scaled;
+    if (hundredths < 0) {
+        hundredths = 0;
+    }
+    if (hundredths > 99999) {
+        hundredths = 99999;
+    }
+    r = (double)hundredths / 100.0;
     snprintf(s, sizeof(s), "%.2f", r);
     n = strlen(s);
     if (n > 0 && s[n - 1] == '0') {

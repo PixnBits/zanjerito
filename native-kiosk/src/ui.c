@@ -114,6 +114,7 @@ static uint32_t g_seen_seq;
 static int g_seen_ok;
 static char g_toast_text[96];
 static double g_toast_until;
+static double g_quiet_until; /* ignore chip and modal taps until this mono time */
 
 static lv_color_t hex(uint32_t c)
 {
@@ -517,9 +518,11 @@ static void note_result(void)
         show_toast("Read-only mode: no request sent");
     } else if (r.code == ZK_OK) {
         show_toast("Sent");
-    } else {
+    } else if (r.http_status > 0) {
         snprintf(buf, sizeof buf, "Failed (HTTP %d)", r.http_status);
         show_toast(buf);
+    } else {
+        show_toast("Could not reach the controller");
     }
 }
 
@@ -576,6 +579,12 @@ static void on_evt(lv_event_t *e)
     if (g_key.modal && id != ZK_TARGET_MODAL_OK && id != ZK_TARGET_MODAL_CANCEL) {
         return;
     }
+    /* 700 ms after OK: a stray tap must not open or confirm another pause or STOP. */
+    if (zk_platform_mono() < g_quiet_until &&
+        ((id >= ZK_TARGET_CHIP0 && id <= ZK_TARGET_CHIP3) || id == ZK_TARGET_MODAL_OK ||
+         id == ZK_TARGET_MODAL_CANCEL)) {
+        return;
+    }
     switch (id) {
     case ZK_TARGET_STOP:
         g_modal = ZK_SCREEN_CONFIRM_STOP;
@@ -626,9 +635,11 @@ static void on_evt(lv_event_t *e)
         zk_data_get(&snap);
         if (g_key.modal == ZK_SCREEN_CONFIRM_PAUSE) {
             submit_pause(&snap);
+            g_nav = -1; /* leave the picker; back to the base screen */
         } else {
             zk_data_submit_action(ZK_ACT_STOP, NULL);
         }
+        g_quiet_until = zk_platform_mono() + 0.700;
         close_modal();
         note_result();
         break;
@@ -1411,6 +1422,7 @@ void zk_ui_init(lv_display_t *disp, const zk_app_t *app)
     g_override = -1;
     g_nav = -1;
     g_modal = 0;
+    g_quiet_until = 0;
     g_pick_chip = -1;
     g_pressed = 0;
     g_have_key = 0;

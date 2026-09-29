@@ -1,4 +1,5 @@
 #include "zk_test.h"
+#include "zk_logic.h"
 #include "zk_model.h"
 
 static void check_common_stations(const zk_stations_t *st)
@@ -191,6 +192,24 @@ static void test_defaults(void)
     TEQ_I(so.zones[0].percent, -1);
 }
 
+static void test_huge_rain(void)
+{
+    zk_status_t st;
+    TEQ_I(zk_parse_status("{\"phase\":\"Idle\",\"rain\":{\"enabled\":true,\"unavailable\":false,\"total_72h_inches\":1e999,\"total_24h_inches\":0.2}}", &st), ZK_OK);
+    TEQ_I(st.rain.enabled, 1);
+    TEQ_I(st.rain.have_totals, 0);
+    TEQ_I(zk_rain_strip_visible(&st), 0);
+    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":0.2,\"total_24h_inches\":1e999}}", &st), ZK_OK);
+    TEQ_I(st.rain.have_totals, 0);
+    TEQ_I(zk_rain_strip_visible(&st), 0);
+    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":1e30}}", &st), ZK_OK);
+    TEQ_I(st.rain.have_totals, 0);
+    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":1000}}", &st), ZK_OK);
+    TEQ_I(st.rain.have_totals, 1);
+    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":1000.1}}", &st), ZK_OK);
+    TEQ_I(st.rain.have_totals, 0);
+}
+
 static void test_wall_parse(void)
 {
     zk_wall_t w, w2;
@@ -238,6 +257,7 @@ int main(void)
     }
     test_garbage();
     test_defaults();
+    test_huge_rain();
     test_wall_parse();
     test_wall_advance();
     return zk_test_report("test_json");

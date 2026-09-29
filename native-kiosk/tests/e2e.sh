@@ -28,14 +28,28 @@ CHIP_TOMORROW_X=141
 CHIP_TOMORROW_Y=166
 CHIP_DAYS2_X=408
 CHIP_DAYS2_Y=166
+# Chip 2 "1 week": (14, 272) 255x188 -> center (141, 366).
+# (255, 305) is inside that chip while the picker is still up.
+CHIP_WEEK_X=141
+CHIP_WEEK_Y=366
 
 FAILS=0
 STUB_PID=
+KIOSK_PID=
 PORT=
 LOG=
 TMP=
 
+stop_kiosk() {
+    if [[ -n "${KIOSK_PID}" ]]; then
+        kill "$KIOSK_PID" 2>/dev/null || true
+        wait "$KIOSK_PID" 2>/dev/null || true
+        KIOSK_PID=
+    fi
+}
+
 cleanup() {
+    stop_kiosk
     if [[ -n "${STUB_PID}" ]]; then
         kill "$STUB_PID" 2>/dev/null || true
         wait "$STUB_PID" 2>/dev/null || true
@@ -174,11 +188,13 @@ stop_stub() {
 
 start_stub() {
     local dir=$1
+    shift
     stop_stub
     LOG=$TMP/requests.log
     : >"$LOG"
+    : >"${LOG}.ts"
     : >"$TMP/stub.out"
-    python3 "$STUB" --dir "$dir" --log "$LOG" --port 0 >"$TMP/stub.out" &
+    python3 "$STUB" --dir "$dir" --log "$LOG" --port 0 "$@" >"$TMP/stub.out" &
     STUB_PID=$!
     local i port
     port=
@@ -375,6 +391,81 @@ case_g() {
     fi
 }
 
+# Pause OK, then stray taps at OK and on the 1-week chip: still one pause POST.
+case_h() {
+    start_stub "$FIX/home-rain" || return 1
+    kiosk 6 \
+        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_DAYS2_X},${CHIP_DAYS2_Y};wait:400;tap:${OK_X},${OK_Y};wait:100;tap:${OK_X},${OK_Y};wait:150;tap:${CHIP_WEEK_X},${CHIP_WEEK_Y};wait:50;tap:${OK_X},${OK_Y};wait:900" \
+        12 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts 'POST /api/pause {"days":2,"reason":"kiosk"}' || return 1
+}
+
+# Two STOP+OK sequences while the first POST is still held by the stub.
+case_i() {
+    start_stub "$FIX/home-rain" --post-delay 3 || return 1
+    kiosk 8 \
+        "wait:700;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:800" \
+        20 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "POST /api/run/cancel" || return 1
+}
+
+# GETs held 8s. The cancel POST must show up soon after OK, not after the GET.
+case_j() {
+    local shot=$TMP/j-start.png
+    local seen delta
+    start_stub "$FIX/home-rain" --get-delay 8 || return 1
+    timeout 22 env -u ZAN_API -u ZK_POLL_MS_STATUS \
+        "$BIN" \
+        --api "http://127.0.0.1:${PORT}" \
+        --allow-writes \
+        --script "shot:${shot};wait:300;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:2000" \
+        --duration 6 \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err" &
+    KIOSK_PID=$!
+    seen=$(python3 - "$shot" <<'PY'
+import os, sys, time
+path = sys.argv[1]
+deadline = time.monotonic() + 12
+while time.monotonic() < deadline:
+    if os.path.isfile(path) and os.path.getsize(path) > 32:
+        print("%.6f" % time.monotonic())
+        raise SystemExit(0)
+    time.sleep(0.02)
+raise SystemExit(1)
+PY
+) || { echo "case j: start shot missing" >&2; show_kiosk_err; stop_kiosk; return 1; }
+    delta=$(python3 - "${LOG}.ts" "$seen" <<'PY'
+import sys, time
+path, seen_s = sys.argv[1], sys.argv[2]
+seen = float(seen_s)
+deadline = time.monotonic() + 8
+while time.monotonic() < deadline:
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "POST" and parts[2] == "/api/run/cancel":
+            delta = float(parts[0]) - seen
+            print("%.3f" % delta)
+            raise SystemExit(0 if 0.0 <= delta <= 2.5 else 2)
+    time.sleep(0.05)
+sys.stderr.write("no POST ts\n")
+raise SystemExit(1)
+PY
+) || { echo "case j: POST not within 2.5s of start shot (delta=${delta:-missing})" >&2; stop_kiosk; return 1; }
+    echo "case_j post_delta_s ${delta}"
+    if ! wait "$KIOSK_PID"; then
+        echo "case j: kiosk failed" >&2
+        show_kiosk_err
+        KIOSK_PID=
+        return 1
+    fi
+    KIOSK_PID=
+    assert_posts "POST /api/run/cancel" || return 1
+}
+
 run_case a case_a
 run_case b case_b
 run_case c case_c
@@ -382,6 +473,9 @@ run_case d case_d
 run_case e case_e
 run_case f case_f
 run_case g case_g
+run_case h case_h
+run_case i case_i
+run_case j case_j
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1
