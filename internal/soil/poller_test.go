@@ -570,3 +570,82 @@ func TestViewETOutsideWindowIsUnknown(t *testing.T) {
 		t.Fatalf("updated %s", got)
 	}
 }
+
+func TestViewETStaleBoundary(t *testing.T) {
+	loc, err := time.LoadLocation("America/Phoenix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	p := &Poller{
+		Cfg: Config{Enabled: true, WindowDays: 14, CropFactor: 0.6, Capacity: 1, MaxDailyET: 0.6},
+		Loc: loc,
+	}
+	v := p.View(viewStations(), nil, nil, false, now, loc)
+	if v.ETStale || v.ETKnown {
+		t.Fatalf("never fetched known %v stale %v reason %q", v.ETKnown, v.ETStale, v.ETReason)
+	}
+
+	days := []DayET{{Date: "2026-09-26", ETInches: 0.2}}
+	cases := []struct {
+		name  string
+		age   time.Duration
+		stale bool
+	}{
+		{name: "47h59m", age: 47*time.Hour + 59*time.Minute, stale: false},
+		{name: "48h01m", age: 48*time.Hour + time.Minute, stale: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p.SeedCacheForTest(days, now.Add(-tc.age))
+			v := p.View(viewStations(), nil, nil, false, now, loc)
+			if v.ETStale != tc.stale || !v.ETKnown {
+				t.Fatalf("known %v stale %v want stale %v", v.ETKnown, v.ETStale, tc.stale)
+			}
+		})
+	}
+}
+
+func TestViewETStaleWhenCachedDaysInWindowAndFetchFails(t *testing.T) {
+	loc, err := time.LoadLocation("America/Phoenix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	fetched := now.Add(-72 * time.Hour)
+	var buf bytes.Buffer
+	p := &Poller{
+		Source: &Fake{},
+		Cfg:    Config{Enabled: true, Station: "azXX", WindowDays: 14, CropFactor: 0.6, Capacity: 1, MaxDailyET: 0.6},
+		Now:    func() time.Time { return now },
+		Loc:    loc,
+		Log:    log.New(&buf, "", 0),
+	}
+	p.SeedCacheForTest([]DayET{
+		{Date: "2026-09-24", ETInches: 0.20},
+		{Date: "2026-09-25", ETInches: 0.20},
+		{Date: "2026-09-26", ETInches: 0.22},
+	}, fetched)
+	p.Source.(*Fake).Set(nil, errString("HTTP 500"))
+	p.Poll(context.Background())
+	v := p.View([]engine.StationConfig{{ID: "front-north", Title: "Front North"}}, nil, nil, false, now, loc)
+	if !v.ETKnown || !v.ETStale {
+		t.Fatalf("known %v stale %v reason %q", v.ETKnown, v.ETStale, v.ETReason)
+	}
+	if v.UpdatedAt == nil || v.Zones[0].Percent == nil {
+		t.Fatalf("updated %v pct %v", v.UpdatedAt, v.Zones[0].Percent)
+	}
+	got, err := time.Parse(time.RFC3339, *v.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Equal(fetched) || got.Equal(now) {
+		t.Fatalf("updated %s fetched %s now %s", got, fetched, now)
+	}
+	if !v.ET.Unavailable {
+		t.Fatal("expected unavailable after failed fetch")
+	}
+	if strings.Contains(buf.String(), "azXX") || strings.Contains(buf.String(), "Test Station") {
+		t.Fatalf("leak %s", buf.String())
+	}
+}

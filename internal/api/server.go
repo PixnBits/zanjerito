@@ -119,8 +119,8 @@ func (s *Server) location() *time.Location {
 	return loc
 }
 
-// pauseFields is the pause + rain object shared by status, SSE, and pause writes.
-// Existing keys (paused, paused_until, paused_label, reason) stay.
+// pauseFields is the pause, rain, and rain_strip object shared by status, SSE,
+// and pause writes. Existing keys (paused, paused_until, paused_label, reason) stay.
 func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[string]any) {
 	loc = s.location()
 	d := s.Eng.PauseDetail(now)
@@ -145,6 +145,7 @@ func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[stri
 	if d.AutoRain() {
 		label = schedule.RainPauseLabel(inches, d.Until, now, loc)
 	}
+	rainMap, strip := s.rainBody(now, loc, d.AutoRain())
 	fields = map[string]any{
 		"paused":       d.Paused,
 		"paused_until": untilStr,
@@ -153,18 +154,19 @@ func (s *Server) pauseFields(now time.Time) (loc *time.Location, fields map[stri
 		"pause_source": src,
 		"rain_inches":  inches,
 		"last_rain_at": lastRain,
-		"rain":         s.rainBody(loc),
+		"rain":         rainMap,
+		"rain_strip":   strip,
 	}
 	return loc, fields
 }
 
-func (s *Server) rainBody(loc *time.Location) map[string]any {
+func (s *Server) rainBody(now time.Time, loc *time.Location, rainPaused bool) (map[string]any, rain.RainStrip) {
 	out := map[string]any{"enabled": false, "unavailable": false}
 	if s.Rain == nil {
 		if msg := rain.SanitizeConfigMessage(s.RainConfigErr); msg != "" {
 			out["config_error"] = msg
 		}
-		return out
+		return out, rain.HomeStrip(false, false, rainPaused, false, 0, 0)
 	}
 	st := s.Rain.Status()
 	out["enabled"] = st.Enabled
@@ -184,7 +186,18 @@ func (s *Server) rainBody(loc *time.Location) map[string]any {
 	if st.HaveTotal {
 		out["last_total_inches"] = rain.RoundInches(st.LastTotal)
 	}
-	return out
+	in72, ok := s.Rain.TotalSince(72*time.Hour, now)
+	var in24 float64
+	if ok {
+		var ok24 bool
+		in24, ok24 = s.Rain.TotalSince(24*time.Hour, now)
+		ok = ok24
+	}
+	if ok {
+		out["total_72h_inches"] = rain.RoundInches(in72)
+		out["total_24h_inches"] = rain.RoundInches(in24)
+	}
+	return out, rain.HomeStrip(st.Enabled, st.Unavailable, rainPaused, ok, in24, in72)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {

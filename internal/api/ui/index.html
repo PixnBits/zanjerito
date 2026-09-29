@@ -214,6 +214,22 @@
       background: color-mix(in srgb, var(--teal) 18%, var(--teal-soft));
       color: var(--teal); border-color: color-mix(in srgb, var(--teal) 30%, transparent);
     }
+    /* Soil fill sits under the name. It is not a control; the tile still receives the tap. */
+    .tile-soil {
+      align-self: stretch;
+      width: 100%;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--sand);
+      overflow: hidden;
+      pointer-events: none;
+    }
+    .tile-soil > span {
+      display: block;
+      height: 100%;
+      background: var(--teal);
+      border-radius: 999px;
+    }
     /* STOP — fixed footer; heavier terracotta; never overlaps Edit/Duplicate */
     .stop-bar {
       position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
@@ -330,6 +346,47 @@
       color: var(--muted); font-size: .78rem; font-weight: 500;
       margin: 0 0 10px;
     }
+    /* Under the hero. Hidden on dry days so it adds no gap above Pause. */
+    .rain-strip {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 10px 0 0;
+      padding: 8px 12px;
+      background: var(--cream);
+      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
+      border-radius: 14px;
+      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 6px rgba(58,42,31,.04);
+    }
+    .rain-strip.hidden,
+    .rain-strip[hidden] { display: none; }
+    .rain-meter {
+      flex: 0 0 4.5rem;
+      height: 4px;
+      border-radius: 999px;
+      background: var(--sand);
+      overflow: hidden;
+    }
+    .rain-meter > span {
+      display: block;
+      height: 100%;
+      background: var(--teal);
+      border-radius: 999px;
+    }
+    .rain-strip-text {
+      color: var(--ink);
+      font-size: .85rem;
+      line-height: 1.3;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .soil-note {
+      color: var(--muted);
+      font-size: .82rem;
+      line-height: 1.35;
+      margin: 12px 2px 0;
+    }
     .home-actions {
       /* Breathing room under hero card; keep Pause out of STOP footer */
       display: flex; gap: 8px; margin: 16px 0 18px; flex-wrap: wrap;
@@ -340,6 +397,13 @@
       box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 8px rgba(58,42,31,.05);
     }
     .home-actions .pause-open:active { background: var(--cream-edge); }
+    /* Two-up tiles are taller than the 412px row. Keep the bottom row off the fixed STOP bar. */
+    @media (max-width: 399px) {
+      .strip-label { margin: 12px 0 8px; }
+      .station-tile { padding: 10px 8px 8px; gap: 4px; min-height: 108px; }
+      .home-actions { margin: 10px 0 12px; }
+      .rain-strip { margin-top: 8px; padding: 6px 10px; }
+    }
     .pause-chips { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
     .pause-chips button {
       width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--cream-edge);
@@ -379,15 +443,6 @@
       border-top: 1px solid color-mix(in srgb, var(--dune) 30%, var(--cream-edge));
     }
     .history-item:first-child { border-top: 0; }
-    #soil-wrap { margin: 16px 0 4px; }
-    .soil-bar {
-      margin-top: 6px; height: 4px; border-radius: 999px;
-      background: color-mix(in srgb, var(--dune) 30%, var(--cream-edge));
-      overflow: hidden;
-    }
-    .soil-bar > span {
-      display: block; height: 100%; background: var(--teal); border-radius: 999px;
-    }
     #run-soil { margin: 8px 0 0; }
     .history-line { font-size: .98rem; line-height: 1.35; overflow-wrap: anywhere; }
     .history-detail {
@@ -497,17 +552,13 @@
         </svg>
       </div>
     </div>
+    <div id="rain-strip" class="rain-strip hidden" hidden></div>
     <div class="home-actions" id="home-actions">
       <button type="button" class="pause-open" id="pause-open">Pause for rain</button>
     </div>
     <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
-    <div id="soil-wrap" class="hidden" hidden>
-      <h1 class="strip-label">Soil water</h1>
-      <div class="history-card" id="soil-card">
-        <div id="soil-card-body"></div>
-      </div>
-    </div>
+    <p id="soil-note" class="soil-note hidden" hidden></p>
     <h1 class="strip-label">Recent runs</h1>
     <div class="history-card" id="history-card">
       <div id="history-home"><p class="history-note">No runs yet.</p></div>
@@ -677,6 +728,7 @@
         rain_inches: Number(d.rain_inches ?? d.RainInches ?? 0) || 0,
         last_rain_at: d.last_rain_at ?? d.LastRainAt ?? null,
         rain: d.rain || d.Rain || { enabled: false, unavailable: false },
+        rain_strip: d.rain_strip || d.RainStrip || { show: false, inches: 0, hours: 0 },
       };
     }
     function formatRainInches(n) {
@@ -705,6 +757,29 @@
       }
       const since = rain.since ? stampPhrase(new Date(rain.since)) : "";
       el.textContent = since ? ("Rain data unavailable since " + since) : "Rain data unavailable";
+    }
+    function paintRainStrip() {
+      const el = $("rain-strip");
+      if (!el) return;
+      const strip = (state.status && state.status.rain_strip) || {};
+      const show = strip.show === true;
+      el.hidden = !show;
+      el.classList.toggle("hidden", !show);
+      if (!show) {
+        el.innerHTML = "";
+        return;
+      }
+      const inches = Number(strip.inches);
+      const safeIn = Number.isFinite(inches) && inches > 0 ? inches : 0;
+      const hours = Number(strip.hours) === 24 ? 24 : 72;
+      // Meter is 0–1 in. Totals above 1 in fill the track and keep the real amount in the text.
+      const pct = Math.max(0, Math.min(100, safeIn * 100));
+      const label = formatRainInches(safeIn) + " in fell in the last " + hours + " hours";
+      const shown = Math.min(1, safeIn);
+      el.innerHTML =
+        `<span class="rain-meter" role="meter" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${shown.toFixed(2)}" aria-label="${esc(label)}">` +
+        `<span style="width:${pct}%"></span></span>` +
+        `<span class="rain-strip-text" aria-hidden="true">${esc(label)}</span>`;
     }
     async function j(url, opt) {
       const r = await fetch(url, opt);
@@ -917,6 +992,7 @@
         banner.hidden = true;
         if (openBtn) openBtn.classList.remove("hidden");
         paintRainHint();
+        paintRainStrip();
         return;
       }
       banner.hidden = false;
@@ -930,10 +1006,18 @@
           const tail = pauseUntilLabel().replace(/^Paused until\s+/, "");
           msg = "Paused for rain (" + formatRainInches(s.rain_inches) + " in) until " + tail;
         }
+      } else {
+        const rain = s.rain || {};
+        const strip = s.rain_strip || {};
+        const t72 = Number(rain.total_72h_inches);
+        if (strip.show === true && Number.isFinite(t72)) {
+          msg += " · " + formatRainInches(t72) + " in in the last 72 hours";
+        }
       }
       $("pause-msg").textContent = msg;
       if (openBtn) openBtn.classList.add("hidden");
       paintRainHint();
+      paintRainStrip();
     }
     /** Infer active itinerary + remaining for timer / Next-station. */
     function activeRunInfo() {
@@ -1075,6 +1159,7 @@
         b.innerHTML =
           `<span class="tile-icon" aria-hidden="true">${icon}</span>` +
           `<span class="tile-name">${esc(label)}</span>` +
+          tileSoilHTML(st.id) +
           `<span class="tile-pill">Off</span>`;
         b.addEventListener("click", () => openRun(st));
         $("stations").appendChild(b);
@@ -1664,9 +1749,6 @@
         });
       } catch (e) {}
     }
-    function soilEtKnown(d) {
-      return !!(d && d.et_known === true && d.et && d.et.last_ok_at);
-    }
     function soilInches(n) {
       const v = Number(n);
       return (Number.isFinite(v) ? v : 0).toFixed(2);
@@ -1686,81 +1768,79 @@
       if (d.et_known && d.updated_at) return d.updated_at;
       return "";
     }
-    function paintSoil() {
-      const wrap = $("soil-wrap");
-      const box = $("soil-card-body");
-      if (!wrap || !box) return;
+    function soilTilePercent(id) {
       const d = state.soil;
-      if (!d || d.enabled !== true) {
-        if (d && d.reason === "soil.local.json invalid") {
-          wrap.hidden = false;
-          wrap.classList.remove("hidden");
-          box.innerHTML = `<p class="history-detail">Soil settings file has an error (see log)</p>`;
-          return;
-        }
-        wrap.hidden = true;
-        wrap.classList.add("hidden");
-        box.innerHTML = "";
-        return;
+      if (!d || d.enabled !== true || d.et_known !== true || d.et_stale === true) return null;
+      const z = (d.zones || []).find((x) => x.station_id === id);
+      if (!z || z.rate_measured !== true || z.percent == null) return null;
+      const n = Number(z.percent);
+      if (!Number.isFinite(n)) return null;
+      return Math.max(0, Math.min(100, Math.round(n)));
+    }
+    function tileSoilHTML(id) {
+      const pct = soilTilePercent(id);
+      if (pct == null) return "";
+      return `<span class="tile-soil" role="img" aria-label="Soil about ${pct}%"><span aria-hidden="true" style="width:${pct}%"></span></span>`;
+    }
+    function paintTileSoil() {
+      document.querySelectorAll("#stations .station-tile").forEach((el) => {
+        const html = tileSoilHTML(el.dataset.id);
+        const cur = el.querySelector(".tile-soil");
+        if (cur) cur.remove();
+        if (!html) return;
+        const name = el.querySelector(".tile-name");
+        if (name) name.insertAdjacentHTML("afterend", html);
+      });
+    }
+    function paintSoilNote() {
+      const el = $("soil-note");
+      if (!el) return;
+      const bad = !!(state.soil && state.soil.reason === "soil.local.json invalid");
+      el.hidden = !bad;
+      el.classList.toggle("hidden", !bad);
+      el.textContent = bad ? "Soil estimate off: settings file has an error (see log)" : "";
+    }
+    function soilDialogText(z, d) {
+      const known = !!(d && d.et_known === true);
+      const stale = !!(d && d.et_stale === true);
+      const measured = !!(z && z.rate_measured === true);
+      const pctN = Number(z && z.percent);
+      const havePct = !!(z && z.percent != null && Number.isFinite(pctN));
+      const bits = [];
+      if (stale) bits.push("ET data is stale");
+      else if (!known || (measured && !havePct)) bits.push("No ET data yet");
+      else if (measured) {
+        const cap = (Number(z.capacity_inches) || 0).toFixed(2);
+        bits.push(Math.round(pctN) + "% of " + cap + " in");
       }
-      wrap.hidden = false;
-      wrap.classList.remove("hidden");
-      const known = soilEtKnown(d);
-      const zones = d.zones || [];
-      let anyUnmeasured = false;
-      zones.forEach((z) => { if (!z.rate_measured) anyUnmeasured = true; });
-      let rows = "";
-      if (!known) {
-        if (d.rain_known) {
-          rows = zones.map((z) => {
-            const name = shortStation(z.station_id);
-            return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
-              `<div class="history-detail">${esc(soilWindowLine(z, d, false))}</div></div>`;
-          }).join("");
-        }
-      } else {
-        rows = zones.map((z) => {
-          const name = shortStation(z.station_id);
-          if (!z.rate_measured) {
-            return `<div class="history-item"><div class="history-line">${esc(name)}</div>` +
-              `<div class="history-detail">${esc(soilWindowLine(z, d, true))}</div></div>`;
-          }
-          const pctN = Number(z.percent);
-          if (!Number.isFinite(pctN)) {
-            return `<div class="history-item"><div class="history-line">${esc(name)}</div></div>`;
-          }
-          const pct = Math.max(0, Math.min(100, Math.round(pctN)));
-          return `<div class="history-item"><div class="history-line">${esc(name)} · ${pct}% of capacity</div>` +
-            `<div class="soil-bar" aria-hidden="true"><span style="width:${pct}%"></span></div></div>`;
-        }).join("");
-      }
-      let notes = (known ? `<p class="history-detail">estimate</p>` : "") + rows;
-      if (!known) {
-        notes += `<p class="history-detail">No ET data yet</p>`;
-      }
+      if (!measured) bits.push("Measure sprinkler output to enable");
+      if (known || d.rain_known) bits.push(soilWindowLine(z, d, known));
       if (d.et && d.et.unavailable) {
         const since = d.et.since ? stampPhrase(new Date(d.et.since)) : "";
-        notes += `<p class="history-detail">ET unavailable since ${esc(since)}</p>`;
-      }
-      if (anyUnmeasured) {
-        notes += `<p class="history-detail">Measure sprinkler output to enable</p>`;
+        bits.push("ET unavailable since " + since);
       }
       const stamp = soilUpdatedStamp(d);
-      if (stamp) {
-        notes += `<p class="history-detail">Updated ${esc(stampPhrase(new Date(stamp)))}</p>`;
-      }
-      if (d.et_stale) {
-        notes += `<p class="history-detail">ET data is stale</p>`;
-      }
-      box.innerHTML = notes;
+      if (stamp) bits.push("Updated " + stampPhrase(new Date(stamp)));
+      return "Soil estimate: " + bits.join(" · ");
+    }
+    function paintSoil() {
+      paintSoilNote();
+      paintTileSoil();
+      const dlg = $("run-dlg");
+      if (state.pick && dlg && dlg.open) paintRunSoil(state.pick);
     }
     function paintRunSoil(st) {
       const el = $("run-soil");
       if (!el) return;
       const d = state.soil;
-      if (!d || d.enabled !== true || !st) {
+      if (!st || !d || d.reason === "no soil.local.json" || (d.enabled !== true && d.reason !== "soil.local.json invalid")) {
         el.hidden = true;
         el.textContent = "";
+        return;
+      }
+      if (d.reason === "soil.local.json invalid") {
+        el.hidden = false;
+        el.textContent = "Soil settings file has an error (see log)";
         return;
       }
       const z = (d.zones || []).find((x) => x.station_id === st.id);
@@ -1770,20 +1850,7 @@
         return;
       }
       el.hidden = false;
-      if (!soilEtKnown(d) || (z.rate_measured && !Number.isFinite(Number(z.percent)))) {
-        el.textContent = "Soil estimate: no ET data yet";
-        return;
-      }
-      const stamp = soilUpdatedStamp(d);
-      const updated = stamp ? stampPhrase(new Date(stamp)) : "";
-      if (z.rate_measured) {
-        const cap = (Number(z.capacity_inches) || 0).toFixed(2);
-        const pct = Math.round(Number(z.percent));
-        el.textContent = "Soil estimate: " + pct + "% of " + cap + " in" +
-          (updated ? " · updated " + updated : "");
-      } else {
-        el.textContent = "Soil estimate: rate not measured · " + soilWindowLine(z, d, true);
-      }
+      el.textContent = soilDialogText(z, d);
     }
     async function loadSoil() {
       try {
@@ -1791,13 +1858,7 @@
         state.soil = d;
         paintSoil();
       } catch (e) {
-        if (!state.soil) {
-          const wrap = $("soil-wrap");
-          if (wrap) {
-            wrap.hidden = true;
-            wrap.classList.add("hidden");
-          }
-        }
+        if (!state.soil) paintSoil();
       }
     }
     loadStatus();
