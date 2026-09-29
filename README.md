@@ -135,3 +135,7 @@ Example zone entry after a 0.20 in catch in 15 minutes:
 ```json
 "front-north": { "inches_per_hour": 0.8, "crop_factor": 0.6, "capacity_inches": 1.0 }
 ```
+
+## Native kiosk client (experimental)
+
+A native C and LVGL client of the daemon's HTTP JSON API is in [native-kiosk/README.md](native-kiosk/README.md). It is not a browser and not a second source of truth. It stays read-only unless `--allow-writes` is passed, and this tree does not install it as a systemd unit or a boot hook.
