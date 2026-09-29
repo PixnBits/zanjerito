@@ -1,0 +1,25 @@
+{
+ "stations": [
+  {
+   "color": "red",
+   "id": "az01",
+   "title": "Test Station 1"
+  },
+  {
+   "color": "yellow",
+   "id": "az02",
+   "title": "TestStation02TestStation02TestStation02TestStation02TestStation02TestStation02TestStation02TestStation02TestStation02Tes"
+  },
+  {
+   "color": "blue",
+   "id": "az03",
+   "rain_pause_exempt": true,
+   "title": "Test Station 3"
+  },
+  {
+   "color": "green",
+   "id": "az04",
+   "title": "TestStation04TestStation04TestStation04TestStation04TestStation04TestStation04TestStation04TestStation04TestStation04Tes"
+  }
+ ]
+}

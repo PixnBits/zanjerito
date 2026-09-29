@@ -1,5 +1,5 @@
 # Core sources (reused by later UI / cross-compile targets).
-SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c
+SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c
 SRC_DATA = src/data.c
 CJSON = third_party/cJSON/cJSON.c
 
@@ -10,7 +10,7 @@ BUILD = build
 
 SANITIZE := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c -o /dev/null - >/dev/null 2>&1 && echo -fsanitize=address,undefined)
 
-TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency
+TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text
 
 HOST_CC := gcc
 ARM_CC ?= arm-linux-gnueabihf-gcc
@@ -60,6 +60,8 @@ test: $(TEST_BINS)
 	$(BUILD)/test_http
 	$(BUILD)/test_data
 	$(BUILD)/test_stop_latency
+	$(BUILD)/test_text
+	$(BUILD)/test_ui_text
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -81,6 +83,39 @@ $(BUILD)/test_data: tests/test_data.c $(SRC_CORE) $(SRC_DATA) $(CJSON) | $(BUILD
 
 $(BUILD)/test_stop_latency: tests/test_stop_latency.c $(SRC_CORE) $(SRC_DATA) $(CJSON) | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -pthread -o $@ tests/test_stop_latency.c $(SRC_CORE) $(SRC_DATA) $(CJSON)
+
+$(BUILD)/test_text: tests/test_text.c src/zk_text.c | $(BUILD)
+	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_text.c src/zk_text.c
+
+TESTUI_DIR := $(BUILD)/testui
+TESTUI_SRCS := tests/test_ui_text.c $(SRC_CORE) $(SRC_DATA) src/platform.c src/ui.c src/zk_png.c $(GEN_SRCS) $(CJSON) $(LVGL_SRCS)
+TESTUI_OBJS := $(addprefix $(TESTUI_DIR)/,$(TESTUI_SRCS:.c=.o))
+TESTUI_APP_CFLAGS := $(STD) -Wall -Wextra -Werror -Os -g $(SANITIZE) $(INC)
+TESTUI_EXT_CFLAGS := $(STD) -w -Os -g $(SANITIZE) $(INC)
+
+$(BUILD)/test_ui_text: $(TESTUI_OBJS)
+	@test -n "$(LVGL_SRCS)" || { echo "error: LVGL not fetched; run make fetch-lvgl" >&2; exit 1; }
+	$(CC) $(SANITIZE) -o $@ $(TESTUI_OBJS) -lm -lpthread
+
+$(TESTUI_DIR)/tests/%.o: tests/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TESTUI_APP_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(TESTUI_DIR)/src/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TESTUI_APP_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(TESTUI_DIR)/generated/%.o: generated/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TESTUI_EXT_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(TESTUI_DIR)/third_party/%.o: third_party/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TESTUI_EXT_CFLAGS) $(DEPFLAGS) -c -o $@ $<
+
+$(TESTUI_DIR)/.cache/lvgl/%.o: .cache/lvgl/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(TESTUI_EXT_CFLAGS) $(DEPFLAGS) -c -o $@ $<
 
 fetch-lvgl:
 	tools/fetch-lvgl.sh
@@ -146,3 +181,4 @@ clean:
 
 -include $(HOST_OBJS:.o=.d)
 -include $(ARM_OBJS:.o=.d)
+-include $(TESTUI_OBJS:.o=.d)

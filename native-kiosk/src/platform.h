@@ -36,6 +36,9 @@ void zk_platform_note_injected_touch(void);
 /* Force a refresh, then write the last flushed frame as PNG. */
 int zk_snapshot_png(const char *file);
 
+/* Last flushed memory-display frame, XRGB8888 (B,G,R,X). NULL if none yet. */
+const uint8_t *zk_platform_frame(int *w, int *h, int *stride);
+
 void zk_platform_print_stats(int enabled);
 
 #endif

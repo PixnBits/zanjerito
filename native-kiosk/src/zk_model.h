@@ -23,7 +23,7 @@ enum {
 #define ZK_MAX_ON        8
 
 #define ZK_ID_MAX      32
-#define ZK_TITLE_MAX   64
+#define ZK_TITLE_MAX   128
 #define ZK_NOTE_MAX    96
 #define ZK_COLOR_MAX   16
 #define ZK_PHASE_MAX   32

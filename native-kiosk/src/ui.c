@@ -4,6 +4,7 @@
 #include "platform.h"
 #include "zk_layout.h"
 #include "zk_logic.h"
+#include "zk_text.h"
 
 #include "generated/zk_fonts.h"
 #include "generated/zk_icons.h"
@@ -37,7 +38,7 @@ enum {
 };
 
 #define MIDDOT "\xC2\xB7"
-#define ELLIPSIS "\xE2\x80\xA6"
+#define ELLIPSIS ZK_TEXT_ELLIPSIS
 
 enum { HIT_N = 24, ACT_SCHED_BODY = 1000 };
 
@@ -76,6 +77,8 @@ typedef struct {
     lv_obj_t *ban_title;
     lv_obj_t *ban_until;
     lv_obj_t *info_name;
+    lv_obj_t *info_sub0;
+    lv_obj_t *info_sub1;
     lv_obj_t *chip_t[4];
     lv_obj_t *chip_s[4];
     lv_obj_t *sched_count;
@@ -116,6 +119,79 @@ static char g_toast_text[96];
 static double g_toast_until;
 static double g_quiet_until; /* ignore chip and modal taps until this mono time */
 
+enum { LAB_TRACK_MAX = 96, LAB_ID_STORE = 32 };
+
+typedef struct {
+    char id[LAB_ID_STORE];
+    lv_obj_t *obj;
+    int clamped;
+} lab_slot_t;
+
+static lab_slot_t g_labs[LAB_TRACK_MAX];
+static int g_nlabs;
+static int g_lab_overflow;
+static const char *g_mark_id;
+static int g_mark_clamped;
+static char g_idbuf[LAB_ID_STORE];
+
+static void tracks_reset(void)
+{
+    g_nlabs = 0;
+    g_lab_overflow = 0;
+    g_mark_id = NULL;
+    g_mark_clamped = 0;
+}
+
+static void mark_lab(const char *id, int clamped)
+{
+    g_mark_id = id;
+    g_mark_clamped = clamped;
+}
+
+static void mark_lab_n(const char *prefix, int n, int clamped)
+{
+    snprintf(g_idbuf, sizeof g_idbuf, "%s%d", prefix, n);
+    mark_lab(g_idbuf, clamped);
+}
+
+static void copy_cap(char *dst, size_t cap, const char *src)
+{
+    size_t i = 0;
+    if (!dst || cap == 0) {
+        return;
+    }
+    if (!src) {
+        src = "";
+    }
+    while (src[i] && i + 1 < cap) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
+static void remember(lv_obj_t *lb)
+{
+    lab_slot_t *s;
+    if (g_nlabs >= LAB_TRACK_MAX) {
+        g_lab_overflow = 1;
+        g_mark_id = NULL;
+        g_mark_clamped = 0;
+        return;
+    }
+    s = &g_labs[g_nlabs];
+    if (g_mark_id) {
+        copy_cap(s->id, sizeof s->id, g_mark_id);
+    } else {
+        snprintf(s->id, sizeof s->id, "l%d", g_nlabs);
+    }
+    s->obj = lb;
+    s->clamped = g_mark_clamped;
+    g_nlabs++;
+    g_mark_id = NULL;
+    g_mark_clamped = 0;
+}
+
 static lv_color_t hex(uint32_t c)
 {
     return lv_color_hex(c);
@@ -140,6 +216,81 @@ static void set_lab(lv_obj_t *lb, const char *text)
         return;
     }
     lv_label_set_text(lb, text);
+}
+
+typedef struct {
+    const lv_font_t *font;
+    int32_t letter_space;
+} fit_ctx_t;
+
+static int fit_width_cb(const char *text, size_t nbytes, void *user)
+{
+    fit_ctx_t *u = user;
+    if (!text || !u || !u->font) {
+        return 0;
+    }
+    if (nbytes > 0x7fffffffu) {
+        nbytes = 0x7fffffffu;
+    }
+    return (int)lv_text_get_width(text, (uint32_t)nbytes, u->font, u->letter_space);
+}
+
+/* One line, clipped to max_px, with U+2026 when the source does not fit.
+ * Does not change the label's width: right-aligned slots stay put. */
+static void set_lab_fit_px(lv_obj_t *lb, const char *text, int max_px)
+{
+    char buf[512];
+    fit_ctx_t u;
+    const lv_font_t *font;
+    int32_t h;
+    if (!lb) {
+        return;
+    }
+    font = lv_obj_get_style_text_font(lb, LV_PART_MAIN);
+    u.font = font;
+    u.letter_space = lv_obj_get_style_text_letter_space(lb, LV_PART_MAIN);
+    if (max_px < 1 || !font || zk_text_fit(buf, sizeof buf, text, max_px, fit_width_cb, &u) != 0) {
+        set_lab(lb, text);
+    } else {
+        set_lab(lb, buf);
+    }
+    lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
+    if (font) {
+        h = lv_font_get_line_height(font);
+        if (h > 0) {
+            lv_obj_set_height(lb, h);
+        }
+    }
+}
+
+static int slot_px(lv_obj_t *lb)
+{
+    int w;
+    if (!lb) {
+        return 0;
+    }
+    w = (int)lv_obj_get_style_width(lb, LV_PART_MAIN);
+    if (w <= 0 || w > 4000) {
+        lv_obj_update_layout(lb);
+        w = (int)lv_obj_get_width(lb);
+    }
+    if (w <= 0 || w > 4000) {
+        return 0;
+    }
+    return w;
+}
+
+static void set_lab_fit(lv_obj_t *lb, const char *text)
+{
+    int w = slot_px(lb);
+    if (w <= 0) {
+        set_lab(lb, text);
+        if (lb) {
+            lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
+        }
+        return;
+    }
+    set_lab_fit_px(lb, text, w);
 }
 
 static lv_obj_t *box_at(lv_obj_t *parent, int x, int y, int w, int h, uint32_t bg, int radius)
@@ -215,6 +366,7 @@ static lv_obj_t *lab(lv_obj_t *parent, const char *text, const lv_font_t *font, 
     lv_obj_set_pos(lb, x, y);
     lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
     plain(lb);
+    remember(lb);
     return lb;
 }
 
@@ -493,7 +645,7 @@ static void show_toast(const char *msg)
     snprintf(g_toast_text, sizeof g_toast_text, "%s", msg ? msg : "");
     g_toast_until = zk_platform_mono() + 2.5;
     if (g_w.toast_lbl) {
-        set_lab(g_w.toast_lbl, g_toast_text);
+        set_lab_fit(g_w.toast_lbl, g_toast_text);
     }
     if (g_w.toast) {
         lv_obj_remove_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
@@ -714,9 +866,11 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
     lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, LV_STATE_PRESSED);
     lv_obj_set_style_translate_y(hdr, 0, LV_STATE_PRESSED);
+    mark_lab("hdr_kicker", 1);
     g_w.hdr_kicker = lab(hdr, "", &zk_font_b_26, COL_MUT, 4, 6);
     lab_width(g_w.hdr_kicker, L->header.w - 160, LV_TEXT_ALIGN_LEFT);
     lv_obj_set_style_text_letter_space(g_w.hdr_kicker, 1, 0);
+    mark_lab("hdr_big", 1);
     g_w.hdr_big = lab(hdr, "", &zk_font_xb_50, COL_INK, 4, 38);
     lab_width(g_w.hdr_big, L->header.w - 160, LV_TEXT_ALIGN_LEFT);
     brand = box_at(hdr, L->header.w - 148, 0, 144, 96, COL_BG, 0);
@@ -728,13 +882,16 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
     }
     if (k->fault && L->rain.w > 0) {
         lv_obj_t *pill = box_rect(scr, L->rain, COL_STOP, 16);
+        mark_lab("fault_lbl", 1);
         g_w.fault_lbl = lab(pill, "", &zk_font_b_26, COL_WHITE, 16, 14);
         lab_width(g_w.fault_lbl, L->rain.w - 32, LV_TEXT_ALIGN_LEFT);
         lv_label_set_long_mode(g_w.fault_lbl, LV_LABEL_LONG_CLIP);
     } else if (k->rain && L->rain.w > 0) {
         lv_obj_t *strip = box_rect(scr, L->rain, COL_RAINBG, 16);
         icon_at(strip, &zk_icon_cloud_36, COL_RAINFG, 14, 11);
+        mark_lab("rain_bold", 1);
         g_w.rain_bold = lab(strip, "", &zk_font_xb_28, COL_RAINFG, 62, 14);
+        mark_lab("rain_rest", 1);
         g_w.rain_rest = lab(strip, "", &zk_font_sb_28, COL_RAINFG, 200, 14);
     }
     g_w.n_tiles = L->n_tiles;
@@ -743,6 +900,7 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
         int soil = (k->soil_mask & (1 << i)) != 0;
         lv_obj_t *tile = target(scr, tr, ZK_TARGET_TILE0 + i, COL_CARD, 22, 1);
         int title_y = soil ? 10 : (tr.h - 36) / 2;
+        mark_lab_n("tile_title", i, 1);
         g_w.tile_title[i] = lab(tile, "", &zk_font_xb_32, COL_INK, 14, title_y);
         lab_width(g_w.tile_title[i], tr.w - 28, LV_TEXT_ALIGN_LEFT);
         if (!soil) {
@@ -790,6 +948,7 @@ static void build_running(lv_obj_t *scr, const zk_layout_rects *L)
     lv_obj_t *c = box_rect(scr, card, COL_RUNBG, 26);
     int bar_w = card.w - 48;
     int prog_y = card.h - 18 - 32 - 16 - 24;
+    mark_lab("run_title", 1);
     g_w.run_title = lab(c, "", &zk_font_xb_58, COL_WHITE, 24, 58);
     lab_width(g_w.run_title, card.w - 48, LV_TEXT_ALIGN_LEFT);
     icon_at(c, &zk_icon_drop_30, COL_RUNLBL, 24, 16);
@@ -806,7 +965,9 @@ static void build_running(lv_obj_t *scr, const zk_layout_rects *L)
         lv_obj_set_style_clip_corner(track, true, 0);
         g_w.run_fill = box_at(track, 0, 0, 0, 24, COL_RUNFILL, 12);
     }
+    mark_lab("run_step", 0);
     g_w.run_step = lab(c, "", &zk_font_b_28, COL_WHITE, 24, card.h - 18 - 30);
+    mark_lab("run_next", 1);
     g_w.run_next = lab(c, "", &zk_font_b_28, COL_WHITE, card.w / 2, card.h - 18 - 30);
     lab_width(g_w.run_next, card.w / 2 - 24, LV_TEXT_ALIGN_RIGHT);
 }
@@ -815,20 +976,24 @@ static void build_paused(lv_obj_t *scr, const zk_layout_rects *L, const view_key
 {
     lv_obj_t *ban;
     lv_obj_t *info;
-    lv_obj_t *sub;
     if (L->banner.w <= 0) {
         return;
     }
     ban = box_rect(scr, L->banner, COL_PAUSE, 24);
     icon_at(ban, &zk_icon_cloud_64, COL_WHITE, 18, (L->banner.h - 64) / 2);
+    mark_lab("ban_title", 1);
     g_w.ban_title = lab(ban, "", &zk_font_b_26, COL_WHITE, 18 + 64 + 16, 18);
     lv_obj_set_style_text_letter_space(g_w.ban_title, 1, 0);
+    lab_width(g_w.ban_title, L->banner.w - 18 - 64 - 16 - 16, LV_TEXT_ALIGN_LEFT);
+    mark_lab("ban_until", 1);
     g_w.ban_until = lab(ban, "", &zk_font_xb_48, COL_WHITE, 18 + 64 + 16, 48);
     lab_width(g_w.ban_until, L->banner.w - 18 - 64 - 16 - 16, LV_TEXT_ALIGN_LEFT);
     if (k->rain && L->rain.w > 0) {
         lv_obj_t *strip = box_rect(scr, L->rain, COL_RAINBG, 16);
         icon_at(strip, &zk_icon_cloud_36, COL_RAINFG, 14, 11);
+        mark_lab("rain_bold", 1);
         g_w.rain_bold = lab(strip, "", &zk_font_xb_28, COL_RAINFG, 62, 14);
+        mark_lab("rain_rest", 1);
         g_w.rain_rest = lab(strip, "", &zk_font_sb_28, COL_RAINFG, 200, 14);
     }
     if (L->info.w <= 0) {
@@ -839,13 +1004,15 @@ static void build_paused(lv_obj_t *scr, const zk_layout_rects *L, const view_key
         lv_obj_t *kicker = lab(info, "ON HOLD", &zk_font_b_26, COL_MUT, 20, 16);
         lv_obj_set_style_text_letter_space(kicker, 1, 0);
     }
+    mark_lab("info_name", 1);
     g_w.info_name = lab(info, "", &zk_font_xb_36, COL_INK, 20, 52);
     lab_width(g_w.info_name, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(g_w.info_name, LV_LABEL_LONG_WRAP);
-    sub = lab(info, "Runs again after you resume", &zk_font_sb_28, COL_MUT, 20, 112);
-    lab_width(sub, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
-    sub = lab(info, "or when the pause ends.", &zk_font_sb_28, COL_MUT, 20, 146);
-    lab_width(sub, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
+    mark_lab("info_sub0", 0);
+    g_w.info_sub0 = lab(info, "Runs again after you resume", &zk_font_sb_28, COL_MUT, 20, 112);
+    lab_width(g_w.info_sub0, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
+    mark_lab("info_sub1", 0);
+    g_w.info_sub1 = lab(info, "or when the pause ends.", &zk_font_sb_28, COL_MUT, 20, 146);
+    lab_width(g_w.info_sub1, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
 }
 
 static const void *chip_icon(int i)
@@ -870,9 +1037,14 @@ static void build_picker(lv_obj_t *scr, const zk_layout_rects *L)
     for (i = 0; i < 4; i++) {
         lv_obj_t *c = target(scr, L->chips[i], ZK_TARGET_CHIP0 + i, COL_CARD, 24, 1);
         icon_at(c, chip_icon(i), COL_TEAL, 16, 12);
+        mark_lab_n("chip_t", i, 1);
         g_w.chip_t[i] = lab(c, "", &zk_font_xb_36, COL_INK, 16, 72);
         lab_width(g_w.chip_t[i], L->chips[i].w - 32, LV_TEXT_ALIGN_LEFT);
         lv_label_set_long_mode(g_w.chip_t[i], LV_LABEL_LONG_WRAP);
+        /* Two lines is the current picker copy. A longer primary clips here
+         * instead of pushing the subtitle. One line keeps its natural height. */
+        lv_obj_set_style_max_height(g_w.chip_t[i], 2 * lv_font_get_line_height(&zk_font_xb_36), 0);
+        mark_lab_n("chip_s", i, 1);
         g_w.chip_s[i] = lab(c, "", &zk_font_sb_26, COL_MUT, 16, 120);
         lab_width(g_w.chip_s[i], L->chips[i].w - 32, LV_TEXT_ALIGN_LEFT);
     }
@@ -901,18 +1073,23 @@ static void build_schedules(lv_obj_t *scr, const zk_layout_rects *L, const zk_sn
     int nrows;
     lv_obj_t *title = lab(scr, "Schedules", &zk_font_xb_44, COL_INK, L->title.x + 2, L->title.y + 2);
     (void)title;
+    mark_lab("sched_count", 1);
     g_w.sched_count = lab(scr, "", &zk_font_sb_26, COL_MUT, L->title.x, L->title.y + 12);
     lab_width(g_w.sched_count, L->title.w - 4, LV_TEXT_ALIGN_RIGHT);
     card = box_rect(scr, L->card, COL_CARD, 26);
     border_on(card, 3);
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(card, on_evt, LV_EVENT_CLICKED, (void *)(intptr_t)ACT_SCHED_BODY);
+    mark_lab("sched_name", 1);
     g_w.sched_name = lab(card, "", &zk_font_b_26, COL_MUT, 20, 8);
     lv_obj_set_style_text_letter_space(g_w.sched_name, 1, 0);
+    lab_width(g_w.sched_name, L->card.w - 40 - 170, LV_TEXT_ALIGN_LEFT);
+    mark_lab("sched_sum", 1);
     g_w.sched_sum = lab(card, "", &zk_font_xb_50, COL_INK, 20, 32);
     lab_width(g_w.sched_sum, L->card.w - 40 - 170, LV_TEXT_ALIGN_LEFT);
     g_w.sched_ends1 = lab(card, "Ends about", &zk_font_b_28, COL_MUT, L->card.w - 20 - 168, 8);
     lab_width(g_w.sched_ends1, 168, LV_TEXT_ALIGN_RIGHT);
+    mark_lab("sched_ends2", 1);
     g_w.sched_ends2 = lab(card, "", &zk_font_b_28, COL_MUT, L->card.w - 20 - 168, 38);
     lab_width(g_w.sched_ends2, 168, LV_TEXT_ALIGN_RIGHT);
     nrows = L->n_sched_rows;
@@ -926,8 +1103,10 @@ static void build_schedules(lv_obj_t *scr, const zk_layout_rects *L, const zk_sn
     for (i = 0; i < nrows; i++) {
         int y = L->sched_rows[i].y - L->card.y;
         int h = L->sched_rows[i].h;
+        mark_lab_n("row_name", i, 1);
         g_w.row_name[i] = lab(card, "", &zk_font_b_34, COL_INK, 20, y + 6);
-        lab_width(g_w.row_name[i], L->card.w - 20 - 160, LV_TEXT_ALIGN_LEFT);
+        /* Right edge meets row_min (x = card.w-170). Short names stay left-aligned. */
+        lab_width(g_w.row_name[i], L->card.w - 190, LV_TEXT_ALIGN_LEFT);
         g_w.row_min[i] = lab(card, "", &zk_font_xb_42, COL_INK, L->card.w - 20 - 150, y + 2);
         lab_width(g_w.row_min[i], 80, LV_TEXT_ALIGN_RIGHT);
         g_w.row_unit[i] = lab(card, "min", &zk_font_b_26, COL_INK, L->card.w - 20 - 64, y + 14);
@@ -1002,9 +1181,10 @@ static void build_modal(lv_obj_t *scr, int modal)
     border_on(card, 3);
     g_w.m_title = lab(card, "", &zk_font_xb_44, COL_INK, 24, 22);
     lab_width(g_w.m_title, M.modal.w - 48, LV_TEXT_ALIGN_CENTER);
+    mark_lab("m_body", 1);
     g_w.m_body = lab(card, "", &zk_font_sb_28, COL_INK, 24, 84);
     lab_width(g_w.m_body, M.modal.w - 48, LV_TEXT_ALIGN_CENTER);
-    lv_label_set_long_mode(g_w.m_body, LV_LABEL_LONG_WRAP);
+    mark_lab("m_sub", 1);
     g_w.m_sub = lab(card, "", &zk_font_sb_26, COL_MUT, 24, 122);
     lab_width(g_w.m_sub, M.modal.w - 48, LV_TEXT_ALIGN_CENTER);
     ok = target(dim, M.modal_ok, ZK_TARGET_MODAL_OK, ok_bg, 22, 0);
@@ -1028,27 +1208,58 @@ static void build_overlays(lv_obj_t *scr)
     }
     lv_obj_add_flag(g_w.stale, LV_OBJ_FLAG_HIDDEN);
     g_w.toast = box_at(scr, 28, 360, 490, 48, COL_INK, 24);
+    mark_lab("toast", 1);
     g_w.toast_lbl = lab(g_w.toast, "", &zk_font_b_26, COL_CARD, 12, 10);
     lab_width(g_w.toast_lbl, 466, LV_TEXT_ALIGN_CENTER);
     lv_obj_add_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void place_rain_rest(void)
+static void apply_rain(const char *bold, const char *rest)
 {
+    lv_obj_t *parent;
     lv_point_t sz;
-    const char *t;
+    const char *shown;
+    int parent_w;
+    int bold_max;
+    int x;
+    int rest_max;
     if (!g_w.rain_bold || !g_w.rain_rest) {
         return;
     }
-    t = lv_label_get_text(g_w.rain_bold);
-    lv_text_get_size(&sz, t ? t : "", &zk_font_xb_28, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    lv_obj_set_pos(g_w.rain_rest, 62 + sz.x, 14);
+    parent = lv_obj_get_parent(g_w.rain_bold);
+    parent_w = parent ? (int)lv_obj_get_style_width(parent, LV_PART_MAIN) : 0;
+    if (parent_w <= 0 || parent_w > 4000) {
+        if (parent) {
+            lv_obj_update_layout(parent);
+            parent_w = (int)lv_obj_get_width(parent);
+        }
+    }
+    bold_max = parent_w - 62 - 14;
+    if (bold_max < 8) {
+        set_lab(g_w.rain_bold, bold);
+        set_lab(g_w.rain_rest, rest);
+        shown = lv_label_get_text(g_w.rain_bold);
+        lv_text_get_size(&sz, shown ? shown : "", &zk_font_xb_28, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_obj_set_pos(g_w.rain_rest, 62 + sz.x, 14);
+        return;
+    }
+    set_lab_fit_px(g_w.rain_bold, bold, bold_max);
+    shown = lv_label_get_text(g_w.rain_bold);
+    lv_text_get_size(&sz, shown ? shown : "", &zk_font_xb_28, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    x = 62 + sz.x;
+    lv_obj_set_pos(g_w.rain_rest, x, 14);
+    rest_max = parent_w - x - 14;
+    if (rest_max < 1) {
+        rest_max = 1;
+    }
+    lv_obj_set_width(g_w.rain_rest, rest_max);
+    set_lab_fit_px(g_w.rain_rest, rest, rest_max);
 }
 
 static void apply_content(const zk_snapshot_t *s)
 {
     char a[256];
-    char b[128];
+    char b[192];
     char c[96];
     zk_next_run_t next;
     int i;
@@ -1060,28 +1271,26 @@ static void apply_content(const zk_snapshot_t *s)
         }
         if (!s->have_status) {
             snprintf(a, sizeof a, "NEXT RUN " MIDDOT " --");
-            set_lab(g_w.hdr_kicker, a);
-            set_lab(g_w.hdr_big, "Connecting" ELLIPSIS);
+            set_lab_fit(g_w.hdr_kicker, a);
+            set_lab_fit(g_w.hdr_big, "Connecting" ELLIPSIS);
         } else if (!next.have) {
             snprintf(a, sizeof a, "NEXT RUN " MIDDOT " --");
-            set_lab(g_w.hdr_kicker, a);
-            set_lab(g_w.hdr_big, "--");
+            set_lab_fit(g_w.hdr_kicker, a);
+            set_lab_fit(g_w.hdr_big, "--");
         } else {
             snprintf(a, sizeof a, "NEXT RUN " MIDDOT " %s", next.name);
-            set_lab(g_w.hdr_kicker, a);
+            set_lab_fit(g_w.hdr_kicker, a);
             snprintf(b, sizeof b, "%s %s", next.day, next.time);
-            set_lab(g_w.hdr_big, b);
+            set_lab_fit(g_w.hdr_big, b);
         }
         if (g_w.fault_lbl) {
             const char *err = (s->have_status && s->status.last_error[0]) ? s->status.last_error : "check controller";
             snprintf(a, sizeof a, "Fault: %s", err);
-            set_lab(g_w.fault_lbl, a);
+            set_lab_fit(g_w.fault_lbl, a);
         }
         if (g_w.rain_bold && s->have_status) {
             rain_parts(&s->status, a, sizeof a, b, sizeof b);
-            set_lab(g_w.rain_bold, a);
-            set_lab(g_w.rain_rest, b);
-            place_rain_rest();
+            apply_rain(a, b);
         }
         for (i = 0; i < g_w.n_tiles; i++) {
             const zk_station_t *stn;
@@ -1092,7 +1301,7 @@ static void apply_content(const zk_snapshot_t *s)
                 continue;
             }
             stn = &s->stations.items[i];
-            set_lab(g_w.tile_title[i], stn->title);
+            set_lab_fit(g_w.tile_title[i], stn->title);
             if (s->have_soil) {
                 pct = zk_soil_percent(&s->soil, stn->id);
             }
@@ -1131,7 +1340,7 @@ static void apply_content(const zk_snapshot_t *s)
                 cur = s->status.stations_on[0];
             }
         }
-        set_lab(g_w.run_title, cur[0] ? station_title(s, cur) : "--");
+        set_lab_fit(g_w.run_title, cur[0] ? station_title(s, cur) : "--");
         if (!info.have || info.remaining_sec < 0) {
             set_lab(g_w.run_count, "--:--");
         } else {
@@ -1149,7 +1358,7 @@ static void apply_content(const zk_snapshot_t *s)
         } else {
             snprintf(b, sizeof b, "Next: --");
         }
-        set_lab(g_w.run_next, b);
+        set_lab_fit(g_w.run_next, b);
         {
             int fw = 0;
             if (info.total_step_sec > 0 && info.remaining_sec >= 0) {
@@ -1175,13 +1384,11 @@ static void apply_content(const zk_snapshot_t *s)
             snprintf(a, sizeof a, "PAUSED");
             snprintf(b, sizeof b, "--");
         }
-        set_lab(g_w.ban_title, a);
-        set_lab(g_w.ban_until, b);
+        set_lab_fit(g_w.ban_title, a);
+        set_lab_fit(g_w.ban_until, b);
         if (g_w.rain_bold && s->have_status) {
             rain_parts(&s->status, a, sizeof a, b, sizeof b);
-            set_lab(g_w.rain_bold, a);
-            set_lab(g_w.rain_rest, b);
-            place_rain_rest();
+            apply_rain(a, b);
         }
         if (s->have_schedules) {
             zk_next_run(&s->schedules, s->have_stations ? &s->stations : NULL, s->wall, &next);
@@ -1192,14 +1399,14 @@ static void apply_content(const zk_snapshot_t *s)
         } else {
             snprintf(a, sizeof a, "--");
         }
-        set_lab(g_w.info_name, a);
+        set_lab_fit(g_w.info_name, a);
     } else if (g_key.content == ZK_SCREEN_PICKER) {
         for (i = 0; i < 4; i++) {
             zk_pause_preview_t pv;
             memset(&pv, 0, sizeof pv);
             zk_pause_preview(s->have_schedules ? &s->schedules : NULL, s->wall, (zk_pause_kind_t)i, &pv);
             set_lab(g_w.chip_t[i], pv.primary);
-            set_lab(g_w.chip_s[i], pv.secondary);
+            set_lab_fit(g_w.chip_s[i], pv.secondary);
             if (g_w.chip_t[i] && g_w.chip_s[i]) {
                 lv_obj_update_layout(g_w.chip_t[i]);
                 lv_obj_align_to(g_w.chip_s[i], g_w.chip_t[i], LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
@@ -1210,20 +1417,20 @@ static void apply_content(const zk_snapshot_t *s)
         int nsch = s->have_schedules ? s->schedules.n : 0;
         if (nsch > 1) {
             snprintf(a, sizeof a, "%d of %d", g_sched_i + 1, nsch);
-            set_lab(g_w.sched_count, a);
+            set_lab_fit(g_w.sched_count, a);
         } else {
-            set_lab(g_w.sched_count, "");
+            set_lab_fit(g_w.sched_count, "");
         }
         if (nsch > 0 && g_sched_i >= 0 && g_sched_i < nsch) {
             sch = &s->schedules.items[g_sched_i];
         }
         if (sch) {
             name_upper(sch, a, sizeof a);
-            set_lab(g_w.sched_name, a);
+            set_lab_fit(g_w.sched_name, a);
             sched_summary(sch, b, sizeof b);
-            set_lab(g_w.sched_sum, b);
+            set_lab_fit(g_w.sched_sum, b);
             ends_about(sch, c, sizeof c);
-            set_lab(g_w.sched_ends2, c);
+            set_lab_fit(g_w.sched_ends2, c);
             for (i = 0; i < g_w.n_rows; i++) {
                 const char *nm = "--";
                 if (i < sch->n_steps) {
@@ -1232,7 +1439,7 @@ static void apply_content(const zk_snapshot_t *s)
                 } else {
                     snprintf(a, sizeof a, "--");
                 }
-                set_lab(g_w.row_name[i], nm);
+                set_lab_fit(g_w.row_name[i], nm);
                 set_lab(g_w.row_min[i], a);
             }
         }
@@ -1240,8 +1447,8 @@ static void apply_content(const zk_snapshot_t *s)
 
     if (g_key.modal == ZK_SCREEN_CONFIRM_STOP) {
         set_lab(g_w.m_title, "Stop all watering?");
-        set_lab(g_w.m_body, "Turns every valve off.");
-        set_lab(g_w.m_sub, "");
+        set_lab_fit(g_w.m_body, "Turns every valve off.");
+        set_lab_fit(g_w.m_sub, "");
     } else if (g_key.modal == ZK_SCREEN_CONFIRM_PAUSE) {
         zk_pause_preview_t pv;
         int chip = g_pick_chip;
@@ -1251,8 +1458,8 @@ static void apply_content(const zk_snapshot_t *s)
         }
         zk_pause_preview(s->have_schedules ? &s->schedules : NULL, s->wall, (zk_pause_kind_t)chip, &pv);
         set_lab(g_w.m_title, "Pause watering?");
-        set_lab(g_w.m_body, pv.primary);
-        set_lab(g_w.m_sub, pv.secondary);
+        set_lab_fit(g_w.m_body, pv.primary);
+        set_lab_fit(g_w.m_sub, pv.secondary);
     }
 }
 
@@ -1292,7 +1499,7 @@ static void overlays(const zk_snapshot_t *s)
     }
     if (g_w.toast) {
         if (show_toast) {
-            set_lab(g_w.toast_lbl, g_toast_text);
+            set_lab_fit(g_w.toast_lbl, g_toast_text);
             lv_obj_set_pos(g_w.toast, 28, y);
             lv_obj_remove_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(g_w.toast);
@@ -1308,6 +1515,7 @@ static void rebuild(const zk_snapshot_t *s)
     zk_layout_in in;
     zk_layout_rects L;
     view_key key = g_key;
+    tracks_reset();
     lv_obj_clean(scr);
     memset(&g_w, 0, sizeof g_w);
     fill_key(s, key.content, key.modal, &g_key, &in);
@@ -1332,6 +1540,51 @@ static void rebuild(const zk_snapshot_t *s)
     }
     draw_steps(scr);
     apply_content(s);
+}
+
+int zk_ui_debug_label_boxes(zk_ui_label_box_t *out, int cap)
+{
+    lv_obj_t *scr;
+    int i;
+    if (g_lab_overflow || !out || cap < g_nlabs) {
+        return -1;
+    }
+    scr = lv_screen_active();
+    if (scr) {
+        lv_obj_update_layout(scr);
+    }
+    for (i = 0; i < g_nlabs; i++) {
+        zk_ui_label_box_t *b = &out[i];
+        lv_obj_t *o = g_labs[i].obj;
+        lv_obj_t *p;
+        lv_area_t a;
+        lv_area_t pa;
+        const char *t;
+        memset(b, 0, sizeof *b);
+        copy_cap(b->id, sizeof b->id, g_labs[i].id);
+        b->clamped = g_labs[i].clamped;
+        if (!o) {
+            continue;
+        }
+        b->visible = lv_obj_is_visible(o) ? 1 : 0;
+        b->y_rel = (int)lv_obj_get_y(o);
+        lv_obj_get_coords(o, &a);
+        b->x = (int)a.x1;
+        b->y = (int)a.y1;
+        b->w = (int)lv_area_get_width(&a);
+        b->h = (int)lv_area_get_height(&a);
+        p = lv_obj_get_parent(o);
+        if (p) {
+            lv_obj_get_coords(p, &pa);
+            b->parent_x = (int)pa.x1;
+            b->parent_y = (int)pa.y1;
+            b->parent_w = (int)lv_area_get_width(&pa);
+            b->parent_h = (int)lv_area_get_height(&pa);
+        }
+        t = lv_label_get_text(o);
+        copy_cap(b->text, sizeof b->text, t);
+    }
+    return g_nlabs;
 }
 
 void zk_ui_set_fixture(const char *dir)

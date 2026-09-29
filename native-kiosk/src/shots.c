@@ -34,7 +34,10 @@ static const shot_t k_shots[] = {
     {"home-rain", "06-confirm-stop.png", ZK_SCREEN_CONFIRM_STOP, 0, -1, 0},
     {"home-rain", "07-confirm-pause.png", ZK_SCREEN_CONFIRM_PAUSE, 0, 0, 0},
     {"home-rain", "08-home-stop-pressed.png", ZK_SCREEN_HOME, ZK_TARGET_STOP, -1, 0},
-    {"home-rain", "09-offline.png", ZK_SCREEN_HOME, 0, -1, 1}
+    {"home-rain", "09-offline.png", ZK_SCREEN_HOME, 0, -1, 1},
+    {"paused-long", "03c-paused-long-reason.png", ZK_SCREEN_PAUSED, 0, -1, 0},
+    {"home-longnames", "01f-home-long-names.png", ZK_SCREEN_HOME, 0, -1, 0},
+    {"running-long", "02b-running-long.png", ZK_SCREEN_RUNNING, 0, -1, 0}
 };
 
 static int join2(char *dst, size_t cap, const char *a, const char *b)

@@ -1,0 +1,14 @@
+{
+ "enabled": false,
+ "et": {
+  "last_ok_at": null,
+  "since": null,
+  "unavailable": false
+ },
+ "et_known": false,
+ "et_stale": false,
+ "rain_known": false,
+ "reason": "no soil.local.json",
+ "updated_at": null,
+ "zones": []
+}

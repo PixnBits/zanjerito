@@ -744,6 +744,23 @@ void zk_platform_note_injected_touch(void)
     queue_touch((int64_t)ts.tv_sec, (int64_t)(ts.tv_nsec / 1000));
 }
 
+const uint8_t *zk_platform_frame(int *w, int *h, int *stride)
+{
+    if (!g_have_frame) {
+        return NULL;
+    }
+    if (w) {
+        *w = SNAP_W;
+    }
+    if (h) {
+        *h = SNAP_H;
+    }
+    if (stride) {
+        *stride = SNAP_W * 4;
+    }
+    return g_snap;
+}
+
 int zk_snapshot_png(const char *file)
 {
     lv_obj_t *scr;
