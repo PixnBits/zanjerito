@@ -1613,6 +1613,15 @@
       const ap = String(map.dayPeriod || "").toLowerCase();
       return ap ? `${map.hour}:${map.minute} ${ap}` : `${map.hour}:${map.minute}`;
     }
+    function stampPhrase(d) {
+      const time = clockPhrase(d);
+      if (!time) return "";
+      const ymd = tzYMD(d);
+      const today = tzYMD(new Date());
+      if (ymd === today) return time;
+      const map = tzParts(d);
+      return `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}, ${time}`.trim();
+    }
     function formatRunMins(sec) {
       sec = Number(sec) || 0;
       if (sec > 0 && sec < 60) return "<1 min";
@@ -1750,7 +1759,7 @@
     }
     function soilTilePercent(id) {
       const d = state.soil;
-      if (!d || d.enabled !== true || d.et_known !== true) return null;
+      if (!d || d.enabled !== true || d.et_known !== true || d.et_stale === true) return null;
       const z = (d.zones || []).find((x) => x.station_id === id);
       if (!z || z.rate_measured !== true || z.percent == null) return null;
       const n = Number(z.percent);
@@ -1782,11 +1791,13 @@
     }
     function soilDialogText(z, d) {
       const known = !!(d && d.et_known === true);
+      const stale = !!(d && d.et_stale === true);
       const measured = !!(z && z.rate_measured === true);
       const pctN = Number(z && z.percent);
       const havePct = !!(z && z.percent != null && Number.isFinite(pctN));
       const bits = [];
-      if (!known || (measured && !havePct)) bits.push("No ET data yet");
+      if (stale) bits.push("ET data is stale");
+      else if (!known || (measured && !havePct)) bits.push("No ET data yet");
       else if (measured) {
         const cap = (Number(z.capacity_inches) || 0).toFixed(2);
         bits.push(Math.round(pctN) + "% of " + cap + " in");
@@ -1794,11 +1805,11 @@
       if (!measured) bits.push("Measure sprinkler output to enable");
       if (known || d.rain_known) bits.push(soilWindowLine(z, d, known));
       if (d.et && d.et.unavailable) {
-        const since = d.et.since ? clockPhrase(new Date(d.et.since)) : "";
+        const since = d.et.since ? stampPhrase(new Date(d.et.since)) : "";
         bits.push("ET unavailable since " + since);
       }
       const stamp = soilUpdatedStamp(d);
-      if (stamp) bits.push("Updated " + clockPhrase(new Date(stamp)));
+      if (stamp) bits.push("Updated " + stampPhrase(new Date(stamp)));
       return "Soil estimate: " + bits.join(" · ");
     }
     function paintSoil() {

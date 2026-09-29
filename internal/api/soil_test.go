@@ -1,10 +1,12 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -399,6 +401,69 @@ func (b *blockingSoil) Fetch(ctx context.Context, _ time.Time, _ int) ([]soil.Da
 	}
 }
 
+func TestSoilAPIETStaleWhenFetchFails(t *testing.T) {
+	s := newTestServer(t)
+	loc := phoenixLoc(t)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, loc)
+	fetched := now.Add(-72 * time.Hour)
+	fake := &soil.Fake{}
+	var buf bytes.Buffer
+	p := &soil.Poller{
+		Source: fake,
+		Cfg:    soil.Config{Enabled: true, Station: "azXX", WindowDays: 14, CropFactor: 0.6, Capacity: 1, MaxDailyET: 0.6},
+		Now:    func() time.Time { return now },
+		Loc:    loc,
+		Log:    log.New(&buf, "", 0),
+	}
+	p.SeedCacheForTest([]soil.DayET{
+		{Date: "2026-09-24", ETInches: 0.20},
+		{Date: "2026-09-25", ETInches: 0.20},
+		{Date: "2026-09-26", ETInches: 0.22},
+	}, fetched)
+	fake.Set(nil, errors.New("HTTP 500"))
+	p.Poll(context.Background())
+	s.Soil = p
+
+	rr := doJSON(t, s, http.MethodGet, "/api/soil", nil)
+	if rr.Code != 200 {
+		t.Fatalf("%d %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "azXX") || strings.Contains(body, "Test Station") || strings.Contains(buf.String(), "azXX") {
+		t.Fatalf("leak body %s log %s", body, buf.String())
+	}
+	var got struct {
+		ETKnown   bool    `json:"et_known"`
+		ETStale   bool    `json:"et_stale"`
+		UpdatedAt *string `json:"updated_at"`
+		Zones     []struct {
+			Percent *int `json:"percent"`
+		} `json:"zones"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.ETKnown || !got.ETStale {
+		t.Fatalf("known %v stale %v body %s", got.ETKnown, got.ETStale, body)
+	}
+	if !strings.Contains(body, `"et_stale":true`) {
+		t.Fatalf("missing et_stale: %s", body)
+	}
+	if got.UpdatedAt == nil {
+		t.Fatal("updated_at nil")
+	}
+	at, err := time.Parse(time.RFC3339, *got.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !at.Equal(fetched) || at.Equal(now) {
+		t.Fatalf("updated %s fetched %s now %s", at, fetched, now)
+	}
+	if len(got.Zones) == 0 || got.Zones[0].Percent == nil {
+		t.Fatalf("percent cleared while et_known: %s", body)
+	}
+}
+
 func TestUISoilStrings(t *testing.T) {
 	s := newTestServer(t)
 	rr := doJSON(t, s, http.MethodGet, "/", nil)
@@ -425,10 +490,29 @@ func TestUISoilStrings(t *testing.T) {
 		"rain-strip",
 		"total_72h_inches",
 		"Math.min(100",
+		"et_stale",
+		"ET data is stale",
+		"function stampPhrase(d)",
+		`Updated " + stampPhrase(new Date(stamp))`,
+		`stampPhrase(new Date(d.et.since))`,
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)
 		}
+	}
+	tile := jsFunc(t, body, "soilTilePercent", "tileSoilHTML")
+	if !strings.Contains(tile, "et_stale") {
+		t.Fatalf("tile-bar gate does not reference et_stale: %s", tile)
+	}
+	dlg := jsFunc(t, body, "soilDialogText", "paintSoil")
+	if !strings.Contains(dlg, "et_stale") || !strings.Contains(dlg, "ET data is stale") {
+		t.Fatalf("dialog does not gate percent on et_stale: %s", dlg)
+	}
+	if !strings.Contains(dlg, `Updated " + stampPhrase(new Date(stamp))`) {
+		t.Fatalf("Updated stamp does not use stampPhrase: %s", dlg)
+	}
+	if strings.Contains(dlg, "clockPhrase") {
+		t.Fatalf("dialog still uses time-only clockPhrase: %s", dlg)
 	}
 	for _, gone := range []string{
 		"Soil water",
@@ -445,4 +529,18 @@ func TestUISoilStrings(t *testing.T) {
 			t.Fatalf("ui leaked %q", leak)
 		}
 	}
+}
+
+func jsFunc(t *testing.T, body, name, next string) string {
+	t.Helper()
+	start := strings.Index(body, "function "+name)
+	if start < 0 {
+		t.Fatalf("missing function %s", name)
+	}
+	rest := body[start:]
+	end := strings.Index(rest, "function "+next)
+	if end < 0 {
+		t.Fatalf("missing function %s after %s", next, name)
+	}
+	return rest[:end]
 }

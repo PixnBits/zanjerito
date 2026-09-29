@@ -20,6 +20,7 @@ const (
 	badRate        = "rate"
 	badEmpty       = "empty"
 	badOther       = "other"
+	etStaleAfter   = 48 * time.Hour
 )
 
 // Status is the public ET-feed health. It never includes an AZMET station id or URL.
@@ -48,6 +49,7 @@ type View struct {
 	Reason      string     `json:"reason,omitempty"`
 	ConfigError string     `json:"config_error,omitempty"`
 	ETKnown     bool       `json:"et_known"`
+	ETStale     bool       `json:"et_stale"`
 	ETReason    string     `json:"et_reason,omitempty"`
 	UpdatedAt   *string    `json:"updated_at"`
 	WindowDays  int        `json:"window_days,omitempty"`
@@ -487,6 +489,7 @@ func (p *Poller) View(stations []engine.StationConfig, hist []history.Entry, rai
 	cfg = cfg.normalized()
 	dates := windowDates(now, loc, cfg.WindowDays)
 	etKnown := st.LastOK != nil && etDayInWindow(days, dates)
+	etStale := st.LastOK != nil && now.Sub(*st.LastOK) > etStaleAfter
 	zones := Estimate(cfg, stations, days, rainByDate, rainKnown, hist, now, loc)
 	if zones == nil {
 		zones = []ZoneView{}
@@ -500,6 +503,7 @@ func (p *Poller) View(stations []engine.StationConfig, hist []history.Entry, rai
 	return View{
 		Enabled:    true,
 		ETKnown:    etKnown,
+		ETStale:    etStale,
 		ETReason:   etReason(tried, st, etKnown),
 		UpdatedAt:  rfc3339Ptr(st.LastOK, loc),
 		WindowDays: cfg.WindowDays,
