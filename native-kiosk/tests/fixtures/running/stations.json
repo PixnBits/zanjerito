@@ -1,0 +1,25 @@
+{
+ "stations": [
+  {
+   "color": "red",
+   "id": "az01",
+   "title": "Test Station 1"
+  },
+  {
+   "color": "yellow",
+   "id": "az02",
+   "title": "Test Station 2"
+  },
+  {
+   "color": "blue",
+   "id": "az03",
+   "rain_pause_exempt": true,
+   "title": "Test Station 3"
+  },
+  {
+   "color": "green",
+   "id": "az04",
+   "title": "Test Station 4"
+  }
+ ]
+}

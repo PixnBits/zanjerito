@@ -1,0 +1,29 @@
+{
+ "current_station": "",
+ "last_error": "",
+ "last_rain_at": null,
+ "lockout": false,
+ "now": "2026-09-29T06:52:00-06:00",
+ "pause_source": "auto",
+ "paused": true,
+ "paused_label": "Paused until 2026-09-30T06:00:00-06:00",
+ "paused_until": "2026-09-30T06:00:00-06:00",
+ "phase": "Idle",
+ "rain": {
+  "enabled": true,
+  "last_ok_at": "2026-09-29T06:52:00-06:00",
+  "last_total_inches": 0.24,
+  "total_24h_inches": 0.24,
+  "total_72h_inches": 0.24,
+  "unavailable": false
+ },
+ "rain_inches": 0.24,
+ "rain_strip": {
+  "hours": 72,
+  "inches": 0.24,
+  "show": false
+ },
+ "reason": "rain",
+ "stations_on": null,
+ "timezone": "UTC"
+}
