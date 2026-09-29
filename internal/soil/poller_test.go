@@ -509,6 +509,39 @@ func TestViewUpdatedAtStaysLastOKAfterFailedRetry(t *testing.T) {
 	}
 }
 
+func TestViewETStaleUsesNow(t *testing.T) {
+	loc, err := time.LoadLocation("America/Phoenix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	okAt := time.Date(2026, 9, 25, 8, 0, 0, 0, loc)
+	p := &Poller{
+		Cfg: Config{Enabled: true, WindowDays: 14, CropFactor: 0.6, Capacity: 1, MaxDailyET: 0.6},
+		Now: func() time.Time { return okAt },
+		Loc: loc,
+	}
+	p.SeedCacheForTest([]DayET{{Date: "2026-09-25", ETInches: 0.2}}, okAt)
+	stations := []engine.StationConfig{{ID: "front-north", Title: "Front North"}}
+
+	fresh := p.View(stations, nil, nil, false, okAt.Add(47*time.Hour), loc)
+	if fresh.ETStale {
+		t.Fatal("47h must not be stale")
+	}
+	edge := p.View(stations, nil, nil, false, okAt.Add(48*time.Hour), loc)
+	if edge.ETStale {
+		t.Fatal("exactly 48h is not older than 48h")
+	}
+	stale := p.View(stations, nil, nil, false, okAt.Add(48*time.Hour+time.Second), loc)
+	if !stale.ETStale {
+		t.Fatal("want et_stale")
+	}
+
+	empty := DisabledView("no soil.local.json", okAt.Add(72*time.Hour), loc)
+	if empty.ETStale {
+		t.Fatal("disabled view must not be stale")
+	}
+}
+
 func TestViewETOutsideWindowIsUnknown(t *testing.T) {
 	loc, err := time.LoadLocation("America/Phoenix")
 	if err != nil {

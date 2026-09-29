@@ -95,11 +95,11 @@ The model is a capped daily bucket. For each zone and each local day `d` in a ro
 balance(d) = max(0, min(capacity, balance(d-1) + rain(d) + watering(d) - ETo(d) * crop_factor))
 ```
 
-`balance` before the first modelled day is **capacity** (the spin-up assumption: the soil is treated as full `window_days` ago). Until that window has filled with real rain, ET, and watering, the number is a starting guess, not a measurement. Home does not show that guess as a percent until ET for the window is known.
+`balance` before the first modelled day is **capacity** (the spin-up assumption: the soil is treated as full at the start of the oldest modelled day). Until that window has filled with real rain, ET, and watering, the number is a starting guess, not a measurement. Home does not show that guess as a percent until ET for the window is known.
 
 - **ETo** is daily reference ET from AZMET (`eto_azmet` millimetres ÷ 25.4; `eto_azmet_in` if millimetres are missing). Today's row is often unpublished; the last earlier good day is carried forward. A day with no earlier ET is treated as 0 ET and marked unknown. A daily ETo below 0 or above `max_daily_et_inches` rejects that fetch; the previous good cache is kept. Until a fetch has succeeded and at least one ET day falls in the window, `percent` and `balance_inches` are null.
 - **Rain** reuses the last good FCDMC gauge fetch (no second gauge request). If rain pause is off or has no good data, rain is 0 and marked unknown.
-- **Watering** sums `completed` and `stopped` history `ActualSec` for that station on the local `StartedAt` date: `ActualSec / 3600 * inches_per_hour`. `skipped`, `refused`, and `error` do not add water. If `inches_per_hour` is null, watering is omitted. The station dialog then shows that zone's rain and crop-ET totals for the modelled window (for example "Rain 0.40 in · ET 1.68 in, last 14 days", using `window_days`) and "Measure sprinkler output to enable".
+- **Watering** sums `completed` and `stopped` history `ActualSec` for that station on the local `StartedAt` date: `ActualSec / 3600 * inches_per_hour`. `skipped`, `refused`, and `error` do not add water. If `inches_per_hour` is null, watering is omitted. The station dialog then shows that zone's rain and crop-ET totals for the modelled window (for example "Rain 0.40 in · ET (plant-adjusted) 1.68 in, last 14 days", using `window_days`) and "Measure sprinkler output to enable".
 
 Copy `config/soil.local.example.json` to `soil.local.json` in the same directory as your config file. Set `azmet_station` to your AZMET id (the example uses `azXX`). Do not commit `soil.local.json`. `ZANJERITO_SOIL_CONFIG` overrides that path. If the file is missing, or `enabled` is false, the estimate is off: no polling, `GET /api/soil` returns `enabled: false` with reason `no soil.local.json` and no `config_error`, and Home shows nothing for soil. If the file is invalid (malformed or empty JSON, wrong types, missing station, bad URL), the error is logged, polling stays off, and `GET /api/soil` returns `enabled: false`, reason `soil.local.json invalid`, and `config_error` with a short parse message. That message does not include the station id, the URL, or a filesystem path. The station dialog shows "Soil settings file has an error (see log)", and Home shows one muted line: "Soil estimate off: settings file has an error (see log)".
 
@@ -109,7 +109,7 @@ Defaults (also the example file):
 |---|---|---|
 | `crop_factor` | 0.6 | Crop coefficient. Generic starting point; adjust per zone. Valid `(0, 1.5]`. |
 | `capacity_inches` | 1.0 | Bucket size in inches. Generic starting point; adjust per zone. Valid `(0, 12]`. |
-| `window_days` | 14 | Days modelled. Fetch asks for `window_days+1` days starting `today - window_days`. |
+| `window_days` | 14 | Local days modelled, ending today (oldest = today − `window_days` + 1). Fetch asks for `window_days+1` days starting `today - window_days` so one extra day is available for spin-up. |
 | `max_daily_et_inches` | 0.6 | Daily ETo above this (or below 0) is implausible. |
 | `poll_hours` | 6 | How often to fetch. Set `poll_seconds` to override in tests. |
 | `timeout_seconds` | 15 | HTTP client timeout. |
@@ -119,7 +119,7 @@ Defaults (also the example file):
 
 `et_known` is true only when `et.last_ok_at` is set and at least one ET day in the window is known. Otherwise it is false. `et_reason` is `waiting for first ET fetch` while that first attempt has not finished, and `no ET data yet` after a failed or empty fetch (optionally with a short class such as AZMET unavailable). While `et_known` is false, each zone's `percent` and `balance_inches` are JSON null. Per-zone rain and ET inputs are still present, and the station dialog may still show rain totals. The dialog says "No ET data yet" and does not show a percent, plus "ET unavailable since …" when the feed is down. When ET is known, the zone's rate is measured, and `percent` is set, that station's Home tile shows a thin bar ("Soil about 62%"). Otherwise the tile has no bar. `et_stale` is true when the last successful ET fetch is more than 48 hours old; tiles hide the soil bars when it is, and the dialog says "ET data is stale" instead of a percent. The dialog keeps a "Soil estimate: …" line, including the zone's rain and ET over the window when those inputs exist. "Updated …" stays on that dialog line. A missing settings file shows nothing on Home or in the dialog. `updated_at` is the last successful ET fetch, the same instant as `et.last_ok_at`, or null if there has never been one. It is not the current time and not the time of a failed attempt.
 
-`window_days` is the configured window. Each zone has `rain_total_inches` and `et_total_inches`: rain and crop ET summed over the days the model actually runs (the previous `window_days` plus today).
+`window_days` is the configured window. Each zone has `rain_total_inches` and `et_total_inches`: rain and crop ET summed over the modelled local days (exactly `window_days` dates ending today).
 
 ### Tuna-can test (application rate)
 

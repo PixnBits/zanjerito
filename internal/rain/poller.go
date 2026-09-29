@@ -18,6 +18,7 @@ type Status struct {
 	Unavailable bool
 	LastError   string
 	LastOK      *time.Time
+	Since       *time.Time
 	LastTotal   float64
 	HaveTotal   bool
 }
@@ -30,11 +31,18 @@ const (
 	badOther       = "other"
 )
 
+// negRowKey is one negative increment the poller has already logged.
+// unix is the sample instant; cents is the increment in hundredths.
+type negRowKey struct {
+	unix  int64
+	cents int64
+}
+
 // Poller fetches on an interval and applies Decide to the engine.
 // It does not call engine.Stop. A cancelled ctx ends Loop.
 //
-// mu guards engine edits, status, and the snapshot version. Disk writes take
-// writeMu only, after mu is released, so Status never waits on fsync.
+// mu guards engine edits, status, negLogged, and the snapshot version. Disk
+// writes take writeMu only, after mu is released, so Status never waits on fsync.
 // Do's callback must not call Poll, Do, ManualPause, or ManualClear.
 type Poller struct {
 	Source Source
@@ -53,10 +61,14 @@ type Poller struct {
 	badCat string
 	seq    uint64 // bumped under mu for each snapshot
 
-	// lastGood is the newest fetch that Decide treated as usable
-	// (not empty, stale, or implausible). DailyRain copies it.
+	// lastGood is the newest fetch Decide treated as usable (not unavailable).
+	// DailyRain copies it and skips negative increments.
 	lastGood []Sample
 	haveGood bool
+
+	// negLogged remembers in-window negative rows already logged so each row
+	// is reported once. Entries outside the trigger window are pruned.
+	negLogged map[negRowKey]struct{}
 
 	// writeMu serializes pause.json writes. Status never takes it.
 	writeMu sync.Mutex
@@ -153,7 +165,7 @@ func (p *Poller) TotalSince(d time.Duration, now time.Time) (float64, bool) {
 
 // DailyRain sums last-good incremental samples by local calendar date.
 // ok is false when the poller is nil or no usable fetch has been cached.
-// The map is a copy. Negatives count as 0. loc nil uses America/Phoenix.
+// The map is a copy. Negative increments are skipped. loc nil uses America/Phoenix.
 func (p *Poller) DailyRain(loc *time.Location) (map[string]float64, bool) {
 	if p == nil {
 		return nil, false
@@ -172,12 +184,11 @@ func (p *Poller) DailyRain(loc *time.Location) (map[string]float64, bool) {
 	}
 	out := make(map[string]float64, len(p.lastGood))
 	for _, s := range p.lastGood {
-		day := s.Time.In(loc).Format("2006-01-02")
-		inches := s.Inches
-		if inches < 0 {
-			inches = 0
+		if s.Inches < 0 {
+			continue
 		}
-		out[day] += inches
+		day := s.Time.In(loc).Format("2006-01-02")
+		out[day] += s.Inches
 	}
 	return out, true
 }
@@ -195,6 +206,10 @@ func (p *Poller) Status() Status {
 	if s.LastOK != nil {
 		t := *s.LastOK
 		s.LastOK = &t
+	}
+	if s.Since != nil {
+		t := *s.Since
+		s.Since = &t
 	}
 	return s
 }
@@ -246,8 +261,8 @@ func (p *Poller) SyncExpiredPause(now time.Time) {
 	_ = store.SavePause(p.Path, ps.WithoutActive())
 }
 
-// Poll fetches once and applies the decision. Fetch errors and stale or
-// implausible samples do not pause or clear. A cancelled ctx does not mark
+// Poll fetches once and applies the decision. Fetch errors and unavailable
+// samples do not pause, extend, or clear. A cancelled ctx does not mark
 // the feed unavailable. pause.json is written after mu is released.
 func (p *Poller) Poll(ctx context.Context) {
 	if p == nil || p.Source == nil || p.Eng == nil {
@@ -275,17 +290,20 @@ func (p *Poller) Poll(ctx context.Context) {
 	now := p.now()
 	if fetchErr != nil {
 		msg := redactErr(fetchErr, p.Cfg.GaugeID)
-		if line := p.observeBad(msg, badFetch); line != "" {
+		if line := p.observeBad(msg, badFetch, now); line != "" {
 			logs = append(logs, line)
 		}
 	} else {
+		logs = p.noteNegativeRows(samples, now)
 		detail := p.Eng.PauseRaw()
 		action := Decide(samples, now, p.Cfg, viewFrom(detail), memoryFrom(detail))
 		if action.Kind != ActionUnavailable {
 			p.lastGood = cloneSamples(samples)
 			p.haveGood = true
 		}
-		ps, ver, doSave, loadFile, logs = p.applyLocked(now, action)
+		var applyLogs []string
+		ps, ver, doSave, loadFile, applyLogs = p.applyLocked(now, action)
+		logs = append(logs, applyLogs...)
 	}
 	path = p.Path
 	save = p.saveFuncLocked()
@@ -344,14 +362,56 @@ func (p *Poller) noteFresh(now time.Time, total float64) {
 	p.st.Unavailable = false
 	p.st.LastError = ""
 	p.st.LastOK = &t
+	p.st.Since = nil
 	p.st.LastTotal = RoundInches(total)
 	p.st.HaveTotal = true
 }
 
+// noteNegativeRows returns one log line the first time each in-window
+// negative row is seen. The line has no gauge id, URL, or host. Rows outside
+// the trigger window are not logged. Keys outside the window are dropped.
+func (p *Poller) noteNegativeRows(samples []Sample, now time.Time) []string {
+	cfg := p.Cfg.normalized()
+	p.pruneNegLogged(now, cfg)
+	var lines []string
+	for _, s := range samples {
+		if s.Inches >= 0 || !inWindow(s, now, cfg) {
+			continue
+		}
+		if p.negLogged == nil {
+			p.negLogged = make(map[negRowKey]struct{})
+		}
+		key := negRowKey{unix: s.Time.UnixNano(), cents: hundredths(s.Inches)}
+		if _, seen := p.negLogged[key]; seen {
+			continue
+		}
+		p.negLogged[key] = struct{}{}
+		lines = append(lines, fmt.Sprintf(
+			"rain: ignoring feed: negative increment at %s (%.2f in)",
+			s.Time.Format("15:04"), s.Inches,
+		))
+	}
+	return lines
+}
+
+// pruneNegLogged drops remembered rows that are no longer inside the window.
+func (p *Poller) pruneNegLogged(now time.Time, cfg Config) {
+	for k := range p.negLogged {
+		t := time.Unix(0, k.unix).UTC()
+		if !inWindow(Sample{Time: t}, now, cfg) {
+			delete(p.negLogged, k)
+		}
+	}
+}
+
 // observeBad records unavailable. It returns a log line only when the feed
 // enters unavailable, or the reason category changes.
-func (p *Poller) observeBad(msg, cat string) string {
+func (p *Poller) observeBad(msg, cat string, now time.Time) string {
 	changed := !p.st.Unavailable || p.badCat != cat
+	if !p.st.Unavailable {
+		t := now.UTC()
+		p.st.Since = &t
+	}
 	p.markBad(msg)
 	p.badCat = cat
 	if !changed {
@@ -381,7 +441,7 @@ func (p *Poller) applyLocked(now time.Time, action Action) (ps store.PauseState,
 		if msg == "" {
 			msg = "rain data unavailable"
 		}
-		if line := p.observeBad(msg, badCategory(msg)); line != "" {
+		if line := p.observeBad(msg, badCategory(msg), now); line != "" {
 			logs = append(logs, line)
 		}
 		return

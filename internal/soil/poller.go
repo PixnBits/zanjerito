@@ -20,7 +20,8 @@ const (
 	badRate        = "rate"
 	badEmpty       = "empty"
 	badOther       = "other"
-	etStaleAfter   = 48 * time.Hour
+
+	etStaleAfter = 48 * time.Hour
 )
 
 // Status is the public ET-feed health. It never includes an AZMET station id or URL.

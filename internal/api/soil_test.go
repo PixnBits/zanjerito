@@ -179,14 +179,14 @@ func TestSoilAPIEnabledMeasuredAndNullRate(t *testing.T) {
 	if north.Percent == nil || north.BalanceInches == nil || *north.Percent < 0 || *north.Percent > 100 {
 		t.Fatalf("percent %v balance %v", north.Percent, north.BalanceInches)
 	}
-	// Window is the previous day plus today. Crop ET is 0.20 * 0.6 each day. Rain is 0.10 today.
-	if north.RainTotalInches != 0.10 || north.ETTotalInches != 0.24 {
+	// window_days is 1: only today. Crop ET is 0.20 * 0.6. Rain is 0.10 today.
+	if north.RainTotalInches != 0.10 || north.ETTotalInches != 0.12 {
 		t.Fatalf("north totals rain %v et %v", north.RainTotalInches, north.ETTotalInches)
 	}
 	if south.RateMeasured || south.Inputs.WateringInches != nil {
 		t.Fatalf("south must be null rate %+v", south)
 	}
-	if south.RainTotalInches != 0.10 || south.ETTotalInches != 0.24 {
+	if south.RainTotalInches != 0.10 || south.ETTotalInches != 0.12 {
 		t.Fatalf("south totals rain %v et %v", south.RainTotalInches, south.ETTotalInches)
 	}
 }
@@ -370,6 +370,9 @@ func TestSoilAPIETUnknownThenKnown(t *testing.T) {
 	if known.UpdatedAt == nil {
 		t.Fatal("updated_at nil")
 	}
+	if strings.Contains(body, `"et_stale":true`) {
+		t.Fatalf("fresh fetch marked stale %s", body)
+	}
 	got, err := time.Parse(time.RFC3339, *known.UpdatedAt)
 	if err != nil {
 		t.Fatal(err)
@@ -464,6 +467,36 @@ func TestSoilAPIETStaleWhenFetchFails(t *testing.T) {
 	}
 }
 
+func TestSoilAPIETStale(t *testing.T) {
+	s := newTestServer(t)
+	loc := phoenixLoc(t)
+	okAt := time.Date(2026, 9, 25, 8, 0, 0, 0, loc)
+	clock := okAt
+	p := &soil.Poller{
+		Cfg: soil.Config{Enabled: true, Station: "azXX", WindowDays: 14, CropFactor: 0.6, Capacity: 1, MaxDailyET: 0.6},
+		Now: func() time.Time { return clock },
+		Loc: loc,
+	}
+	p.SeedCacheForTest([]soil.DayET{{Date: "2026-09-25", ETInches: 0.2}}, okAt)
+	s.Soil = p
+
+	clock = okAt.Add(47 * time.Hour)
+	rr := doJSON(t, s, http.MethodGet, "/api/soil", nil)
+	if !strings.Contains(rr.Body.String(), `"et_stale":false`) {
+		t.Fatalf("47h %s", rr.Body.String())
+	}
+
+	clock = okAt.Add(48*time.Hour + time.Second)
+	rr = doJSON(t, s, http.MethodGet, "/api/soil", nil)
+	body := rr.Body.String()
+	if !strings.Contains(body, `"et_stale":true`) {
+		t.Fatalf("stale %s", body)
+	}
+	if strings.Contains(body, "azXX") {
+		t.Fatalf("leak %s", body)
+	}
+}
+
 func TestUISoilStrings(t *testing.T) {
 	s := newTestServer(t)
 	rr := doJSON(t, s, http.MethodGet, "/", nil)
@@ -495,6 +528,8 @@ func TestUISoilStrings(t *testing.T) {
 		"function stampPhrase(d)",
 		`Updated " + stampPhrase(new Date(stamp))`,
 		`stampPhrase(new Date(d.et.since))`,
+		"ET (plant-adjusted)",
+		"stampPhrase",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)

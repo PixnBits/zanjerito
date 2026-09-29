@@ -2,12 +2,19 @@ package rain
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/PixnBits/zanjerito/internal/engine"
+	"github.com/PixnBits/zanjerito/internal/gpio"
 )
 
 func TestLoadMissingDisabled(t *testing.T) {
@@ -202,6 +209,97 @@ func TestLoadPlausibilityAndDryDayCap(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("normalized logged %q", buf.String())
+	}
+}
+
+func TestPublicConfigErrorMissingVsInvalid(t *testing.T) {
+	t.Setenv(envConfig, "")
+	cfg, err := Load(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil || cfg.Enabled {
+		t.Fatalf("missing %+v %v", cfg, err)
+	}
+	if msg := PublicConfigError(err); msg != "" {
+		t.Fatalf("missing config_error %q", msg)
+	}
+
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "malformed", body: `{`, want: "unexpected end of JSON input"},
+		{name: "gauge type", body: `{"gauge_id":123}`, want: "gauge_id: must be a string"},
+		{name: "url type", body: `{"gauge_id":"00000","url":true}`, want: "url: must be a string"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := t.TempDir()
+			path := filepath.Join(d, "rain.local.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(envConfig, path)
+			_, err := Load(filepath.Join(d, "config.json"))
+			if err == nil {
+				t.Fatal("want error")
+			}
+			msg := PublicConfigError(err)
+			if msg != tc.want {
+				t.Fatalf("config_error %q want %q (err %v)", msg, tc.want, err)
+			}
+			if strings.Contains(msg, "/") || strings.Contains(msg, "00000") {
+				t.Fatalf("config_error %q", msg)
+			}
+		})
+	}
+
+	pathErr := fmt.Errorf("rain: config: open /tmp/zanjerito/rain.local.json: permission denied")
+	if msg := PublicConfigError(pathErr); msg != "rain.local.json invalid" || strings.Contains(msg, "/") || strings.Contains(msg, "tmp") {
+		t.Fatalf("path msg %q", msg)
+	}
+}
+
+func TestStartMissingDisabledAndInvalid(t *testing.T) {
+	t.Setenv(envConfig, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	al := true
+	cfg := engine.Config{
+		Chip: "gpiochip0", ActiveLow: &al, Timezone: "America/Phoenix", MaxOnSec: 900,
+		Power:    engine.StationConfig{ID: "psu", BCM: 21},
+		Stations: []engine.StationConfig{{ID: "front-north", Title: "Front North", BCM: 6}},
+	}
+	eng, err := engine.New(cfg, gpio.NewFake())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+
+	p, err := Start(ctx, eng, filepath.Join(t.TempDir(), "config.json"))
+	if p != nil || err != nil {
+		t.Fatalf("missing p=%v err=%v", p, err)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rain.local.json"), []byte(`{"enabled":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err = Start(ctx, eng, filepath.Join(dir, "config.json"))
+	if p != nil || err != nil {
+		t.Fatalf("disabled p=%v err=%v", p, err)
+	}
+
+	bad := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bad, "rain.local.json"), []byte(`{`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err = Start(ctx, eng, filepath.Join(bad, "config.json"))
+	if p != nil || err == nil || errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("invalid p=%v err=%v", p, err)
+	}
+	msg := PublicConfigError(err)
+	if msg == "" || strings.Contains(msg, "/") {
+		t.Fatalf("config_error %q", msg)
 	}
 }
 

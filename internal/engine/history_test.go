@@ -148,6 +148,52 @@ func TestLockoutRecordsRefused(t *testing.T) {
 	}
 }
 
+func TestLockoutStopRecordsRefused(t *testing.T) {
+	cfg := testConfig(t)
+	drv := gpio.NewLockout()
+	e, err := New(cfg, drv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	rec := &capture{drv: drv}
+	e.SetRecorder(rec)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- e.RunItinerary(context.Background(), []Step{{StationID: "front-west", Duration: 3 * time.Second}})
+	}()
+	waitNotIdle(t, e)
+	if err := e.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errCh; !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
+	}
+	got := rec.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("got %d records", len(got))
+	}
+	g := got[0]
+	if g.Outcome != OutcomeRefused || g.Error != "lockout driver: relays not energized" {
+		t.Fatalf("outcome=%s err=%q", g.Outcome, g.Error)
+	}
+	if len(g.Stations) != 1 || g.Stations[0].ActualSec != 0 {
+		t.Fatalf("stations %+v", g.Stations)
+	}
+	if e.Status().Phase != PhaseIdle {
+		t.Fatalf("phase %s", e.Status().Phase)
+	}
+	if !rec.allOff {
+		t.Fatal("refused record emitted while a relay was on")
+	}
+	st := gpio.StateForTest(drv)
+	for id, lv := range st {
+		if lv != gpio.Off {
+			t.Fatalf("%s energized under lockout", id)
+		}
+	}
+}
+
 func TestRunProgramTaggedSchedule(t *testing.T) {
 	cfg := testConfig(t)
 	e, err := New(cfg, gpio.NewFake())
