@@ -89,9 +89,9 @@ func main() {
 	go runner.Loop(ctx, time.Second)
 	log.Printf("schedule runner ticking (America/Phoenix, %s)", *configPath)
 
-	rainPoller, err := rain.Start(ctx, eng, *configPath)
-	if err != nil {
-		log.Printf("rain: disabled: %v", err)
+	rainPoller, rainErr := rain.Start(ctx, eng, *configPath)
+	if rainErr != nil {
+		log.Printf("rain: disabled: %v", rainErr)
 	}
 
 	loc, locErr := time.LoadLocation(cfg.Timezone)
@@ -109,7 +109,7 @@ func main() {
 	if *listen != "" {
 		srv := api.New(eng, *configPath)
 		srv.History = hist
-		srv.Rain = rainPoller
+		srv.NoteRain(rainPoller, rainErr)
 		srv.NoteSoil(soilPoller, err)
 		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
 		go func() {

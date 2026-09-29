@@ -2,11 +2,14 @@ package rain
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -81,6 +84,110 @@ func Load(configPath string) (Config, error) {
 		return Config{}, fmt.Errorf("rain: config: %w", err)
 	}
 	return parseConfig(b)
+}
+
+// PublicConfigError is the short config_error string for a Load or Start error.
+// A missing file and a nil error yield "". The text has no gauge id, URL, or path.
+func PublicConfigError(err error) string {
+	if err == nil || errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return SanitizeConfigMessage(syn.Error())
+	}
+	var ute *json.UnmarshalTypeError
+	if errors.As(err, &ute) {
+		return SanitizeConfigMessage(jsonTypeMessage(ute))
+	}
+	msg := err.Error()
+	msg = strings.TrimPrefix(msg, "rain: config: ")
+	return SanitizeConfigMessage(msg)
+}
+
+// SanitizeConfigMessage drops filesystem paths from a config error.
+// A path collapses to "rain.local.json invalid" so the API cannot echo it.
+func SanitizeConfigMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return ""
+	}
+	if strings.Contains(msg, "/") || strings.Contains(msg, `\`) {
+		return "rain.local.json invalid"
+	}
+	return msg
+}
+
+func jsonTypeMessage(e *json.UnmarshalTypeError) string {
+	if e == nil {
+		return "invalid JSON type"
+	}
+	field := knownConfigField(e.Field)
+	if field == "" {
+		return "invalid JSON type"
+	}
+	want := jsonWant(e.Type)
+	switch want {
+	case "array", "object":
+		return field + ": must be an " + want
+	default:
+		return field + ": must be a " + want
+	}
+}
+
+func knownConfigField(field string) string {
+	known := []string{
+		"max_increment_inches",
+		"max_window_inches",
+		"timeout_seconds",
+		"trigger_inches",
+		"heavy_dry_days",
+		"poll_seconds",
+		"poll_minutes",
+		"window_hours",
+		"heavy_inches",
+		"stale_hours",
+		"gauge_id",
+		"dry_days",
+		"enabled",
+		"method",
+		"body",
+		"url",
+	}
+	best := ""
+	for _, name := range known {
+		if field == name || strings.HasSuffix(field, "."+name) {
+			if len(name) > len(best) {
+				best = name
+			}
+		}
+	}
+	return best
+}
+
+func jsonWant(t reflect.Type) string {
+	if t == nil {
+		return "value"
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "bool"
+	case reflect.Float32, reflect.Float64,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "number"
+	case reflect.Slice, reflect.Array:
+		return "array"
+	case reflect.Map, reflect.Struct:
+		return "object"
+	default:
+		return "value"
+	}
 }
 
 func parseConfig(b []byte) (Config, error) {

@@ -237,6 +237,50 @@ func TestPollerBadDataChangesNothing(t *testing.T) {
 	}
 }
 
+func TestPollerNegativeIncrementUnavailable(t *testing.T) {
+	p, fake, clk, _ := newTestPoller(t)
+	now := clk.Now()
+	rainAt := now.Add(-time.Hour)
+	fake.Set(beat(now, 0.40, rainAt), nil)
+	p.Poll(context.Background())
+	if !p.Eng.PauseRaw().Paused {
+		t.Fatal("expected pause")
+	}
+	good, ok := p.DailyRain(time.UTC)
+	if !ok {
+		t.Fatal("expected last-good rain")
+	}
+
+	fake.Set([]Sample{{Time: rainAt, Inches: -0.2}, {Time: now, Inches: 0}}, nil)
+	p.Poll(context.Background())
+	got := p.Eng.PauseRaw()
+	if !got.Paused {
+		t.Fatal("negative increment must not clear")
+	}
+	st := p.Status()
+	if !st.Unavailable || st.Since == nil {
+		t.Fatalf("status %+v", st)
+	}
+	gotRain, ok := p.DailyRain(time.UTC)
+	if !ok {
+		t.Fatal("last good should remain")
+	}
+	for day, inches := range good {
+		if gotRain[day] != inches {
+			t.Fatalf("cache mutated %v vs %v", gotRain, good)
+		}
+	}
+
+	p.Eng.ClearPause()
+	p.Poll(context.Background())
+	if p.Eng.PauseRaw().Paused {
+		t.Fatal("negative increment must not pause")
+	}
+	if !p.Status().Unavailable {
+		t.Fatal("still unavailable")
+	}
+}
+
 func TestPollerLeavesManualAlone(t *testing.T) {
 	p, fake, clk, _ := newTestPoller(t)
 	now := clk.Now()

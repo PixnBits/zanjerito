@@ -18,6 +18,7 @@ type Status struct {
 	Unavailable bool
 	LastError   string
 	LastOK      *time.Time
+	Since       *time.Time
 	LastTotal   float64
 	HaveTotal   bool
 }
@@ -137,7 +138,7 @@ func (p *Poller) SetSaveFuncForTest(fn func(path string, ps store.PauseState) er
 
 // DailyRain sums last-good incremental samples by local calendar date.
 // ok is false when the poller is nil or no usable fetch has been cached.
-// The map is a copy. Negatives count as 0. loc nil uses America/Phoenix.
+// The map is a copy. Negative increments are skipped. loc nil uses America/Phoenix.
 func (p *Poller) DailyRain(loc *time.Location) (map[string]float64, bool) {
 	if p == nil {
 		return nil, false
@@ -156,12 +157,11 @@ func (p *Poller) DailyRain(loc *time.Location) (map[string]float64, bool) {
 	}
 	out := make(map[string]float64, len(p.lastGood))
 	for _, s := range p.lastGood {
-		day := s.Time.In(loc).Format("2006-01-02")
-		inches := s.Inches
-		if inches < 0 {
-			inches = 0
+		if s.Inches < 0 {
+			continue
 		}
-		out[day] += inches
+		day := s.Time.In(loc).Format("2006-01-02")
+		out[day] += s.Inches
 	}
 	return out, true
 }
@@ -179,6 +179,10 @@ func (p *Poller) Status() Status {
 	if s.LastOK != nil {
 		t := *s.LastOK
 		s.LastOK = &t
+	}
+	if s.Since != nil {
+		t := *s.Since
+		s.Since = &t
 	}
 	return s
 }
@@ -259,7 +263,7 @@ func (p *Poller) Poll(ctx context.Context) {
 	now := p.now()
 	if fetchErr != nil {
 		msg := redactErr(fetchErr, p.Cfg.GaugeID)
-		if line := p.observeBad(msg, badFetch); line != "" {
+		if line := p.observeBad(msg, badFetch, now); line != "" {
 			logs = append(logs, line)
 		}
 	} else {
@@ -328,14 +332,19 @@ func (p *Poller) noteFresh(now time.Time, total float64) {
 	p.st.Unavailable = false
 	p.st.LastError = ""
 	p.st.LastOK = &t
+	p.st.Since = nil
 	p.st.LastTotal = RoundInches(total)
 	p.st.HaveTotal = true
 }
 
 // observeBad records unavailable. It returns a log line only when the feed
 // enters unavailable, or the reason category changes.
-func (p *Poller) observeBad(msg, cat string) string {
+func (p *Poller) observeBad(msg, cat string, now time.Time) string {
 	changed := !p.st.Unavailable || p.badCat != cat
+	if !p.st.Unavailable {
+		t := now.UTC()
+		p.st.Since = &t
+	}
 	p.markBad(msg)
 	p.badCat = cat
 	if !changed {
@@ -365,7 +374,7 @@ func (p *Poller) applyLocked(now time.Time, action Action) (ps store.PauseState,
 		if msg == "" {
 			msg = "rain data unavailable"
 		}
-		if line := p.observeBad(msg, badCategory(msg)); line != "" {
+		if line := p.observeBad(msg, badCategory(msg), now); line != "" {
 			logs = append(logs, line)
 		}
 		return

@@ -12,6 +12,9 @@ const futureSkew = 15 * time.Minute
 // errImplausible is Decide's Error when a reading cannot be trusted.
 const errImplausible = "implausible rain reading"
 
+// errInvalidIncrement is Decide's Error when a sample increment is negative.
+const errInvalidIncrement = "invalid rain increment"
+
 // ActionKind is the poller's next step. Pause covers a new pause and an
 // extension (Until is never earlier than the pause already in effect).
 type ActionKind int
@@ -61,13 +64,16 @@ type Memory struct {
 // A new event's newest positive increment must be after ClearedAt (when set)
 // and after LastEventRain (when set). The sum still counts every in-window
 // increment, including rain from before the clear.
-// Stale, empty, all-future, or implausible input returns ActionUnavailable
-// and must not pause, extend, or clear. Samples more than futureSkew ahead
-// of now are ignored. Staleness uses the newest remaining sample.
+// Stale, empty, all-future, implausible, or negative-increment input returns
+// ActionUnavailable and must not pause, extend, or clear. Samples more than
+// futureSkew ahead of now are ignored. Staleness uses the newest remaining sample.
 func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Memory) Action {
 	cfg = cfg.normalized()
 	if len(samples) == 0 {
 		return Action{Kind: ActionUnavailable, Error: "no samples"}
+	}
+	if hasNegativeIncrement(samples) {
+		return Action{Kind: ActionUnavailable, Error: errInvalidIncrement}
 	}
 	newest, haveNewest := newestUsable(samples, now)
 	if !haveNewest {
@@ -173,6 +179,15 @@ func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Me
 	return base
 }
 
+func hasNegativeIncrement(samples []Sample) bool {
+	for _, s := range samples {
+		if s.Inches < 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // newestUsable is the newest sample that is not more than futureSkew ahead.
 func newestUsable(samples []Sample, now time.Time) (time.Time, bool) {
 	limit := now.Add(futureSkew)
@@ -224,7 +239,7 @@ func hundredths(v float64) int64 {
 	return int64(math.Round(v * 100))
 }
 
-// sumWindow totals increments in (now-window, now+futureSkew]. Negatives count as 0.
+// sumWindow totals increments in (now-window, now+futureSkew].
 // last is the newest positive increment in that window; first is the oldest.
 // Samples more than futureSkew ahead of now are excluded.
 func sumWindow(samples []Sample, now time.Time, cfg Config) (total float64, last, first time.Time, havePos bool) {

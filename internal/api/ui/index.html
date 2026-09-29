@@ -690,10 +690,21 @@
       const el = $("rain-hint");
       if (!el) return;
       const rain = (state.status && state.status.rain) || {};
+      if (rain.config_error) {
+        el.hidden = false;
+        el.classList.remove("hidden");
+        el.textContent = "Rain settings file has an error (see log)";
+        return;
+      }
       const show = !!(rain.enabled && rain.unavailable);
       el.hidden = !show;
       el.classList.toggle("hidden", !show);
-      el.textContent = show ? "Rain data unavailable" : "";
+      if (!show) {
+        el.textContent = "";
+        return;
+      }
+      const since = rain.since ? stampPhrase(new Date(rain.since)) : "";
+      el.textContent = since ? ("Rain data unavailable since " + since) : "Rain data unavailable";
     }
     async function j(url, opt) {
       const r = await fetch(url, opt);
@@ -1029,9 +1040,8 @@
           sub.textContent = s.last_error;
           sub.classList.remove("hidden");
         } else if (isPaused()) {
-          const lab = pauseUntilLabel();
-          sub.textContent = lab;
-          sub.classList.remove("hidden");
+          sub.textContent = ""; // paused: the banner and the Next line already say it
+          sub.classList.add("hidden");
         } else {
           sub.textContent = "Ready";
           sub.classList.remove("hidden");
@@ -1528,6 +1538,15 @@
       const ap = String(map.dayPeriod || "").toLowerCase();
       return ap ? `${map.hour}:${map.minute} ${ap}` : `${map.hour}:${map.minute}`;
     }
+    function stampPhrase(d) {
+      const time = clockPhrase(d);
+      if (!time) return "";
+      const ymd = tzYMD(d);
+      const today = tzYMD(new Date());
+      if (ymd === today) return time;
+      const map = tzParts(d);
+      return `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}, ${time}`.trim();
+    }
     function formatRunMins(sec) {
       sec = Number(sec) || 0;
       if (sec > 0 && sec < 60) return "<1 min";
@@ -1553,7 +1572,7 @@
       const mins = formatRunMins(actual);
       if (entry.outcome === "completed") return `${mins} · finished`;
       if (entry.outcome === "stopped") {
-        if (actual > 0 && actual < 60) return "Stopped after under a minute";
+        if (actual < 60) return "Stopped after under a minute";
         return `Stopped after ${mins}`;
       }
       if (entry.outcome === "refused") return "Refused (lockout mode)";
@@ -1574,8 +1593,9 @@
       const skipped = entry.outcome === "skipped";
       const parts = [];
       for (const s of entry.stations || []) {
-        const name = shortStation(s.station_id) || s.station_id || "Station";
         const sec = skipped ? (Number(s.planned_sec) || 0) : (Number(s.actual_sec) || 0);
+        if (sec <= 0) continue;
+        const name = shortStation(s.station_id) || s.station_id || "Station";
         parts.push(`${name} ${formatRunMins(sec)}${skipped ? " planned" : ""}`);
       }
       return parts.join(" · ");
@@ -1654,7 +1674,7 @@
     function soilWindowLine(z, d, withET) {
       const days = Number(d && d.window_days);
       let s = "Rain " + soilInches(z.rain_total_inches) + " in";
-      if (withET) s += " · ET " + soilInches(z.et_total_inches) + " in";
+      if (withET) s += " · ET (plant-adjusted) " + soilInches(z.et_total_inches) + " in";
       if (Number.isFinite(days) && days > 0) {
         s += ", last " + days + " " + (days === 1 ? "day" : "days");
       }
@@ -1719,7 +1739,7 @@
         notes += `<p class="history-detail">No ET data yet</p>`;
       }
       if (d.et && d.et.unavailable) {
-        const since = d.et.since ? clockPhrase(new Date(d.et.since)) : "";
+        const since = d.et.since ? stampPhrase(new Date(d.et.since)) : "";
         notes += `<p class="history-detail">ET unavailable since ${esc(since)}</p>`;
       }
       if (anyUnmeasured) {
@@ -1727,7 +1747,10 @@
       }
       const stamp = soilUpdatedStamp(d);
       if (stamp) {
-        notes += `<p class="history-detail">Updated ${esc(clockPhrase(new Date(stamp)))}</p>`;
+        notes += `<p class="history-detail">Updated ${esc(stampPhrase(new Date(stamp)))}</p>`;
+      }
+      if (d.et_stale) {
+        notes += `<p class="history-detail">ET data is stale</p>`;
       }
       box.innerHTML = notes;
     }
@@ -1752,7 +1775,7 @@
         return;
       }
       const stamp = soilUpdatedStamp(d);
-      const updated = stamp ? clockPhrase(new Date(stamp)) : "";
+      const updated = stamp ? stampPhrase(new Date(stamp)) : "";
       if (z.rate_measured) {
         const cap = (Number(z.capacity_inches) || 0).toFixed(2);
         const pct = Math.round(Number(z.percent));

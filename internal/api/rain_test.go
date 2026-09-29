@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -149,6 +150,56 @@ func TestStatusRainUnavailable(t *testing.T) {
 	}
 	if rainObj["last_error"] == nil || rainObj["last_error"] == "" {
 		t.Fatalf("last_error %v", rainObj)
+	}
+	since, _ := rainObj["since"].(string)
+	if since == "" {
+		t.Fatalf("since %v", rainObj)
+	}
+}
+
+func TestStatusRainConfigMissingAndInvalid(t *testing.T) {
+	s := newTestServer(t)
+	t.Setenv("ZANJERITO_RAIN_CONFIG", "")
+	p, err := rain.Start(context.Background(), s.Eng, s.Path)
+	if p != nil || err != nil {
+		t.Fatalf("missing p=%v err=%v", p, err)
+	}
+	s.NoteRain(p, err)
+	st := decodeMap(t, doJSON(t, s, http.MethodGet, "/api/status", nil))
+	rainObj, _ := st["rain"].(map[string]any)
+	if rainObj["enabled"] != false {
+		t.Fatalf("missing rain %v", rainObj)
+	}
+	if _, ok := rainObj["config_error"]; ok {
+		t.Fatalf("missing must not have config_error %v", rainObj)
+	}
+
+	bodies := []string{
+		`{`,
+		`{"gauge_id":123}`,
+		`{"gauge_id":"00000","url":true}`,
+	}
+	for _, body := range bodies {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "rain.local.json")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("ZANJERITO_RAIN_CONFIG", path)
+		p, err := rain.Start(context.Background(), s.Eng, s.Path)
+		if p != nil || err == nil {
+			t.Fatalf("body %s p=%v err=%v", body, p, err)
+		}
+		s.NoteRain(p, err)
+		st = decodeMap(t, doJSON(t, s, http.MethodGet, "/api/status", nil))
+		rainObj, _ = st["rain"].(map[string]any)
+		if rainObj["enabled"] != false {
+			t.Fatalf("invalid rain %v", rainObj)
+		}
+		msg, _ := rainObj["config_error"].(string)
+		if msg == "" || strings.Contains(msg, "/") || strings.Contains(msg, "00000") {
+			t.Fatalf("config_error %q body %s rain %v", msg, body, rainObj)
+		}
 	}
 }
 

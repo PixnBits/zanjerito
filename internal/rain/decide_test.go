@@ -153,6 +153,39 @@ func TestDecideStaleAndClear(t *testing.T) {
 	}
 }
 
+func TestDecideNegativeIncrementUnavailable(t *testing.T) {
+	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
+	cfg := testPolicy()
+	last := now.Add(-time.Hour)
+	until := now.Add(48 * time.Hour)
+	auto := PauseView{
+		Active: true, Until: &until, Reason: "rain", Source: "auto",
+		Inches: 0.4, LastRain: &last, EventAt: &last,
+	}
+	neg := []Sample{{Time: last, Inches: -0.1}, {Time: now, Inches: 0}}
+
+	got := Decide(neg, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionUnavailable || got.Error != errInvalidIncrement {
+		t.Fatalf("unpaused %+v", got)
+	}
+	got = Decide(neg, now, cfg, auto, Memory{})
+	if got.Kind != ActionUnavailable || got.Error != errInvalidIncrement {
+		t.Fatalf("must not clear or extend %+v", got)
+	}
+	past := now.Add(-time.Minute)
+	expired := auto
+	expired.Until = &past
+	got = Decide(neg, now, cfg, expired, Memory{})
+	if got.Kind != ActionUnavailable {
+		t.Fatalf("must not clear expired %+v", got)
+	}
+	mixed := []Sample{{Time: last, Inches: 0.5}, {Time: now.Add(-time.Minute), Inches: -0.01}, {Time: now, Inches: 0}}
+	got = Decide(mixed, now, cfg, PauseView{}, Memory{})
+	if got.Kind != ActionUnavailable || got.Error != errInvalidIncrement {
+		t.Fatalf("mixed %+v", got)
+	}
+}
+
 func TestDecideEmpty(t *testing.T) {
 	got := Decide(nil, time.Now(), testPolicy(), PauseView{}, Memory{})
 	if got.Kind != ActionUnavailable {
