@@ -1,0 +1,29 @@
+{
+ "current_station": "",
+ "last_error": "",
+ "last_rain_at": null,
+ "lockout": false,
+ "now": "2026-09-29T09:00:00-07:00",
+ "pause_source": "manual",
+ "paused": true,
+ "paused_label": "Paused until Fri",
+ "paused_until": "2026-10-02T00:00:00-07:00",
+ "phase": "Idle",
+ "rain": {
+  "enabled": true,
+  "last_ok_at": "2026-09-28T23:56:31-07:00",
+  "last_total_inches": 0.24,
+  "total_24h_inches": 0.24,
+  "total_72h_inches": 0.24,
+  "unavailable": false
+ },
+ "rain_inches": 0,
+ "rain_strip": {
+  "hours": 24,
+  "inches": 0.24,
+  "show": true
+ },
+ "reason": "guests",
+ "stations_on": null,
+ "timezone": "America/Denver"
+}

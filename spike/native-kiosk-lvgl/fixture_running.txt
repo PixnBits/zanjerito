@@ -1,0 +1,10 @@
+phase=StationOn
+paused=0
+rain=0.24
+show=1
+next=Tomorrow 08:23
+on=az02
+st=az01|Test Station 1|red
+st=az02|Test Station 2|blue
+st=az03|Test Station 3|green
+st=az04|Test Station 4|orange

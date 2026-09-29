@@ -1,0 +1,50 @@
+{
+ "schedules": [
+  {
+   "id": "morning",
+   "enabled": true,
+   "note": "Morning cycle",
+   "weekdays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun"
+   ],
+   "start": "08:23",
+   "steps": [
+    {
+     "station_id": "az01",
+     "minutes": 2
+    },
+    {
+     "station_id": "az02",
+     "minutes": 3
+    },
+    {
+     "station_id": "az04",
+     "minutes": 3
+    }
+   ]
+  },
+  {
+   "id": "drip-weekly",
+   "enabled": false,
+   "note": "Weekly drip",
+   "weekdays": [
+    "thu"
+   ],
+   "start": "07:31",
+   "steps": [
+    {
+     "station_id": "az03",
+     "minutes": 5
+    }
+   ],
+   "starts_on": "2026-09-16",
+   "ends_on": "2026-10-29"
+  }
+ ]
+}

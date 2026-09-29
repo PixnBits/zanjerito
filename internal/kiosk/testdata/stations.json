@@ -1,0 +1,24 @@
+{
+ "stations": [
+  {
+   "id": "az01",
+   "title": "Test Station 1",
+   "color": "red"
+  },
+  {
+   "id": "az02",
+   "title": "Test Station 2",
+   "color": "yellow"
+  },
+  {
+   "id": "az03",
+   "title": "Test Station 3",
+   "color": "blue"
+  },
+  {
+   "id": "az04",
+   "title": "Test Station 4",
+   "color": "green"
+  }
+ ]
+}
