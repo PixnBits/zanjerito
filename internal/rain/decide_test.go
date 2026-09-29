@@ -186,6 +186,68 @@ func TestDecideNegativeIncrementUnavailable(t *testing.T) {
 	}
 }
 
+func TestDecideNegativeIncrementOnlyInsideWindow(t *testing.T) {
+	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
+	cfg := testPolicy()
+	rainAt := now.Add(-35 * time.Minute)
+	pos := Sample{Time: rainAt, Inches: 0.30}
+	beat := Sample{Time: now, Inches: 0}
+
+	aged := Decide([]Sample{
+		{Time: now.Add(-25 * time.Hour), Inches: -0.50},
+		pos, beat,
+	}, now, cfg, PauseView{}, Memory{})
+	if aged.Kind != ActionPause || aged.Inches < 0.30-1e-9 || aged.Inches > 0.30+1e-9 || aged.Total < 0.30-1e-9 || aged.Total > 0.30+1e-9 {
+		t.Fatalf("aged out negative must not block or subtract, %+v", aged)
+	}
+
+	// Exactly the window start is outside, same bound as sumWindow.
+	edge := Decide([]Sample{
+		{Time: now.Add(-24 * time.Hour), Inches: -0.50},
+		pos, beat,
+	}, now, cfg, PauseView{}, Memory{})
+	if edge.Kind != ActionPause || edge.Total < 0.30-1e-9 || edge.Total > 0.30+1e-9 {
+		t.Fatalf("window start is outside, %+v", edge)
+	}
+
+	inside := Decide([]Sample{
+		{Time: now.Add(-24*time.Hour + time.Nanosecond), Inches: -0.01},
+		pos, beat,
+	}, now, cfg, PauseView{}, Memory{})
+	if inside.Kind != ActionUnavailable || inside.Error != errInvalidIncrement {
+		t.Fatalf("just inside window %+v", inside)
+	}
+
+	atSkew := Decide([]Sample{
+		{Time: now.Add(futureSkew), Inches: -0.04},
+		pos, beat,
+	}, now, cfg, PauseView{}, Memory{})
+	if atSkew.Kind != ActionUnavailable || atSkew.Error != errInvalidIncrement {
+		t.Fatalf("futureSkew edge %+v", atSkew)
+	}
+
+	beyond := Decide([]Sample{
+		{Time: now.Add(futureSkew + time.Second), Inches: -1},
+		pos, beat,
+	}, now, cfg, PauseView{}, Memory{})
+	if beyond.Kind != ActionPause || beyond.Total < 0.30-1e-9 || beyond.Total > 0.30+1e-9 {
+		t.Fatalf("future negative counted %+v", beyond)
+	}
+}
+
+func TestSumWindowSkipsNegative(t *testing.T) {
+	now := time.Date(2026, 9, 26, 18, 0, 0, 0, time.UTC)
+	total, last, _, have := sumWindow([]Sample{
+		{Time: now.Add(-25 * time.Hour), Inches: -0.50},
+		{Time: now.Add(-time.Hour), Inches: 0.30},
+		{Time: now.Add(-time.Minute), Inches: -0.10},
+		{Time: now, Inches: 0},
+	}, now, testPolicy())
+	if !have || !last.Equal(now.Add(-time.Hour)) || total < 0.30-1e-9 || total > 0.30+1e-9 {
+		t.Fatalf("total %v last %s have %v", total, last, have)
+	}
+}
+
 func TestDecideEmpty(t *testing.T) {
 	got := Decide(nil, time.Now(), testPolicy(), PauseView{}, Memory{})
 	if got.Kind != ActionUnavailable {

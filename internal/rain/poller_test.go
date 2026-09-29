@@ -3,6 +3,7 @@ package rain
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -258,7 +259,7 @@ func TestPollerNegativeIncrementUnavailable(t *testing.T) {
 		t.Fatal("negative increment must not clear")
 	}
 	st := p.Status()
-	if !st.Unavailable || st.Since == nil {
+	if !st.Unavailable || st.Since == nil || st.LastError != "invalid rain increment" {
 		t.Fatalf("status %+v", st)
 	}
 	gotRain, ok := p.DailyRain(time.UTC)
@@ -278,6 +279,240 @@ func TestPollerNegativeIncrementUnavailable(t *testing.T) {
 	}
 	if !p.Status().Unavailable {
 		t.Fatal("still unavailable")
+	}
+}
+
+// fcdmcPrecipPage builds a stub precipitation page. rows are written in the
+// order given; real pages are newest-first. The header uses the test gauge.
+func fcdmcPrecipPage(rows []Sample) string {
+	var b strings.Builder
+	b.WriteString("<HTML><BODY><P><PRE>\n")
+	b.WriteString("00000 Test Gauge\n")
+	b.WriteString("Precipitation Gage\n")
+	b.WriteString("Date       Time      inches Rainfall   inches\n")
+	for _, s := range rows {
+		fmt.Fprintf(&b, "%s   1.20  %6.2f  %6.2f\n", s.Time.Format("01/02/2006 15:04:05"), s.Inches, s.Inches)
+	}
+	b.WriteString("</PRE></P></BODY>\n")
+	return b.String()
+}
+
+// useFCDMCPage serves body through the real HTTP source, which calls ParseFCDMC.
+// It returns the server URL so tests can assert it never reaches the log.
+func useFCDMCPage(t *testing.T, p *Poller, body string) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	p.Cfg.GaugeID = "00000"
+	p.Source = &FCDMC{
+		URL:     srv.URL,
+		Method:  http.MethodPost,
+		Body:    DefaultBody,
+		GaugeID: "00000",
+		Loc:     time.UTC,
+		HTTP:    srv.Client(),
+	}
+	return srv.URL
+}
+
+func parsedNegativePage(now time.Time, negAt time.Time, neg float64, rainAt time.Time, rain float64) string {
+	return fcdmcPrecipPage([]Sample{
+		{Time: now, Inches: 0},
+		{Time: negAt, Inches: neg},
+		{Time: rainAt, Inches: rain},
+	})
+}
+
+func requireNegativeSample(t *testing.T, samples []Sample, at time.Time, inches float64) {
+	t.Helper()
+	for _, s := range samples {
+		if s.Inches == inches && s.Time.Equal(at) {
+			return
+		}
+	}
+	t.Fatalf("parser dropped negative increment %+v", samples)
+}
+
+func TestPollerParsedNegativeIncrementUnavailable(t *testing.T) {
+	p, _, clk, buf := newTestPoller(t)
+	now := clk.Now()
+	negAt := now.Add(-5 * time.Minute)
+	rainAt := now.Add(-35 * time.Minute)
+	page := parsedNegativePage(now, negAt, -0.50, rainAt, 0.30)
+
+	samples, err := ParseFCDMC(strings.NewReader(page), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireNegativeSample(t, samples, negAt, -0.50)
+
+	rawURL := useFCDMCPage(t, p, page)
+	p.Poll(context.Background())
+	if p.Eng.PauseRaw().Paused {
+		t.Fatal("negative increment must not start a pause")
+	}
+	st := p.Status()
+	if !st.Unavailable || st.Since == nil || st.LastError != "invalid rain increment" {
+		t.Fatalf("status %+v", st)
+	}
+	if !st.Since.Equal(now.UTC()) {
+		t.Fatalf("since %v want %v", st.Since, now.UTC())
+	}
+	msg := buf.String() + " " + st.LastError
+	for _, leak := range []string{"00000", "Test Gauge", rawURL, "127.0.0.1", "http"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("leak %q in %q", leak, msg)
+		}
+	}
+}
+
+func TestPollerParsedNegativeKeepsExistingPause(t *testing.T) {
+	p, _, clk, _ := newTestPoller(t)
+	now := clk.Now()
+	until := now.Add(36 * time.Hour)
+	last := now.Add(-2 * time.Hour)
+	p.Eng.SetPauseMeta(&until, "rain", engine.PauseMeta{
+		Source:      engine.PauseSourceAuto,
+		RainInches:  0.40,
+		LastRainAt:  &last,
+		RainEventAt: &last,
+	})
+
+	negAt := now.Add(-5 * time.Minute)
+	rainAt := now.Add(-35 * time.Minute)
+	page := parsedNegativePage(now, negAt, -0.50, rainAt, 0.30)
+	samples, err := ParseFCDMC(strings.NewReader(page), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireNegativeSample(t, samples, negAt, -0.50)
+	useFCDMCPage(t, p, page)
+
+	p.Poll(context.Background())
+	got := p.Eng.PauseRaw()
+	if !got.Paused || got.Source != engine.PauseSourceAuto || got.Reason != "rain" {
+		t.Fatalf("pause changed %+v", got)
+	}
+	if got.Until == nil || !got.Until.Equal(until.UTC()) || got.RainInches != 0.40 {
+		t.Fatalf("extended or cleared %+v", got)
+	}
+	st := p.Status()
+	if !st.Unavailable || st.Since == nil || st.LastError != "invalid rain increment" {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+func TestPollerParsedNegativeAgesOut(t *testing.T) {
+	p, _, clk, _ := newTestPoller(t)
+	now := clk.Now()
+	negAt := now.Add(-25 * time.Hour)
+	rainAt := now.Add(-35 * time.Minute)
+	page := parsedNegativePage(now, negAt, -0.50, rainAt, 0.30)
+
+	samples, err := ParseFCDMC(strings.NewReader(page), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireNegativeSample(t, samples, negAt, -0.50)
+	useFCDMCPage(t, p, page)
+
+	p.Poll(context.Background())
+	got := p.Eng.PauseRaw()
+	if !got.AutoRain() || got.Until == nil || !got.Until.Equal(rainAt.Add(48*time.Hour)) {
+		t.Fatalf("expected a normal pause, %+v", got)
+	}
+	if got.RainInches < 0.30-1e-9 || got.RainInches > 0.30+1e-9 {
+		t.Fatalf("negative subtracted from pause inches %v", got.RainInches)
+	}
+	st := p.Status()
+	if st.Unavailable || st.LastError != "" || !st.HaveTotal || st.LastTotal < 0.30-1e-9 || st.LastTotal > 0.30+1e-9 {
+		t.Fatalf("status %+v", st)
+	}
+	days, ok := p.DailyRain(time.UTC)
+	if !ok {
+		t.Fatal("expected daily totals")
+	}
+	var sum float64
+	for _, inches := range days {
+		if inches < 0 {
+			t.Fatalf("daily total went negative: %v", days)
+		}
+		sum += inches
+	}
+	if sum < 0.30-1e-9 || sum > 0.30+1e-9 {
+		t.Fatalf("daily sum %v days %v", sum, days)
+	}
+}
+
+func TestPollerNegativeIncrementLogsOnce(t *testing.T) {
+	p, _, clk, buf := newTestPoller(t)
+	now := clk.Now()
+	negAt := now.Add(-5 * time.Minute)
+	rainAt := now.Add(-35 * time.Minute)
+	page := parsedNegativePage(now, negAt, -0.50, rainAt, 0.30)
+	if _, err := ParseFCDMC(strings.NewReader(page), time.UTC); err != nil {
+		t.Fatal(err)
+	}
+	rawURL := useFCDMCPage(t, p, page)
+
+	for i := 0; i < 3; i++ {
+		p.Poll(context.Background())
+	}
+	want := fmt.Sprintf("rain: ignoring feed: negative increment at %s (-0.50 in)", negAt.Format("15:04"))
+	if strings.Count(buf.String(), want) != 1 {
+		t.Fatalf("logs:\n%s", buf.String())
+	}
+	if strings.Count(buf.String(), "negative increment") != 1 {
+		t.Fatalf("logs:\n%s", buf.String())
+	}
+	if strings.Count(buf.String(), "invalid rain increment") != 1 {
+		t.Fatalf("category log repeated:\n%s", buf.String())
+	}
+	msg := buf.String()
+	for _, leak := range []string{"00000", "Test Gauge", rawURL, "127.0.0.1", "http"} {
+		if strings.Contains(msg, leak) {
+			t.Fatalf("leak %q in %q", leak, msg)
+		}
+	}
+
+	// A second bad row is logged once; the first row is not repeated.
+	neg2 := now.Add(-8 * time.Minute)
+	page2 := fcdmcPrecipPage([]Sample{
+		{Time: now, Inches: 0},
+		{Time: negAt, Inches: -0.50},
+		{Time: neg2, Inches: -0.25},
+		{Time: rainAt, Inches: 0.30},
+	})
+	rawURL2 := useFCDMCPage(t, p, page2)
+	p.Poll(context.Background())
+	p.Poll(context.Background())
+	want2 := fmt.Sprintf("rain: ignoring feed: negative increment at %s (-0.25 in)", neg2.Format("15:04"))
+	if strings.Count(buf.String(), want) != 1 || strings.Count(buf.String(), want2) != 1 {
+		t.Fatalf("logs:\n%s", buf.String())
+	}
+	if strings.Count(buf.String(), "negative increment") != 2 {
+		t.Fatalf("logs:\n%s", buf.String())
+	}
+	if strings.Count(buf.String(), "invalid rain increment") != 1 {
+		t.Fatalf("category log repeated:\n%s", buf.String())
+	}
+
+	// The remembered key is dropped once the row leaves the window, and the
+	// same old row does not log again.
+	clk.Set(now.Add(25 * time.Hour))
+	p.Poll(context.Background())
+	if len(p.negLogged) != 0 {
+		t.Fatalf("neg log set not pruned: %d", len(p.negLogged))
+	}
+	if strings.Count(buf.String(), "negative increment") != 2 {
+		t.Fatalf("logged again after age-out:\n%s", buf.String())
+	}
+	for _, leak := range []string{"00000", "Test Gauge", rawURL, rawURL2, "127.0.0.1", "http"} {
+		if strings.Contains(buf.String(), leak) {
+			t.Fatalf("leak %q in %q", leak, buf.String())
+		}
 	}
 }
 

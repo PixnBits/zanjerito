@@ -12,7 +12,7 @@ const futureSkew = 15 * time.Minute
 // errImplausible is Decide's Error when a reading cannot be trusted.
 const errImplausible = "implausible rain reading"
 
-// errInvalidIncrement is Decide's Error when a sample increment is negative.
+// errInvalidIncrement is Decide's Error when an in-window increment is negative.
 const errInvalidIncrement = "invalid rain increment"
 
 // ActionKind is the poller's next step. Pause covers a new pause and an
@@ -64,15 +64,17 @@ type Memory struct {
 // A new event's newest positive increment must be after ClearedAt (when set)
 // and after LastEventRain (when set). The sum still counts every in-window
 // increment, including rain from before the clear.
-// Stale, empty, all-future, implausible, or negative-increment input returns
-// ActionUnavailable and must not pause, extend, or clear. Samples more than
-// futureSkew ahead of now are ignored. Staleness uses the newest remaining sample.
+// Stale, empty, all-future, implausible, or in-window negative-increment
+// input returns ActionUnavailable and must not pause, extend, or clear.
+// A negative increment outside the window is ignored and is not subtracted.
+// Samples more than futureSkew ahead of now are ignored. Staleness uses the
+// newest remaining sample.
 func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Memory) Action {
 	cfg = cfg.normalized()
 	if len(samples) == 0 {
 		return Action{Kind: ActionUnavailable, Error: "no samples"}
 	}
-	if hasNegativeIncrement(samples) {
+	if hasNegativeIncrement(samples, now, cfg) {
 		return Action{Kind: ActionUnavailable, Error: errInvalidIncrement}
 	}
 	newest, haveNewest := newestUsable(samples, now)
@@ -179,9 +181,11 @@ func Decide(samples []Sample, now time.Time, cfg Config, pause PauseView, mem Me
 	return base
 }
 
-func hasNegativeIncrement(samples []Sample) bool {
+// hasNegativeIncrement reports whether any sample in (now-window, now+futureSkew]
+// is negative. Older rows and rows further ahead than futureSkew do not count.
+func hasNegativeIncrement(samples []Sample, now time.Time, cfg Config) bool {
 	for _, s := range samples {
-		if s.Inches < 0 {
+		if s.Inches < 0 && inWindow(s, now, cfg) {
 			return true
 		}
 	}
@@ -221,14 +225,10 @@ func implausible(samples []Sample, now time.Time, cfg Config, total float64) boo
 		return true
 	}
 	for _, s := range samples {
-		if !inWindow(s, now, cfg) {
+		if !inWindow(s, now, cfg) || s.Inches < 0 {
 			continue
 		}
-		inches := s.Inches
-		if inches < 0 {
-			inches = 0
-		}
-		if hundredths(inches) > hundredths(cfg.MaxIncrementInches) {
+		if hundredths(s.Inches) > hundredths(cfg.MaxIncrementInches) {
 			return true
 		}
 	}
@@ -239,20 +239,17 @@ func hundredths(v float64) int64 {
 	return int64(math.Round(v * 100))
 }
 
-// sumWindow totals increments in (now-window, now+futureSkew].
-// last is the newest positive increment in that window; first is the oldest.
+// sumWindow totals non-negative increments in (now-window, now+futureSkew].
+// Negative increments are skipped, never subtracted. last is the newest
+// positive increment in that window; first is the oldest.
 // Samples more than futureSkew ahead of now are excluded.
 func sumWindow(samples []Sample, now time.Time, cfg Config) (total float64, last, first time.Time, havePos bool) {
 	for _, s := range samples {
-		if !inWindow(s, now, cfg) {
+		if !inWindow(s, now, cfg) || s.Inches < 0 {
 			continue
 		}
-		inches := s.Inches
-		if inches < 0 {
-			inches = 0
-		}
-		total += inches
-		if inches > 0 {
+		total += s.Inches
+		if s.Inches > 0 {
 			if !havePos || s.Time.After(last) {
 				last = s.Time
 			}
