@@ -51,7 +51,7 @@ HOST_EXT_CFLAGS := $(STD) -w $(OPT) $(INC)
 ARM_APP_CFLAGS := $(ARCH_ARM) $(HOST_APP_CFLAGS)
 ARM_EXT_CFLAGS := $(ARCH_ARM) $(HOST_EXT_CFLAGS)
 
-.PHONY: test clean fetch-lvgl host arm arm-inner check e2e shots
+.PHONY: test clean fetch-lvgl host arm arm-inner check e2e shots deploy-check
 
 test: $(TEST_BINS)
 	$(BUILD)/test_json
@@ -127,7 +127,10 @@ arm:
 
 arm-inner: $(BUILD)/zan-kiosk-arm
 
-check: test e2e
+check: test e2e deploy-check
+
+deploy-check:
+	bash tests/deploy_test.sh
 
 e2e: $(BUILD)/zan-kiosk-host
 	bash tests/e2e.sh

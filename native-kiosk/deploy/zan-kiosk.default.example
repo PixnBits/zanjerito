@@ -1,0 +1,24 @@
+# Copied once to /etc/default/zan-kiosk. Later installs do not overwrite it.
+# zan-kiosk.service loads this file (EnvironmentFile). The kiosk is read-only
+# unless ZAN_ALLOW_WRITES=1. Nick's current panel has writes on; this example
+# leaves them off.
+
+# Controller base URL. Required. --switch refuses this placeholder.
+ZAN_API=http://CONTROLLER_HOST:8080
+
+# Set to 1 to permit STOP, pause, and resume (the three POSTs).
+# ZAN_ALLOW_WRITES=1
+
+# Framebuffer. Default /dev/fb0 (Osoyoo 800x480 on this board).
+# ZAN_FB=/dev/fb0
+
+# evdev device. Omit to let the client autodetect.
+# ZAN_TOUCH=/dev/input/event0
+
+# Fixed backlight, 0-255. The Pi panel is rpi_backlight (max 255).
+# Applied once at start. There is no idle dim. A screen timeout needs
+# client support; this unit cannot do it.
+# BACKLIGHT=255
+
+# Extra client arguments, split on spaces. No embedded spaces.
+# ZAN_EXTRA_ARGS=

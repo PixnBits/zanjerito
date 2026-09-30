@@ -43,7 +43,8 @@ From `native-kiosk/`:
 | `make arm` | Static 32-bit ARM hard-float binary `build/zan-kiosk-arm` via Docker (`debian:bookworm-slim`, `gcc-arm-linux-gnueabihf`, `-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard -static`) |
 | `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`) |
 | `make e2e` | Build the host binary, then `tests/e2e.sh` |
-| `make check` | `test` then `e2e` |
+| `make check` | `test`, then `e2e`, then `deploy-check` |
+| `make deploy-check` | `tests/deploy_test.sh` (unit, installer, wrapper). No LVGL build |
 | `make shots` | Host build, then `zan-kiosk-host --shot-all build/shots --fixtures-root tests/fixtures` |
 
 `make arm` links `-static`. The linker warns that `getaddrinfo` in a statically linked glibc binary still needs the matching NSS shared libraries at runtime. A numeric `--api` host such as `127.0.0.1` is parsed with `inet_pton` and does not use that path. A hostname is resolved with `getaddrinfo`, which has no timeout: a slow resolver stalls that request until the lookup returns. On the kiosk, use an IPv4 literal.
@@ -151,7 +152,51 @@ The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pa
 
 Target board is a Pi 3B (armv7). The display is the legacy 800×480 32 bpp framebuffer: pass `--fb /dev/fb0`. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
 
-On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Nothing here installs a systemd unit or a boot hook.
+On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Boot-persistent install is opt-in; `make` does not enable it. See below.
+
+## Boot-persistent kiosk (full kiosk mode)
+
+`deploy/` can install a systemd unit that starts `/opt/zanjerito/zan-kiosk` on `/dev/fb0` at boot and keeps the desktop off that framebuffer. Copying the files does not enable the unit and does not change the boot target. The procedure, the framebuffer dump, and the rollback commands are in [docs/native-kiosk-boot.md](../docs/native-kiosk-boot.md).
+
+Build the binary with `make -C native-kiosk arm` (daemon already running; do not restart it for this). Then, on the Pi:
+
+```sh
+sudo native-kiosk/deploy/install-kiosk.sh --bin native-kiosk/build/zan-kiosk-arm
+# edit /etc/default/zan-kiosk — set ZAN_API; the placeholder is refused
+sudo native-kiosk/deploy/install-kiosk.sh --switch
+sudo reboot
+# or, without a reboot: sudo native-kiosk/deploy/install-kiosk.sh --switch --now
+```
+
+`--switch` sets the default target to `multi-user.target`, disables `lightdm`, and enables `zan-kiosk`. `--now` also stops `lightdm` and starts the kiosk. The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`.
+
+It does not change the daemon, `config.json`, `zanjerito.env`, cron, or boot `config.txt` / `cmdline.txt`. It does not stop or restart `zanjerito.service`.
+
+There is no `ExecStop=` that sends STOP or all-off. The kiosk is only a client. Valve safety stays in `zanjerito.service` (SIGTERM runs engine all-off, and `max_on` is enforced there). A STOP on every kiosk stop or crash-restart would cancel a scheduled or manual run, and it would depend on the kiosk being able to POST.
+
+Writes stay off unless `ZAN_ALLOW_WRITES=1`. Nick's current panel has writes on. The installed example leaves them off.
+
+`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. Missing files are skipped. `BACKLIGHT` (0–255) is a fixed level written to `rpi_backlight`; there is no idle dim. A screen timeout needs client support.
+
+Kernel printk can still draw on tty1. `sudo dmesg -n 1` is optional and not persistent. Putting the tty in `KD_GRAPHICS` is a future client change.
+
+Check with `systemctl is-active zan-kiosk`, `journalctl -u zan-kiosk`, and confirm `lightdm` is inactive while `zanjerito` is still active.
+
+If the panel is blank after reboot, SSH in and roll back. The daemon keeps running either way.
+
+```sh
+sudo /opt/zanjerito/rollback-desktop.sh
+```
+
+If the script is gone:
+
+```sh
+sudo systemctl disable --now zan-kiosk && sudo systemctl enable lightdm && sudo systemctl set-default graphical.target && sudo systemctl start lightdm
+```
+
+The old transient unit (not this boot unit) is cleared with `sudo systemctl stop zan-kiosk && sudo systemctl start lightdm`.
+
+Rollback restores lightdm and `graphical.target`. Installed files can stay, or be removed with `rm` of `/opt/zanjerito/zan-kiosk`, `zan-kiosk-run.sh`, `rollback-desktop.sh`, `zan-kiosk.bak.*`, `/etc/systemd/system/zan-kiosk.service`, and `/etc/default/zan-kiosk`, then `systemctl daemon-reload`. That list does not include the daemon binary or its config.
 
 ## Known gaps
 
@@ -159,7 +204,8 @@ On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do
 - `getaddrinfo` has no timeout. A hostname in `--api` can stall one request for as long as the resolver takes. Use an IPv4 literal on the kiosk.
 - Next-run and remaining time are computed in the client. The daemon does not send those fields.
 - Hold to edit is not implemented (toast only).
-- No systemd unit.
+- No idle dim or screen timeout. The boot unit can set a fixed backlight only.
+- The client does not set the tty to KD_GRAPHICS. Kernel messages can still draw on tty1.
 
 ## Licenses
 
