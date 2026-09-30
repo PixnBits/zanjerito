@@ -136,6 +136,28 @@ Example zone entry after a 0.20 in catch in 15 minutes:
 "front-north": { "inches_per_hour": 0.8, "crop_factor": 0.6, "capacity_inches": 1.0 }
 ```
 
+## Kiosk snapshot
+
+`GET /api/kiosk` is a read-only snapshot (`Cache-Control: no-store`) for the native kiosk and for Home. It does not start watering. Unlike `GET /api/status`, it does not sync an expired pause to disk. A config load error is HTTP 500 `{"error":"..."}`. Clients should use this body instead of recomputing the next fire or the in-run itinerary.
+
+`now` and the schedule instants are RFC3339 in the config timezone (`timezone` is that name; the default is America/Phoenix). `phase`, `last_error`, `current_station`, and `stations_on` match status. `lockout` is false. `current_station` is the engine's current station, which is whichever station map entry is seen last while two relays overlap. The run object below names the itinerary step separately.
+
+`pause` is `paused`, `until`, `label`, `reason`, `source`, `rain_inches`, and `last_rain_at`. Those are the same facts as status (`until` is `paused_until`, `source` is `pause_source`). `rain_strip` is exactly the Home strip: `show`, `inches`, and `hours` (`24` or `72`). Inches are rounded to the nearest hundredth before the 0.05 in cutoff, so 0.044 in stays hidden (shown as 0.04 if it were displayed) and 0.045 through 0.049 in display as 0.05. The 24 hour total is used when that rounded total is at least 0.05 in; otherwise the strip uses 72 hours. An automatic rain pause hides the strip. `rain` is `enabled`, `unavailable`, `total_24h_inches`, `total_72h_inches`, and `have_totals` (true only when both totals exist). The gauge id is not included.
+
+`next_run` is the next enabled fire strictly after the current local minute, or null when nothing qualifies in 400 local dates (no schedules, or none enabled). It ignores an active pause. `skipped_by_pause` is true when a pause is active and that pause is indefinite or this fire's `at` is before `until`. A fire exactly at `until` is not skipped: pause-until is exclusive, matching the scheduler. `next_effective_run` is the first fire that still runs. It is the same instant as `next_run` when nothing is paused, null when the pause is indefinite, and otherwise the first fire at or after `until`. On that object `skipped_by_pause` is false.
+
+Eligibility matches the scheduler's calendar rules, not its "this minute is due" check: enabled, a valid `HH:MM`, at least one step, weekday (an empty list means every day), and `starts_on` / `ends_on`. The earliest instant wins. Equal instants keep schedule list order. A same-day start is included only when its `HH:MM` is later than now's `HH:MM`, so a fire in the current minute has already passed. Each fire is `schedule_id`, `name` (the note, or the id), `at`, `ends_at` (`at` plus the sum of step minutes), `total_min`, and `skipped_by_pause`.
+
+Instants are built with `time.Date` in the config zone. A skipped civil time is not a fire: America/Denver 2026-03-08 02:00–02:59 does not occur, and `time.Date` normalizes 02:30 to 01:30 MST, which is not used. A repeated civil time (America/Denver 2026-11-01 01:00–01:59) keeps both real occurrences, earliest first. The scan assumes a one-hour fold. America/Phoenix has no fold.
+
+`run` is null when nothing is watering. Otherwise it is `kind`, `program_id`, `program`, `started_at`, `step_index` (`-1` until the first station turns on), `step_count`, `current_station`, `next_station`, `step_elapsed_sec`, `step_remaining_sec`, `run_remaining_sec`, `run_total_sec`, and `steps`. Each step is `station_id`, `title`, `planned_sec`, `elapsed_sec`, `remaining_sec`, and `state` (`done`, `active`, or `pending`). Seconds are truncated so elapsed plus remaining equals planned. Overlap timing is approximate: remaining time is the current step's remainder plus later planned steps. The previous station can still be energized during the overlap window after its step is `done`. Isolate mode uses the same station-on total and does not add the power-down gap.
+
+`stations` is `id`, `title`, `color`, `on`, `state` (`running`, `queued`, or `idle`), `rain_pause_exempt`, and `soil_percent`. There is no BCM, physical, or wiringPi pin, and the power relay is not a station. `running` means the relay is on, including a station whose step is already `done` but still inside the overlap window. `soil` is `enabled`, `et_known`, `et_stale`, `show_bars`, and `updated_at`. `show_bars` is true only when the estimate is on, ET is known and fresh, and at least one zone has a percent. `soil_percent` is null whenever `show_bars` is false, including when ET is stale. `GET /api/soil` can still return those percents.
+
+`GET /api/events` status events keep `Phase`, `CurrentStation`, `StationsOn`, and `LastError`, and also send `phase`, `current_station`, `stations_on`, and `last_error`.
+
+Home's Next line uses `next_run` from this endpoint when that fetch succeeds, and otherwise keeps the in-page scan. While paused, the line still says "Schedules skip while paused" rather than `next_effective_run`. Each schedule card still computes its own next fire in the page. The in-run countdown on Home is still that page's guess, not `run`.
+
 ## Native kiosk client (experimental)
 
 A native C and LVGL client of the daemon's HTTP JSON API is in [native-kiosk/README.md](native-kiosk/README.md). It is not a browser and not a second source of truth. It stays read-only unless `--allow-writes` is passed, and this tree does not install it as a systemd unit or a boot hook.
