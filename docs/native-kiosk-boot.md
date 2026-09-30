@@ -54,7 +54,7 @@ This copies files and runs `systemctl daemon-reload`. It does not enable the uni
 
 Set `ZAN_API` to the controller base URL. `http://CONTROLLER_HOST:8080` is the placeholder. `--switch` refuses it. Use an IPv4 literal. A hostname in `--api` is resolved with `getaddrinfo`, which has no timeout.
 
-Writes are opt-in. `ZAN_ALLOW_WRITES` is commented out, so the panel is read-only. Nick's current panel has writes on. Set `ZAN_ALLOW_WRITES=1` only if this screen should send STOP, pause, and resume.
+Writes are opt-in. `ZAN_ALLOW_WRITES` is commented out, so the panel is read-only. An existing install may already have writes on. Set `ZAN_ALLOW_WRITES=1` only if this screen should send STOP, pause, and resume.
 
 Optional:
 

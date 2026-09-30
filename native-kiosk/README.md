@@ -174,7 +174,7 @@ It does not change the daemon, `config.json`, `zanjerito.env`, cron, or boot `co
 
 There is no `ExecStop=` that sends STOP or all-off. The kiosk is only a client. Valve safety stays in `zanjerito.service` (SIGTERM runs engine all-off, and `max_on` is enforced there). A STOP on every kiosk stop or crash-restart would cancel a scheduled or manual run, and it would depend on the kiosk being able to POST.
 
-Writes stay off unless `ZAN_ALLOW_WRITES=1`. Nick's current panel has writes on. The installed example leaves them off.
+Writes stay off unless `ZAN_ALLOW_WRITES=1`. An existing install may already have writes on. The installed example leaves them off.
 
 `prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. Missing files are skipped. `BACKLIGHT` (0–255) is a fixed level written to `rpi_backlight`; there is no idle dim. A screen timeout needs client support.
 

@@ -1,6 +1,6 @@
 # Copied once to /etc/default/zan-kiosk. Later installs do not overwrite it.
 # zan-kiosk.service loads this file (EnvironmentFile). The kiosk is read-only
-# unless ZAN_ALLOW_WRITES=1. Nick's current panel has writes on; this example
+# unless ZAN_ALLOW_WRITES=1. An existing install may already have writes on; this example
 # leaves them off.
 
 # Controller base URL. Required. --switch refuses this placeholder.

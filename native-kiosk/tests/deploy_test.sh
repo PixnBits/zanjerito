@@ -118,8 +118,8 @@ if grep -E '^[[:space:]]*(export[[:space:]]+)?ZAN_ALLOW_WRITES=' "$EXAMPLE" >/de
     echo "example env must not set ZAN_ALLOW_WRITES" >&2
     exit 1
 fi
-if ! grep -F "Nick's current panel" "$EXAMPLE" >/dev/null; then
-    echo "example env should say writes are on for Nick's panel and off here" >&2
+if ! grep -F "An existing install may already have writes on" "$EXAMPLE" >/dev/null; then
+    echo "example env should say writes are on for existing installs and off here" >&2
     exit 1
 fi
 pass
