@@ -342,91 +342,572 @@ static int rain_inches_ok(double v)
     if (v != 0.0 && v + v == v) {
         return 0;
     }
-    if (v > 1000.0) {
+    if (v > 1000.0 || v < 0.0) {
         return 0;
     }
     return 1;
 }
 
-int zk_parse_status(const char *json, zk_status_t *out)
+static int finite_nonneg(double v)
+{
+    if (v != v) {
+        return 0;
+    }
+    if (v != 0.0 && v + v == v) {
+        return 0;
+    }
+    if (v < 0.0) {
+        return 0;
+    }
+    return 1;
+}
+
+static int clamp_sec(double v)
+{
+    if (!finite_nonneg(v)) {
+        return 0;
+    }
+    if (v > 7.0 * 24.0 * 3600.0) {
+        v = 7.0 * 24.0 * 3600.0;
+    }
+    return (int)v;
+}
+
+static int present_wrong(const cJSON *o, const char *k, int (*ok)(const cJSON *))
+{
+    const cJSON *v = jobj(o, k);
+    if (!v || cJSON_IsNull(v)) {
+        return 0;
+    }
+    return !ok(v);
+}
+
+static int is_string(const cJSON *v)
+{
+    return cJSON_IsString(v) && v->valuestring != NULL;
+}
+
+static int is_bool(const cJSON *v)
+{
+    return cJSON_IsBool(v);
+}
+
+static int is_number(const cJSON *v)
+{
+    return cJSON_IsNumber(v);
+}
+
+static int is_object(const cJSON *v)
+{
+    return cJSON_IsObject(v);
+}
+
+static int is_array(const cJSON *v)
+{
+    return cJSON_IsArray(v);
+}
+
+static int is_object_or_null(const cJSON *v)
+{
+    return cJSON_IsNull(v) || cJSON_IsObject(v);
+}
+
+static int is_array_or_null(const cJSON *v)
+{
+    return cJSON_IsNull(v) || cJSON_IsArray(v);
+}
+
+static int is_string_or_null(const cJSON *v)
+{
+    return cJSON_IsNull(v) || is_string(v);
+}
+
+static int is_number_or_null(const cJSON *v)
+{
+    return cJSON_IsNull(v) || cJSON_IsNumber(v);
+}
+
+static int parse_optional_wall(const cJSON *o, const char *k, zk_wall_t *out, int *has)
+{
+    const cJSON *v = jobj(o, k);
+    if (has) {
+        *has = 0;
+    }
+    if (!v || cJSON_IsNull(v)) {
+        return 0;
+    }
+    if (!is_string(v) || !v->valuestring[0]) {
+        return -1;
+    }
+    if (zk_parse_wall(v->valuestring, out) != ZK_OK) {
+        return -1;
+    }
+    if (has) {
+        *has = 1;
+    }
+    return 0;
+}
+
+static int parse_fire(const cJSON *o, zk_kiosk_fire_t *out, int *has)
+{
+    double mins;
+    memset(out, 0, sizeof *out);
+    if (has) {
+        *has = 0;
+    }
+    if (!o || cJSON_IsNull(o)) {
+        return 0;
+    }
+    if (!cJSON_IsObject(o)) {
+        return -1;
+    }
+    if (present_wrong(o, "schedule_id", is_string) || present_wrong(o, "name", is_string) ||
+        present_wrong(o, "at", is_string) || present_wrong(o, "ends_at", is_string) ||
+        present_wrong(o, "total_min", is_number) || present_wrong(o, "skipped_by_pause", is_bool)) {
+        return -1;
+    }
+    jstr(o, "schedule_id", out->schedule_id, sizeof out->schedule_id);
+    jstr(o, "name", out->name, sizeof out->name);
+    if (parse_optional_wall(o, "at", &out->at, &out->has_at) != 0) {
+        return -1;
+    }
+    if (parse_optional_wall(o, "ends_at", &out->ends_at, &out->has_ends_at) != 0) {
+        return -1;
+    }
+    mins = 0;
+    if (jnum(o, "total_min", &mins)) {
+        if (!finite_nonneg(mins) || mins > 7.0 * 24.0 * 60.0) {
+            mins = 0;
+        }
+        out->total_min = (int)mins;
+    }
+    out->skipped_by_pause = jbool(o, "skipped_by_pause", 0);
+    if (has) {
+        *has = 1;
+    }
+    return 0;
+}
+
+static int parse_run_steps(const cJSON *arr, zk_kiosk_run_t *run)
+{
+    int i, n;
+    if (!arr || !cJSON_IsArray(arr)) {
+        return 0;
+    }
+    n = cJSON_GetArraySize(arr);
+    if (n < 0) {
+        return -1;
+    }
+    for (i = 0; i < n && run->n_steps < ZK_MAX_STEPS; i++) {
+        const cJSON *it = cJSON_GetArrayItem(arr, i);
+        zk_kiosk_run_step_t *st;
+        double v;
+        if (!it || !cJSON_IsObject(it)) {
+            continue;
+        }
+        if (present_wrong(it, "station_id", is_string) || present_wrong(it, "title", is_string) ||
+            present_wrong(it, "planned_sec", is_number) || present_wrong(it, "elapsed_sec", is_number) ||
+            present_wrong(it, "remaining_sec", is_number) || present_wrong(it, "state", is_string)) {
+            return -1;
+        }
+        st = &run->steps[run->n_steps];
+        memset(st, 0, sizeof *st);
+        jstr(it, "station_id", st->station_id, sizeof st->station_id);
+        jstr(it, "title", st->title, sizeof st->title);
+        jstr(it, "state", st->state, sizeof st->state);
+        v = 0;
+        if (jnum(it, "planned_sec", &v)) {
+            st->planned_sec = clamp_sec(v);
+        }
+        v = 0;
+        if (jnum(it, "elapsed_sec", &v)) {
+            st->elapsed_sec = clamp_sec(v);
+        }
+        v = 0;
+        if (jnum(it, "remaining_sec", &v)) {
+            st->remaining_sec = clamp_sec(v);
+        }
+        run->n_steps++;
+    }
+    return 0;
+}
+
+static int parse_run(const cJSON *o, zk_kiosk_run_t *out, int *has)
+{
+    const cJSON *steps;
+    double v;
+    memset(out, 0, sizeof *out);
+    out->step_index = -1;
+    if (has) {
+        *has = 0;
+    }
+    if (!o || cJSON_IsNull(o)) {
+        return 0;
+    }
+    if (!cJSON_IsObject(o)) {
+        return -1;
+    }
+    if (present_wrong(o, "kind", is_string) || present_wrong(o, "program", is_string) ||
+        present_wrong(o, "current_station", is_string) || present_wrong(o, "next_station", is_string) ||
+        present_wrong(o, "step_index", is_number) || present_wrong(o, "step_count", is_number) ||
+        present_wrong(o, "step_elapsed_sec", is_number) || present_wrong(o, "step_remaining_sec", is_number) ||
+        present_wrong(o, "run_remaining_sec", is_number) || present_wrong(o, "run_total_sec", is_number) ||
+        present_wrong(o, "steps", is_array)) {
+        return -1;
+    }
+    jstr(o, "kind", out->kind, sizeof out->kind);
+    jstr(o, "program", out->program, sizeof out->program);
+    jstr(o, "current_station", out->current_station, sizeof out->current_station);
+    jstr(o, "next_station", out->next_station, sizeof out->next_station);
+    v = -1;
+    if (jnum(o, "step_index", &v)) {
+        if (v != v || (v != 0.0 && v + v == v) || v < 0) {
+            out->step_index = -1;
+        } else if (v > ZK_MAX_STEPS) {
+            out->step_index = ZK_MAX_STEPS;
+        } else {
+            out->step_index = (int)v;
+        }
+    } else {
+        out->step_index = -1;
+    }
+    v = 0;
+    if (jnum(o, "step_count", &v)) {
+        out->step_count = clamp_sec(v);
+        if (out->step_count > ZK_MAX_STEPS) {
+            out->step_count = ZK_MAX_STEPS;
+        }
+    }
+    v = 0;
+    if (jnum(o, "step_elapsed_sec", &v)) {
+        out->step_elapsed_sec = clamp_sec(v);
+    }
+    v = 0;
+    if (jnum(o, "step_remaining_sec", &v)) {
+        out->step_remaining_sec = clamp_sec(v);
+    }
+    v = 0;
+    if (jnum(o, "run_remaining_sec", &v)) {
+        out->run_remaining_sec = clamp_sec(v);
+    }
+    v = 0;
+    if (jnum(o, "run_total_sec", &v)) {
+        out->run_total_sec = clamp_sec(v);
+    }
+    steps = jobj(o, "steps");
+    if (parse_run_steps(steps, out) != 0) {
+        return -1;
+    }
+    if (has) {
+        *has = 1;
+    }
+    return 0;
+}
+
+static int parse_pause(const cJSON *o, zk_pause_t *out)
+{
+    double inches;
+    memset(out, 0, sizeof *out);
+    if (!o || cJSON_IsNull(o)) {
+        return 0;
+    }
+    if (!cJSON_IsObject(o)) {
+        return -1;
+    }
+    if (present_wrong(o, "paused", is_bool) || present_wrong(o, "until", is_string_or_null) ||
+        present_wrong(o, "label", is_string) || present_wrong(o, "reason", is_string) ||
+        present_wrong(o, "source", is_string) || present_wrong(o, "rain_inches", is_number)) {
+        return -1;
+    }
+    out->paused = jbool(o, "paused", 0);
+    jstr(o, "label", out->label, sizeof out->label);
+    jstr(o, "reason", out->reason, sizeof out->reason);
+    jstr(o, "source", out->source, sizeof out->source);
+    if (parse_optional_wall(o, "until", &out->until, &out->has_until) != 0) {
+        return -1;
+    }
+    inches = 0;
+    if (jnum(o, "rain_inches", &inches)) {
+        out->rain_inches = rain_inches_ok(inches) ? inches : 0;
+    }
+    return 0;
+}
+
+static int parse_rain_strip(const cJSON *o, zk_rain_strip_t *out)
+{
+    double inches, hours;
+    memset(out, 0, sizeof *out);
+    if (!o || cJSON_IsNull(o)) {
+        return 0;
+    }
+    if (!cJSON_IsObject(o)) {
+        return -1;
+    }
+    if (present_wrong(o, "show", is_bool) || present_wrong(o, "inches", is_number) ||
+        present_wrong(o, "hours", is_number)) {
+        return -1;
+    }
+    out->show = jbool(o, "show", 0);
+    inches = 0;
+    if (jnum(o, "inches", &inches)) {
+        out->inches = rain_inches_ok(inches) ? inches : 0;
+    }
+    hours = 0;
+    if (jnum(o, "hours", &hours)) {
+        if (!finite_nonneg(hours) || hours > 72) {
+            out->hours = 0;
+        } else {
+            out->hours = (int)hours;
+        }
+    }
+    return 0;
+}
+
+static int parse_rain(const cJSON *o, zk_rain_t *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!o || cJSON_IsNull(o)) {
+        return 0;
+    }
+    if (!cJSON_IsObject(o)) {
+        return -1;
+    }
+    if (present_wrong(o, "enabled", is_bool) || present_wrong(o, "unavailable", is_bool) ||
+        present_wrong(o, "have_totals", is_bool) || present_wrong(o, "total_24h_inches", is_number) ||
+        present_wrong(o, "total_72h_inches", is_number)) {
+        return -1;
+    }
+    out->enabled = jbool(o, "enabled", 0);
+    out->unavailable = jbool(o, "unavailable", 0);
+    out->have_totals = jbool(o, "have_totals", 0);
+    if (!jnum(o, "total_24h_inches", &out->total_24h)) {
+        out->total_24h = 0;
+    }
+    if (!jnum(o, "total_72h_inches", &out->total_72h)) {
+        out->total_72h = 0;
+    }
+    if (out->have_totals && (!rain_inches_ok(out->total_24h) || !rain_inches_ok(out->total_72h))) {
+        out->have_totals = 0;
+        out->total_24h = 0;
+        out->total_72h = 0;
+    }
+    return 0;
+}
+
+static int parse_soil_obj(const cJSON *o, zk_kiosk_soil_t *out)
+{
+    memset(out, 0, sizeof *out);
+    if (!o || cJSON_IsNull(o)) {
+        return 0;
+    }
+    if (!cJSON_IsObject(o)) {
+        return -1;
+    }
+    if (present_wrong(o, "enabled", is_bool) || present_wrong(o, "et_known", is_bool) ||
+        present_wrong(o, "et_stale", is_bool) || present_wrong(o, "show_bars", is_bool) ||
+        present_wrong(o, "updated_at", is_string_or_null)) {
+        return -1;
+    }
+    out->enabled = jbool(o, "enabled", 0);
+    out->et_known = jbool(o, "et_known", 0);
+    out->et_stale = jbool(o, "et_stale", 0);
+    out->show_bars = jbool(o, "show_bars", 0);
+    if (parse_optional_wall(o, "updated_at", &out->updated_at, &out->has_updated_at) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int parse_soil_percent(const cJSON *it, int *pct)
+{
+    const cJSON *v;
+    double n;
+    *pct = -1;
+    v = jobj(it, "soil_percent");
+    if (!v || cJSON_IsNull(v)) {
+        return 0;
+    }
+    if (!cJSON_IsNumber(v)) {
+        return -1;
+    }
+    n = v->valuedouble;
+    if (!finite_nonneg(n) || n > 100.0) {
+        *pct = -1;
+        return 0;
+    }
+    *pct = (int)(n + 0.5);
+    if (*pct < 0 || *pct > 100) {
+        *pct = -1;
+    }
+    return 0;
+}
+
+static int parse_stations_arr(const cJSON *arr, zk_kiosk_t *out)
+{
+    int i, n;
+    if (!arr || cJSON_IsNull(arr)) {
+        return 0;
+    }
+    if (!cJSON_IsArray(arr)) {
+        return -1;
+    }
+    n = cJSON_GetArraySize(arr);
+    if (n < 0) {
+        return -1;
+    }
+    for (i = 0; i < n && out->n_stations < ZK_MAX_STATIONS; i++) {
+        const cJSON *it = cJSON_GetArrayItem(arr, i);
+        zk_kiosk_station_t *st;
+        if (!it || !cJSON_IsObject(it)) {
+            continue;
+        }
+        if (present_wrong(it, "id", is_string) || present_wrong(it, "title", is_string) ||
+            present_wrong(it, "color", is_string) || present_wrong(it, "on", is_bool) ||
+            present_wrong(it, "state", is_string) || present_wrong(it, "rain_pause_exempt", is_bool) ||
+            present_wrong(it, "soil_percent", is_number_or_null)) {
+            return -1;
+        }
+        st = &out->stations[out->n_stations];
+        memset(st, 0, sizeof *st);
+        st->soil_percent = -1;
+        jstr(it, "id", st->id, sizeof st->id);
+        jstr(it, "title", st->title, sizeof st->title);
+        jstr(it, "color", st->color, sizeof st->color);
+        jstr(it, "state", st->state, sizeof st->state);
+        st->on = jbool(it, "on", 0);
+        st->rain_pause_exempt = jbool(it, "rain_pause_exempt", 0);
+        if (parse_soil_percent(it, &st->soil_percent) != 0) {
+            return -1;
+        }
+        if (!st->id[0] && !st->title[0]) {
+            continue;
+        }
+        out->n_stations++;
+    }
+    return 0;
+}
+
+static int parse_stations_on(const cJSON *arr, zk_kiosk_t *out)
+{
+    int i, n;
+    if (!arr || cJSON_IsNull(arr)) {
+        return 0;
+    }
+    if (!cJSON_IsArray(arr)) {
+        return -1;
+    }
+    n = cJSON_GetArraySize(arr);
+    for (i = 0; i < n && out->n_on < ZK_MAX_ON; i++) {
+        const cJSON *it = cJSON_GetArrayItem(arr, i);
+        if (it && cJSON_IsString(it) && it->valuestring && it->valuestring[0]) {
+            zk_str_copy(out->stations_on[out->n_on], ZK_ID_MAX, it->valuestring);
+            out->n_on++;
+        }
+    }
+    return 0;
+}
+
+int zk_parse_kiosk(const char *json, zk_kiosk_t *out)
 {
     cJSON *root;
+    const cJSON *pause;
+    const cJSON *strip;
     const cJSON *rain;
+    const cJSON *soil;
+    const cJSON *stations;
     const cJSON *on;
-    const cJSON *pu;
-    const cJSON *now;
-    int i, n;
+    const cJSON *next;
+    const cJSON *eff;
+    const cJSON *run;
+    int rc = ZK_ERR_PARSE;
+
     if (!out) {
         return ZK_ERR_ARG;
     }
-    memset(out, 0, sizeof(*out));
+    memset(out, 0, sizeof *out);
+    out->run.step_index = -1;
+    {
+        int i;
+        for (i = 0; i < ZK_MAX_STATIONS; i++) {
+            out->stations[i].soil_percent = -1;
+        }
+    }
     root = parse_root(json);
     if (!root || !cJSON_IsObject(root)) {
         cJSON_Delete(root);
         return ZK_ERR_PARSE;
     }
-    jstr(root, "phase", out->phase, sizeof(out->phase));
+    if (present_wrong(root, "now", is_string) || present_wrong(root, "timezone", is_string) ||
+        present_wrong(root, "phase", is_string) || present_wrong(root, "lockout", is_bool) ||
+        present_wrong(root, "last_error", is_string) || present_wrong(root, "current_station", is_string) ||
+        present_wrong(root, "stations_on", is_array_or_null) || present_wrong(root, "pause", is_object) ||
+        present_wrong(root, "rain_strip", is_object) || present_wrong(root, "rain", is_object) ||
+        present_wrong(root, "next_run", is_object_or_null) ||
+        present_wrong(root, "next_effective_run", is_object_or_null) ||
+        present_wrong(root, "run", is_object_or_null) || present_wrong(root, "stations", is_array) ||
+        present_wrong(root, "soil", is_object)) {
+        cJSON_Delete(root);
+        return ZK_ERR_PARSE;
+    }
+
+    jstr(root, "phase", out->phase, sizeof out->phase);
     out->fault = (strcmp(out->phase, "Fault") == 0);
     out->watering = (out->phase[0] && strcmp(out->phase, "Idle") != 0 && strcmp(out->phase, "Fault") != 0);
-    jstr(root, "current_station", out->current_station, sizeof(out->current_station));
-    jstr(root, "last_error", out->last_error, sizeof(out->last_error));
+    jstr(root, "timezone", out->timezone, sizeof out->timezone);
+    jstr(root, "last_error", out->last_error, sizeof out->last_error);
+    jstr(root, "current_station", out->current_station, sizeof out->current_station);
     out->lockout = jbool(root, "lockout", 0);
-    out->paused = jbool(root, "paused", 0);
-    jstr(root, "paused_label", out->paused_label, sizeof(out->paused_label));
-    jstr(root, "pause_source", out->pause_source, sizeof(out->pause_source));
-    jstr(root, "reason", out->reason, sizeof(out->reason));
-    jstr(root, "timezone", out->timezone, sizeof(out->timezone));
-
-    pu = jobj(root, "paused_until");
-    if (pu && cJSON_IsString(pu) && pu->valuestring && pu->valuestring[0]) {
-        if (zk_parse_wall(pu->valuestring, &out->paused_until) == ZK_OK) {
-            out->has_paused_until = 1;
-        }
-    }
-    now = jobj(root, "now");
-    if (now && cJSON_IsString(now) && now->valuestring && now->valuestring[0]) {
-        if (zk_parse_wall(now->valuestring, &out->now) == ZK_OK) {
-            out->has_now = 1;
-        }
+    if (parse_optional_wall(root, "now", &out->now, &out->has_now) != 0) {
+        goto done;
     }
 
     on = jobj(root, "stations_on");
-    if (on && cJSON_IsArray(on)) {
-        n = cJSON_GetArraySize(on);
-        for (i = 0; i < n && out->n_on < ZK_MAX_ON; i++) {
-            const cJSON *it = cJSON_GetArrayItem(on, i);
-            if (it && cJSON_IsString(it) && it->valuestring && it->valuestring[0]) {
-                zk_str_copy(out->stations_on[out->n_on], ZK_ID_MAX, it->valuestring);
-                out->n_on++;
-            }
-        }
+    if (parse_stations_on(on, out) != 0) {
+        goto done;
     }
-
+    pause = jobj(root, "pause");
+    if (parse_pause(pause, &out->pause) != 0) {
+        goto done;
+    }
+    strip = jobj(root, "rain_strip");
+    if (parse_rain_strip(strip, &out->rain_strip) != 0) {
+        goto done;
+    }
     rain = jobj(root, "rain");
-    if (rain && cJSON_IsObject(rain)) {
-        out->rain.enabled = jbool(rain, "enabled", 0);
-        out->rain.unavailable = jbool(rain, "unavailable", 0);
-        out->rain.have_totals = 0;
-        out->rain.total_24h = 0;
-        out->rain.total_72h = 0;
-        if (!jnum(rain, "total_24h_inches", &out->rain.total_24h)) {
-            out->rain.total_24h = 0;
-        }
-        if (jnum(rain, "total_72h_inches", &out->rain.total_72h)) {
-            out->rain.have_totals = 1;
-        } else {
-            out->rain.total_72h = 0;
-        }
-        if (out->rain.have_totals &&
-            (!rain_inches_ok(out->rain.total_24h) || !rain_inches_ok(out->rain.total_72h))) {
-            out->rain.have_totals = 0;
-            out->rain.total_24h = 0;
-            out->rain.total_72h = 0;
-        }
+    if (parse_rain(rain, &out->rain) != 0) {
+        goto done;
     }
-
+    next = jobj(root, "next_run");
+    if (parse_fire(next, &out->next_run, &out->has_next_run) != 0) {
+        goto done;
+    }
+    eff = jobj(root, "next_effective_run");
+    if (parse_fire(eff, &out->next_effective, &out->has_next_effective) != 0) {
+        goto done;
+    }
+    run = jobj(root, "run");
+    if (parse_run(run, &out->run, &out->has_run) != 0) {
+        goto done;
+    }
+    stations = jobj(root, "stations");
+    if (parse_stations_arr(stations, out) != 0) {
+        goto done;
+    }
+    soil = jobj(root, "soil");
+    if (parse_soil_obj(soil, &out->soil) != 0) {
+        goto done;
+    }
+    if (out->has_run) {
+        out->watering = 1;
+    }
+    rc = ZK_OK;
+done:
     cJSON_Delete(root);
-    return ZK_OK;
+    if (rc != ZK_OK) {
+        memset(out, 0, sizeof *out);
+        out->run.step_index = -1;
+    }
+    return rc;
 }
 
 static int parse_wd_token(const char *s)
@@ -489,51 +970,6 @@ static int parse_hhmm(const char *s, int *hh, int *mm)
     *hh = h;
     *mm = m;
     return 0;
-}
-
-int zk_parse_stations(const char *json, zk_stations_t *out)
-{
-    cJSON *root;
-    const cJSON *arr;
-    int i, n;
-    if (!out) {
-        return ZK_ERR_ARG;
-    }
-    memset(out, 0, sizeof(*out));
-    root = parse_root(json);
-    if (!root) {
-        return ZK_ERR_PARSE;
-    }
-    if (cJSON_IsArray(root)) {
-        arr = root;
-    } else if (cJSON_IsObject(root)) {
-        arr = jobj(root, "stations");
-        if (!arr || !cJSON_IsArray(arr)) {
-            cJSON_Delete(root);
-            return ZK_OK;
-        }
-    } else {
-        cJSON_Delete(root);
-        return ZK_ERR_PARSE;
-    }
-    n = cJSON_GetArraySize(arr);
-    for (i = 0; i < n && out->n < ZK_MAX_STATIONS; i++) {
-        const cJSON *it = cJSON_GetArrayItem(arr, i);
-        zk_station_t *st;
-        if (!it || !cJSON_IsObject(it)) {
-            continue;
-        }
-        st = &out->items[out->n];
-        jstr(it, "id", st->id, sizeof(st->id));
-        jstr(it, "title", st->title, sizeof(st->title));
-        jstr(it, "color", st->color, sizeof(st->color));
-        if (!st->id[0] && !st->title[0]) {
-            continue;
-        }
-        out->n++;
-    }
-    cJSON_Delete(root);
-    return ZK_OK;
 }
 
 static void parse_one_schedule(const cJSON *it, zk_schedule_t *sch)
@@ -643,60 +1079,3 @@ int zk_parse_schedules(const char *json, zk_schedules_t *out)
     return ZK_OK;
 }
 
-int zk_parse_soil(const char *json, zk_soil_t *out)
-{
-    cJSON *root;
-    const cJSON *zones;
-    int i, n;
-    if (!out) {
-        return ZK_ERR_ARG;
-    }
-    memset(out, 0, sizeof(*out));
-    root = parse_root(json);
-    if (!root || !cJSON_IsObject(root)) {
-        cJSON_Delete(root);
-        return ZK_ERR_PARSE;
-    }
-    out->enabled = jbool(root, "enabled", 0);
-    out->et_known = jbool(root, "et_known", 0);
-    out->et_stale = jbool(root, "et_stale", 0);
-    zones = jobj(root, "zones");
-    if (zones && cJSON_IsArray(zones)) {
-        n = cJSON_GetArraySize(zones);
-        for (i = 0; i < n && out->n_zones < ZK_MAX_ZONES; i++) {
-            const cJSON *z = cJSON_GetArrayItem(zones, i);
-            const cJSON *pct;
-            zk_zone_t *dst;
-            if (!z || !cJSON_IsObject(z)) {
-                continue;
-            }
-            dst = &out->zones[out->n_zones];
-            jstr(z, "station_id", dst->station_id, ZK_ID_MAX);
-            dst->percent = -1;
-            dst->rate_measured = jbool(z, "rate_measured", 0);
-            pct = jobj(z, "percent");
-            if (pct && cJSON_IsNumber(pct)) {
-                double v = pct->valuedouble;
-                if (v < 0) {
-                    v = 0;
-                }
-                if (v > 100) {
-                    v = 100;
-                }
-                dst->percent = (int)(v + (v >= 0 ? 0.5 : -0.5));
-                if (dst->percent < 0) {
-                    dst->percent = 0;
-                }
-                if (dst->percent > 100) {
-                    dst->percent = 100;
-                }
-            }
-            if (!dst->station_id[0]) {
-                continue;
-            }
-            out->n_zones++;
-        }
-    }
-    cJSON_Delete(root);
-    return ZK_OK;
-}

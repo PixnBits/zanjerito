@@ -31,6 +31,8 @@
 #define SCHED_HDR_H 72
 #define SCHED_ROW_H 50
 #define STEP_STRIP_H 6
+#define SCHED_BTN_W 120
+#define SCHED_BTN_H 108
 
 #define MODAL_W     620
 #define MODAL_H     300
@@ -85,7 +87,16 @@ static void rail_geometry(enum zk_screen screen, zk_rect *stop, zk_rect *slot)
     int slot_h = (screen == ZK_SCREEN_RUNNING) ? SLOT_H_RUN : SLOT_H;
     int slot_y = PAD_TOP + stop_h + SLOT_GAP;
     *stop = R(RAIL_X, PAD_TOP, RAIL_W, stop_h);
-    *slot = R(RAIL_X, slot_y, RAIL_W, slot_h);
+    if (screen == ZK_SCREEN_NEEDS_UPDATE) {
+        *slot = R(0, 0, 0, 0);
+    } else {
+        *slot = R(RAIL_X, slot_y, RAIL_W, slot_h);
+    }
+}
+
+static zk_rect schedules_btn(void)
+{
+    return R(MAIN_X + MAIN_W - SCHED_BTN_W, MAIN_Y, SCHED_BTN_W, SCHED_BTN_H);
 }
 
 static void home_tiles(const zk_layout_in *in, zk_layout_rects *out)
@@ -108,35 +119,32 @@ static void home_tiles(const zk_layout_in *in, zk_layout_rects *out)
     }
     n_show = nst;
     n_rows = 2;
+    cols = 2;
     if (n_show <= 2) {
         n_rows = 1;
     }
-    if (n_show > 4) {
-        int h3 = (avail - 2 * TILE_GAP) / 3;
-        if (h3 >= ZK_MIN_TAP) {
-            n_rows = 3;
-            if (n_show > 6) {
-                n_show = 6;
-            }
-            tile_h = h3;
-        } else {
-            n_show = 4;
-            n_rows = 2;
-        }
-    }
-    if (n_show > 4 && n_rows == 2) {
-        n_show = 4;
-    }
-    cols = 2;
-    tile_w = (MAIN_W - TILE_GAP) / 2;
     if (n_show == 1) {
         cols = 1;
         tile_w = MAIN_W;
+    } else if (n_show <= 4) {
+        cols = 2;
+        tile_w = (MAIN_W - TILE_GAP) / 2;
+    } else if (n_show <= 6) {
+        cols = 3;
+        n_rows = 2;
+        tile_w = (MAIN_W - 2 * TILE_GAP) / 3;
+    } else {
+        cols = 4;
+        n_rows = 2;
+        tile_w = (MAIN_W - 3 * TILE_GAP) / 4;
+    }
+    if (tile_w < 1) {
+        tile_w = 1;
     }
     out->n_tiles = 0;
     for (i = 0; i < n_show && i < 8; i++) {
-        int row = (cols == 1) ? 0 : (i / 2);
-        int col = (cols == 1) ? 0 : (i % 2);
+        int row = (cols == 1) ? 0 : (i / cols);
+        int col = (cols == 1) ? 0 : (i % cols);
         if (n_rows == 1) {
             row = 0;
         }
@@ -174,7 +182,8 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
 
     switch (screen) {
     case ZK_SCREEN_HOME:
-        out->header = R(MAIN_X, MAIN_Y, MAIN_W, HDR_H);
+        out->schedules = schedules_btn();
+        out->header = R(MAIN_X, MAIN_Y, MAIN_W - SCHED_BTN_W - GAP, HDR_H);
         if (rain) {
             out->rain = R(MAIN_X, MAIN_Y + HDR_H + GAP, MAIN_W, RAIN_H);
         }
@@ -186,7 +195,9 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
     case ZK_SCREEN_PAUSED: {
         int y = MAIN_Y;
         int info_h;
-        out->banner = R(MAIN_X, y, MAIN_W, BANNER_H);
+        int left_w = MAIN_W - SCHED_BTN_W - GAP;
+        out->schedules = schedules_btn();
+        out->banner = R(MAIN_X, y, left_w, BANNER_H);
         y += BANNER_H + GAP;
         if (rain) {
             out->rain = R(MAIN_X, y, MAIN_W, RAIN_H);
@@ -243,6 +254,13 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
         }
         break;
     }
+    case ZK_SCREEN_STATION:
+        out->title = R(MAIN_X, MAIN_Y, MAIN_W, TITLE_H);
+        out->card = R(MAIN_X, MAIN_Y + TITLE_H + GAP, MAIN_W, MAIN_BOTTOM - (MAIN_Y + TITLE_H + GAP));
+        break;
+    case ZK_SCREEN_NEEDS_UPDATE:
+        out->card = R(MAIN_X, MAIN_Y, MAIN_W, MAIN_H);
+        break;
     default:
         break;
     }
@@ -270,17 +288,18 @@ int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target o
     case ZK_SCREEN_HOME:
         add_tgt(out, max, &n, ZK_TARGET_PAUSE, L.slot, ZK_KIND_BUTTON);
         add_tgt(out, max, &n, ZK_TARGET_HEADER_NEXT, L.header, ZK_KIND_HEADER);
+        add_tgt(out, max, &n, ZK_TARGET_SCHEDULES, L.schedules, ZK_KIND_BUTTON);
         for (i = 0; i < L.n_tiles; i++) {
             add_tgt(out, max, &n, (enum zk_target_id)(ZK_TARGET_TILE0 + i), L.tiles[i], ZK_KIND_TILE);
         }
         break;
     case ZK_SCREEN_RUNNING:
-        /* Design A lower rail button is Pause, not Back. */
         add_tgt(out, max, &n, ZK_TARGET_PAUSE, L.slot, ZK_KIND_BUTTON);
         break;
     case ZK_SCREEN_PAUSED:
         add_tgt(out, max, &n, ZK_TARGET_RESUME, L.slot, ZK_KIND_BUTTON);
         add_tgt(out, max, &n, ZK_TARGET_INFO_CARD, L.info, ZK_KIND_CARD);
+        add_tgt(out, max, &n, ZK_TARGET_SCHEDULES, L.schedules, ZK_KIND_BUTTON);
         break;
     case ZK_SCREEN_PICKER:
         add_tgt(out, max, &n, ZK_TARGET_BACK, L.slot, ZK_KIND_BUTTON);
@@ -292,6 +311,11 @@ int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target o
     case ZK_SCREEN_SCHEDULES:
         add_tgt(out, max, &n, ZK_TARGET_BACK, L.slot, ZK_KIND_BUTTON);
         add_tgt(out, max, &n, ZK_TARGET_HOLD_EDIT, L.hold_edit, ZK_KIND_BUTTON);
+        break;
+    case ZK_SCREEN_STATION:
+        add_tgt(out, max, &n, ZK_TARGET_BACK, L.slot, ZK_KIND_BUTTON);
+        break;
+    case ZK_SCREEN_NEEDS_UPDATE:
         break;
     default:
         break;

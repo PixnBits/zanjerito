@@ -20,6 +20,12 @@ STOP_X=668
 STOP_Y=144
 SLOT_X=668
 SLOT_Y=376
+# Home tile 0 with rain: (14,198 256x126) -> (142,261)
+TILE0_X=142
+TILE0_Y=261
+# Schedules button (416,12 120x108) -> (476,66)
+SCHED_X=476
+SCHED_Y=66
 OK_X=255
 OK_Y=305
 CANCEL_X=545
@@ -171,6 +177,24 @@ def main():
     if cmd == "stopok":
         rgb = pix(rows, 200, 260)
         print("%d %d %d" % rgb)
+        return
+    # Needs-update card is cream #FCF5E6 in the main column.
+    if cmd == "needsupdate":
+        n = 0
+        for y in range(40, 200):
+            for x in range(30, 500):
+                if near(pix(rows, x, y), (0xFC, 0xF5, 0xE6), 8):
+                    n += 1
+        print(n)
+        return
+    # Hold-to-edit on Schedules is dusk plum #4E3F63.
+    if cmd == "schedules":
+        n = 0
+        for y in range(340, 450):
+            for x in range(40, 520):
+                if near(pix(rows, x, y), (0x4E, 0x3F, 0x63), 12):
+                    n += 1
+        print(n)
         return
     raise SystemExit("unknown cmd")
 
@@ -466,6 +490,65 @@ PY
     assert_posts "POST /api/run/cancel" || return 1
 }
 
+# Tile tap opens the station sheet. Writes stay off.
+case_k() {
+    local png=$TMP/k-sheet.png
+    start_stub "$FIX/home-rain" || return 1
+    kiosk 4 "wait:800;tap:${TILE0_X},${TILE0_Y};wait:400;shot:${png}" 12 --allow-writes || {
+        show_kiosk_err
+        return 1
+    }
+    assert_posts "" || return 1
+    [[ "$(png_size "$png")" == "800x480" ]] || return 1
+}
+
+# Schedules button opens Schedules; Close (slot) returns.
+case_l() {
+    local a=$TMP/l-sched.png b=$TMP/l-home.png
+    local n
+    start_stub "$FIX/home-rain" || return 1
+    kiosk 5 "wait:800;tap:${SCHED_X},${SCHED_Y};wait:400;shot:${a};tap:${SLOT_X},${SLOT_Y};wait:400;shot:${b}" 12 || {
+        show_kiosk_err
+        return 1
+    }
+    n=$(python3 "$TMP/png.py" schedules "$a")
+    if [[ "$n" -lt 80 ]]; then
+        echo "schedules screen plum pixels $n" >&2
+        return 1
+    fi
+    if cmp -s "$a" "$b"; then
+        echo "Close did not leave Schedules" >&2
+        return 1
+    fi
+}
+
+# STOP from the station sheet still confirms and sends one cancel.
+case_m() {
+    start_stub "$FIX/home-rain" || return 1
+    kiosk 5 "wait:800;tap:${TILE0_X},${TILE0_Y};wait:400;tap:${STOP_X},${STOP_Y};wait:400;tap:${OK_X},${OK_Y};wait:600" 12 --allow-writes || {
+        show_kiosk_err
+        return 1
+    }
+    assert_posts "POST /api/run/cancel" || return 1
+}
+
+# 404 /api/kiosk shows the needs-update card; STOP still works.
+case_n() {
+    local png=$TMP/n-need.png
+    local n
+    start_stub "$FIX/home-rain" --kiosk-404 || return 1
+    kiosk 5 "wait:900;shot:${png};tap:${STOP_X},${STOP_Y};wait:400;tap:${OK_X},${OK_Y};wait:600" 12 --allow-writes || {
+        show_kiosk_err
+        return 1
+    }
+    n=$(python3 "$TMP/png.py" needsupdate "$png")
+    if [[ "$n" -lt 200 ]]; then
+        echo "needs-update cream pixels $n" >&2
+        return 1
+    fi
+    assert_posts "POST /api/run/cancel" || return 1
+}
+
 run_case a case_a
 run_case b case_b
 run_case c case_c
@@ -476,6 +559,10 @@ run_case g case_g
 run_case h case_h
 run_case i case_i
 run_case j case_j
+run_case k case_k
+run_case l case_l
+run_case m case_m
+run_case n case_n
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

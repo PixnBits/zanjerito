@@ -5,6 +5,7 @@
 #include "platform.h"
 #include "shots.h"
 #include "ui.h"
+#include "zk_console.h"
 
 #include <errno.h>
 #include <getopt.h>
@@ -468,6 +469,9 @@ int main(int argc, char **argv)
         zk_platform_print_stats(stats);
         return 1;
     }
+    if (fb) {
+        zk_console_cursor(1);
+    }
 
     memset(&app, 0, sizeof app);
     app.api = api;
@@ -479,17 +483,26 @@ int main(int argc, char **argv)
     if (shot_all) {
         rc = zk_shots_run(fixtures_root, shot_all);
         zk_platform_print_stats(stats);
+        if (fb) {
+            zk_console_cursor(0);
+        }
         return rc == 0 ? 0 : 1;
     }
     if (shot_file && !script) {
         rc = zk_snapshot_png(shot_file);
         zk_platform_print_stats(stats);
+        if (fb) {
+            zk_console_cursor(0);
+        }
         return rc == 0 ? 0 : 1;
     }
     if ((fixture && fixture[0]) || (api && api[0])) {
         if (zk_data_start(&app) != 0) {
             fprintf(stderr, "data: start failed\n");
             zk_platform_print_stats(stats);
+            if (fb) {
+                zk_console_cursor(0);
+            }
             return 1;
         }
         data_on = 1;
@@ -545,6 +558,9 @@ int main(int argc, char **argv)
 
     if (data_on) {
         zk_data_stop();
+    }
+    if (fb) {
+        zk_console_cursor(0);
     }
     zk_platform_print_stats(stats);
     return g_script_fail ? 1 : 0;

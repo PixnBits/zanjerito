@@ -85,3 +85,27 @@ func TestAPIStillOnSameMux(t *testing.T) {
 		t.Fatalf("status %d %s", rr.Code, rr.Body.String())
 	}
 }
+
+// The Next label must fall back to the in-page scan when /api/kiosk is malformed or hangs.
+// There is no JS test harness for index.html, so this pins the guards as UI strings.
+func TestUIKioskNextGuards(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/", nil)
+	body := rr.Body.String()
+	for _, need := range []string{
+		"function kioskNextFrom(d)",
+		`hasOwnProperty.call(d, "next_run")`,
+		"new AbortController()",
+		"ctl.abort(), 3000",
+		"signal: ctl.signal",
+		"kioskNextBusy",
+		"if (k.ok) {",
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("loadKioskNext guard missing %q", need)
+		}
+	}
+	if strings.Contains(body, "state.kioskNext = d ? d.next_run : null") {
+		t.Fatal("unguarded kiosk next assignment must be gone")
+	}
+}

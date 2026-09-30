@@ -31,16 +31,13 @@ typedef struct {
 } qitem_t;
 
 typedef struct {
-    zk_status_t status;
-    int have_status;
+    zk_kiosk_t kiosk;
+    int have_kiosk;
     int64_t status_mono_ms;
     int have_mono;
-    zk_stations_t stations;
     zk_schedules_t schedules;
-    zk_soil_t soil;
-    int have_stations;
     int have_schedules;
-    int have_soil;
+    zk_api_state_t api_state;
 } store_t;
 
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
@@ -75,6 +72,7 @@ static zk_act_kind_t g_inflight_kind;
 static char g_inflight_body[BODY_MAX];
 static int g_fixture;
 static int g_force_stale; /* shots only */
+static int g_force_needs_update; /* shots only */
 static int g_allow_writes;
 static int g_live_clock;
 static char g_base[BASE_MAX];
@@ -198,28 +196,22 @@ static void reset_locked(void)
     g_inflight_seq = 0;
     g_inflight_body[0] = 0;
     g_fixture = 0;
+    g_force_stale = 0;
+    g_force_needs_update = 0;
     g_allow_writes = 0;
     g_live_clock = 0;
     g_base[0] = 0;
 }
 
-static void remember_status(const zk_status_t *st, int64_t mono)
+static void remember_kiosk(const zk_kiosk_t *k, int64_t mono)
 {
-    int changed = !g_snap.have_status || memcmp(&g_snap.status, st, sizeof *st) != 0;
-    g_snap.status = *st;
-    g_snap.have_status = 1;
+    int changed = !g_snap.have_kiosk || memcmp(&g_snap.kiosk, k, sizeof *k) != 0 ||
+                  g_snap.api_state != ZK_API_OK;
+    g_snap.kiosk = *k;
+    g_snap.have_kiosk = 1;
+    g_snap.api_state = ZK_API_OK;
     g_snap.status_mono_ms = mono;
     g_snap.have_mono = 1;
-    if (changed) {
-        g_version++;
-    }
-}
-
-static void remember_stations(const zk_stations_t *v)
-{
-    int changed = !g_snap.have_stations || memcmp(&g_snap.stations, v, sizeof *v) != 0;
-    g_snap.stations = *v;
-    g_snap.have_stations = 1;
     if (changed) {
         g_version++;
     }
@@ -235,32 +227,29 @@ static void remember_schedules(const zk_schedules_t *v)
     }
 }
 
-static void remember_soil(const zk_soil_t *v)
+static void set_api_state_locked(zk_api_state_t st, int touch_mono)
 {
-    int changed = !g_snap.have_soil || memcmp(&g_snap.soil, v, sizeof *v) != 0;
-    g_snap.soil = *v;
-    g_snap.have_soil = 1;
-    if (changed) {
+    if (g_snap.api_state != st) {
+        g_snap.api_state = st;
         g_version++;
+    }
+    if (touch_mono) {
+        g_snap.status_mono_ms = mono_ms();
+        g_snap.have_mono = 1;
     }
 }
 
-static int flag_stop(void)
-{
-    int s;
-    pthread_mutex_lock(&g_mu);
-    s = g_stop;
-    pthread_mutex_unlock(&g_mu);
-    return s;
-}
-
-/* Caller must not hold g_mu. A failed exchange leaves the previous snapshot. */
-static int fetch(char *buf, const char *path)
+/* Caller must not hold g_mu. A failed exchange leaves the previous snapshot.
+ * *http_st is the HTTP status when the socket conversation finished, else 0. */
+static int fetch(char *buf, const char *path, int *http_st)
 {
     char base[BASE_MAX];
     int st = 0;
     int rc;
 
+    if (http_st) {
+        *http_st = 0;
+    }
     pthread_mutex_lock(&g_mu);
     if (g_stop) {
         pthread_mutex_unlock(&g_mu);
@@ -272,6 +261,9 @@ static int fetch(char *buf, const char *path)
         return ZK_ERR_ARG;
     }
     rc = zk_http_get(base, path, HTTP_TIMEOUT_MS, buf, ZK_HTTP_MAX_BODY, &st);
+    if (http_st) {
+        *http_st = st;
+    }
     if (rc != ZK_OK) {
         return rc;
     }
@@ -281,33 +273,31 @@ static int fetch(char *buf, const char *path)
     return ZK_OK;
 }
 
-static void poll_status(char *buf)
+static void poll_kiosk(char *buf)
 {
-    zk_status_t st;
-    if (fetch(buf, "/api/status") != ZK_OK) {
-        return;
-    }
-    if (zk_parse_status(buf, &st) != ZK_OK) {
-        return;
-    }
-    pthread_mutex_lock(&g_mu);
-    remember_status(&st, mono_ms());
-    arm_wake_locked();
-    pthread_mutex_unlock(&g_mu);
-    call_platform_wake();
-}
+    zk_kiosk_t k;
+    int http_st = 0;
+    int rc;
 
-static void poll_stations(char *buf)
-{
-    zk_stations_t v;
-    if (fetch(buf, "/api/stations") != ZK_OK) {
+    rc = fetch(buf, "/api/kiosk", &http_st);
+    if (http_st == 404) {
+        pthread_mutex_lock(&g_mu);
+        set_api_state_locked(ZK_API_NEEDS_UPDATE, 1);
+        arm_wake_locked();
+        pthread_mutex_unlock(&g_mu);
+        call_platform_wake();
         return;
     }
-    if (zk_parse_stations(buf, &v) != ZK_OK) {
+    if (rc != ZK_OK || zk_parse_kiosk(buf, &k) != ZK_OK) {
+        pthread_mutex_lock(&g_mu);
+        set_api_state_locked(ZK_API_UNREACHABLE, 0);
+        arm_wake_locked();
+        pthread_mutex_unlock(&g_mu);
+        call_platform_wake();
         return;
     }
     pthread_mutex_lock(&g_mu);
-    remember_stations(&v);
+    remember_kiosk(&k, mono_ms());
     arm_wake_locked();
     pthread_mutex_unlock(&g_mu);
     call_platform_wake();
@@ -316,7 +306,8 @@ static void poll_stations(char *buf)
 static void poll_schedules(char *buf)
 {
     zk_schedules_t v;
-    if (fetch(buf, "/api/schedules") != ZK_OK) {
+    int http_st = 0;
+    if (fetch(buf, "/api/schedules", &http_st) != ZK_OK) {
         return;
     }
     if (zk_parse_schedules(buf, &v) != ZK_OK) {
@@ -324,22 +315,6 @@ static void poll_schedules(char *buf)
     }
     pthread_mutex_lock(&g_mu);
     remember_schedules(&v);
-    arm_wake_locked();
-    pthread_mutex_unlock(&g_mu);
-    call_platform_wake();
-}
-
-static void poll_soil(char *buf)
-{
-    zk_soil_t v;
-    if (fetch(buf, "/api/soil") != ZK_OK) {
-        return;
-    }
-    if (zk_parse_soil(buf, &v) != ZK_OK) {
-        return;
-    }
-    pthread_mutex_lock(&g_mu);
-    remember_soil(&v);
     arm_wake_locked();
     pthread_mutex_unlock(&g_mu);
     call_platform_wake();
@@ -531,18 +506,12 @@ static void *worker_main(void *arg)
         pthread_mutex_unlock(&g_mu);
 
         if (do_status) {
-            poll_status(buf);
+            poll_kiosk(buf);
             next_status = mono_ms() + status_ms;
             continue;
         }
         if (do_slow) {
-            poll_stations(buf);
-            if (!flag_stop()) {
-                poll_schedules(buf);
-            }
-            if (!flag_stop()) {
-                poll_soil(buf);
-            }
+            poll_schedules(buf);
             next_slow = mono_ms() + SLOW_POLL_MS;
         }
     }
@@ -599,61 +568,39 @@ static int load_named(const char *dir, const char *name, char **out)
 /* fixture_dir wins: never open a socket for a fixture run. */
 static void load_fixture(const char *dir)
 {
-    char *status_b = NULL;
-    char *stations_b = NULL;
+    char *kiosk_b = NULL;
     char *sched_b = NULL;
-    char *soil_b = NULL;
-    zk_status_t st;
-    zk_stations_t stations;
+    zk_kiosk_t kiosk;
     zk_schedules_t schedules;
-    zk_soil_t soil;
-    int ok_st = 0;
-    int ok_sta = 0;
+    int ok_k = 0;
     int ok_sch = 0;
-    int ok_soil = 0;
     int64_t mono;
 
-    memset(&st, 0, sizeof st);
-    memset(&stations, 0, sizeof stations);
+    memset(&kiosk, 0, sizeof kiosk);
     memset(&schedules, 0, sizeof schedules);
-    memset(&soil, 0, sizeof soil);
-    if (load_named(dir, "status.json", &status_b) == ZK_OK && zk_parse_status(status_b, &st) == ZK_OK) {
-        ok_st = 1;
-    }
-    if (load_named(dir, "stations.json", &stations_b) == ZK_OK && zk_parse_stations(stations_b, &stations) == ZK_OK) {
-        ok_sta = 1;
+    if (load_named(dir, "kiosk.json", &kiosk_b) == ZK_OK && zk_parse_kiosk(kiosk_b, &kiosk) == ZK_OK) {
+        ok_k = 1;
     }
     if (load_named(dir, "schedules.json", &sched_b) == ZK_OK && zk_parse_schedules(sched_b, &schedules) == ZK_OK) {
         ok_sch = 1;
     }
-    if (load_named(dir, "soil.json", &soil_b) == ZK_OK && zk_parse_soil(soil_b, &soil) == ZK_OK) {
-        ok_soil = 1;
-    }
     mono = mono_ms();
     pthread_mutex_lock(&g_mu);
-    if (ok_st) {
-        remember_status(&st, mono);
-    }
-    if (ok_sta) {
-        remember_stations(&stations);
+    if (ok_k) {
+        remember_kiosk(&kiosk, mono);
     }
     if (ok_sch) {
         remember_schedules(&schedules);
     }
-    if (ok_soil) {
-        remember_soil(&soil);
-    }
-    if (ok_st || ok_sta || ok_sch || ok_soil) {
+    if (ok_k || ok_sch) {
         arm_wake_locked();
     }
     pthread_mutex_unlock(&g_mu);
-    if (ok_st || ok_sta || ok_sch || ok_soil) {
+    if (ok_k || ok_sch) {
         call_platform_wake();
     }
-    free(status_b);
-    free(stations_b);
+    free(kiosk_b);
     free(sched_b);
-    free(soil_b);
 }
 
 static void fail_submit(zk_act_kind_t kind, int code)
@@ -782,14 +729,11 @@ void zk_data_get(zk_snapshot_t *out)
     now = mono_ms();
     pthread_mutex_lock(&g_mu);
     memset(out, 0, sizeof *out);
-    out->status = g_snap.status;
-    out->have_status = g_snap.have_status;
-    out->stations = g_snap.stations;
+    out->kiosk = g_snap.kiosk;
+    out->have_kiosk = g_snap.have_kiosk;
     out->schedules = g_snap.schedules;
-    out->soil = g_snap.soil;
-    out->have_stations = g_snap.have_stations;
     out->have_schedules = g_snap.have_schedules;
-    out->have_soil = g_snap.have_soil;
+    out->api_state = g_snap.api_state;
     if (!g_snap.have_mono) {
         out->status_age_s = 1.0e9;
     } else {
@@ -803,13 +747,19 @@ void zk_data_get(zk_snapshot_t *out)
         out->status_age_s = g_force_stale ? 1.0e9 : 0; /* a canned fixture is never stale */
     }
     out->stale = out->status_age_s > 6.0 ? 1 : 0;
-    if (g_snap.have_status && g_snap.status.has_now) {
+    if (g_force_needs_update) {
+        out->api_state = ZK_API_NEEDS_UPDATE;
+    }
+    if (out->api_state == ZK_API_NEEDS_UPDATE) {
+        out->stale = 0;
+    }
+    if (g_snap.have_kiosk && g_snap.kiosk.has_now) {
         if (g_fixture && !g_live_clock) {
-            out->wall = g_snap.status.now;
+            out->wall = g_snap.kiosk.now;
         } else if (g_snap.have_mono) {
-            out->wall = zk_wall_advance(g_snap.status.now, now, g_snap.status_mono_ms);
+            out->wall = zk_wall_advance(g_snap.kiosk.now, now, g_snap.status_mono_ms);
         } else {
-            out->wall = g_snap.status.now;
+            out->wall = g_snap.kiosk.now;
         }
         if (g_wall_seen && wall_changed(&g_wall_pub, &out->wall)) {
             g_version++;
@@ -921,5 +871,13 @@ void zk_data_debug_force_stale(int on)
 {
     pthread_mutex_lock(&g_mu);
     g_force_stale = on ? 1 : 0;
+    pthread_mutex_unlock(&g_mu);
+}
+
+void zk_data_debug_force_needs_update(int on)
+{
+    pthread_mutex_lock(&g_mu);
+    g_force_needs_update = on ? 1 : 0;
+    g_version++;
     pthread_mutex_unlock(&g_mu);
 }

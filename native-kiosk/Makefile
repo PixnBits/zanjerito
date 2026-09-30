@@ -1,5 +1,5 @@
 # Core sources (reused by later UI / cross-compile targets).
-SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c
+SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c src/zk_console.c
 SRC_DATA = src/data.c
 CJSON = third_party/cJSON/cJSON.c
 

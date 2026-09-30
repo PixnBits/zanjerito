@@ -240,9 +240,13 @@ static void *handler_main(void *arg)
         is_get = 1;
         s->counts.n_get++;
         s->counts.get_busy++;
-        if (req_is(req, "GET", "/api/status")) {
+        if (req_is(req, "GET", "/api/kiosk")) {
             s->counts.n_status++;
-            json = "{\"phase\":\"Idle\",\"now\":\"2026-09-29T06:52:00-06:00\"}";
+            json = "{\"now\":\"2026-09-29T06:52:00-06:00\",\"timezone\":\"America/Denver\",\"phase\":\"Idle\","
+                   "\"lockout\":false,\"stations\":[],\"soil\":{},\"run\":null}";
+        } else if (req_is(req, "GET", "/api/status")) {
+            s->counts.n_status++;
+            json = "{\"phase\":\"Idle\"}";
         }
     } else if (req_is(req, "POST", "/api/run/cancel")) {
         s->counts.n_post++;
