@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -228,6 +229,64 @@ func TestEventsSSE(t *testing.T) {
 	body := string(buf[:n])
 	if !strings.Contains(body, "event: status") {
 		t.Fatalf("sse body %q", body)
+	}
+}
+
+func TestEventsSSESnakeAndPascal(t *testing.T) {
+	s := newTestServer(t)
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	buf := make([]byte, 8192)
+	n, err := resp.Body.Read(buf)
+	if n == 0 && err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	body := string(buf[:n])
+	var data string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+			break
+		}
+	}
+	if data == "" {
+		t.Fatalf("no SSE data in %q", body)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		t.Fatalf("sse json %v body %s", err, data)
+	}
+	pairs := [][2]string{
+		{"Phase", "phase"},
+		{"CurrentStation", "current_station"},
+		{"StationsOn", "stations_on"},
+		{"LastError", "last_error"},
+	}
+	for _, pair := range pairs {
+		if _, ok := payload[pair[0]]; !ok {
+			t.Fatalf("missing %s in %s", pair[0], data)
+		}
+		if _, ok := payload[pair[1]]; !ok {
+			t.Fatalf("missing %s in %s", pair[1], data)
+		}
+		if !reflect.DeepEqual(payload[pair[0]], payload[pair[1]]) {
+			t.Fatalf("%s=%v %s=%v", pair[0], payload[pair[0]], pair[1], payload[pair[1]])
+		}
+	}
+	if payload["phase"] != "Idle" {
+		t.Fatalf("phase %v", payload["phase"])
 	}
 }
 

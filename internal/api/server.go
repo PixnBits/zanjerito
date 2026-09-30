@@ -47,6 +47,7 @@ type Server struct {
 func New(e *engine.Engine, path string) *Server {
 	s := &Server{Eng: e, Path: path, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
+	s.mux.HandleFunc("GET /api/kiosk", s.handleKiosk)
 	s.mux.HandleFunc("GET /api/stations", s.handleStationsList)
 	s.mux.HandleFunc("GET /api/stations/{id}", s.handleStationGet)
 	s.mux.HandleFunc("PATCH /api/stations/{id}", s.handleStationPatch)
@@ -338,7 +339,18 @@ func (s *Server) NoteSoil(p *soil.Poller, err error) {
 func (s *Server) handleSoil(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	loc := s.location()
-	now := time.Now()
+	var stations []engine.StationConfig
+	if s.Soil != nil {
+		if f, err := s.load(); err == nil {
+			stations = f.Stations
+		}
+	}
+	writeJSON(w, http.StatusOK, s.soilSnapshot(time.Now(), loc, stations))
+}
+
+// soilSnapshot is the GET /api/soil body. A nil poller is the disabled view.
+// When the poller has a test clock, that clock wins over now.
+func (s *Server) soilSnapshot(now time.Time, loc *time.Location, stations []engine.StationConfig) soil.View {
 	if s.Soil != nil && s.Soil.Now != nil {
 		now = s.Soil.Now()
 	}
@@ -348,16 +360,10 @@ func (s *Server) handleSoil(w http.ResponseWriter, _ *http.Request) {
 			v.Reason = "soil.local.json invalid"
 			v.ConfigError = msg
 		}
-		writeJSON(w, http.StatusOK, v)
-		return
+		return v
 	}
-	var stations []engine.StationConfig
-	if f, err := s.load(); err == nil {
-		stations = f.Stations
-	}
-	hist := s.History.List(0)
 	rainDays, rainOK := s.Rain.DailyRain(loc)
-	writeJSON(w, http.StatusOK, s.Soil.View(stations, hist, rainDays, rainOK, now, loc))
+	return s.Soil.View(stations, s.History.List(0), rainDays, rainOK, now, loc)
 }
 
 func historyLimit(raw string) (int, error) {
@@ -635,10 +641,14 @@ func writeStatusEvent(w http.ResponseWriter, fl http.Flusher, s *Server) {
 	now := time.Now()
 	_, fields := s.pauseFields(now)
 	payload := map[string]any{
-		"Phase":          st.Phase,
-		"CurrentStation": st.CurrentStation,
-		"StationsOn":     st.StationsOn,
-		"LastError":      st.LastError,
+		"Phase":           st.Phase,
+		"CurrentStation":  st.CurrentStation,
+		"StationsOn":      st.StationsOn,
+		"LastError":       st.LastError,
+		"phase":           st.Phase,
+		"current_station": st.CurrentStation,
+		"stations_on":     st.StationsOn,
+		"last_error":      st.LastError,
 	}
 	for k, v := range fields {
 		payload[k] = v

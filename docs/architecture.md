@@ -105,11 +105,14 @@ Timezone for all wall-clock math: `America/Phoenix` (no DST).
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/status` | now / next / last error / lockout |
+| GET | `/api/kiosk` | read-only snapshot: next run, pause, rain strip, run progress, stations (no pins) |
 | GET, PATCH | `/api/stations/:id` | list/edit |
 | POST | `/api/stations/:id/run` | `{durationSec}` — may preempt |
 | POST | `/api/run/cancel` | STOP |
 | GET, PUT | `/api/schedules/:id` | named programs + itinerary + date window |
 | GET | `/api/events` | SSE: status / station / fault |
+
+`GET /api/kiosk` is the server-computed snapshot (schema and pause/DST/soil rules are in the README). It does not write pause or config files. `GET /api/events` status payloads keep `Phase`, `CurrentStation`, `StationsOn`, and `LastError`, and also send `phase`, `current_station`, `stations_on`, and `last_error`.
 
 Auth: LAN bind only for MVP. No GraphiQL.
 

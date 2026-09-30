@@ -692,8 +692,10 @@
       status: { phase: "Idle", stations_on: [] },
       stations: [], schedules: [], pick: null, kiosk: false,
       edit: { id: null, isNew: false },
-      // Client run track — API has no remaining_seconds / ends_at
+      // In-run timer still uses this track. Home Next uses /api/kiosk when that fetch succeeds.
       runTrack: null, // { steps:[{station_id,minutes}], startedAt, endsAt, source }
+      kioskNext: null,
+      kioskNextReady: false,
       history: [],
       historyLoaded: false,
       historyError: "",
@@ -951,6 +953,25 @@
       if (!best) return "None in window";
       return `${best.label} · ${best.name}`;
     }
+    function kioskNextLabel() {
+      const run = state.kioskNext;
+      if (!run || !run.at) return "None in window";
+      const d = new Date(run.at);
+      if (Number.isNaN(d.getTime())) return "None in window";
+      const p = phoenixParts(d);
+      const hm = String(p.hour).padStart(2, "0") + ":" + String(p.minute).padStart(2, "0");
+      let name = String(run.name || "").trim();
+      if (name.length > 28) name = name.slice(0, 26).trimEnd() + "…";
+      return p.ymd + " " + hm + (name ? " · " + name : "");
+    }
+    async function loadKioskNext() {
+      try {
+        const d = await j("/api/kiosk", { cache: "no-store" });
+        state.kioskNext = d ? d.next_run : null;
+        state.kioskNextReady = true;
+        paintStatus();
+      } catch (e) {}
+    }
     function weekdaysOverlap(a, b) {
       const A = (a.weekdays || []).map((d) => String(d).toLowerCase());
       const B = (b.weekdays || []).map((d) => String(d).toLowerCase());
@@ -1130,7 +1151,8 @@
           sub.textContent = "Ready";
           sub.classList.remove("hidden");
         }
-        $("next-text").textContent = isPaused() ? "Schedules skip while paused" : globalNextLabel();
+        const nextLabel = state.kioskNextReady ? kioskNextLabel() : globalNextLabel();
+        $("next-text").textContent = isPaused() ? "Schedules skip while paused" : nextLabel;
       }
       sub.classList.toggle("fault", !!s.last_error);
       paintPauseBanner();
@@ -1736,6 +1758,7 @@
     async function loadStatus() {
       state.status = normalizeStatus(await j("/api/status"));
       paintStatus();
+      loadKioskNext();
       if (!state.historyLoaded) loadHistory();
     }
     function hookSSE() {

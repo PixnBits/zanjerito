@@ -106,6 +106,10 @@ type Engine struct {
 	rainClearedAt *time.Time
 	eventLastRain *time.Time
 
+	// prog is the in-flight itinerary for RunProgress. Guarded by mu.
+	// It does not affect relay timing.
+	prog runProgress
+
 	// rec is consulted without mu. Record runs only after running is cleared.
 	rec atomic.Pointer[recorderSlot]
 }
@@ -447,6 +451,7 @@ func (e *Engine) runTagged(ctx context.Context, programID, program, kind string,
 		e.mu.Lock()
 		e.running = false
 		e.cancel = nil
+		e.prog = runProgress{}
 		e.mu.Unlock()
 		cancel()
 		if record {
@@ -455,6 +460,7 @@ func (e *Engine) runTagged(ctx context.Context, programID, program, kind string,
 	}()
 
 	started := time.Now()
+	e.armProgress(programID, program, kind, steps, started)
 	err := e.run(runCtx, steps, tim)
 	if err != nil {
 		// Fail-safe: any exit including context.Canceled must all-off (CISO #5).
@@ -532,9 +538,14 @@ func (e *Engine) run(ctx context.Context, steps []Step, tim *stationTimer) error
 }
 
 // turn is only called from the run goroutine. It updates tim after the relay write.
+// A station turning on advances run progress after the driver call returns,
+// so e.mu is not held across that callback.
 func (e *Engine) turn(id string, on bool, idx int, tim *stationTimer) error {
 	if err := e.setStation(id, on); err != nil {
 		return err
+	}
+	if on {
+		e.markStep(idx)
 	}
 	if tim == nil {
 		return nil
