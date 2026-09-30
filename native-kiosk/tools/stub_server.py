@@ -11,10 +11,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 GET_MAP = {
-    "/api/status": "status.json",
-    "/api/stations": "stations.json",
+    "/api/kiosk": "kiosk.json",
     "/api/schedules": "schedules.json",
-    "/api/soil": "soil.json",
 }
 
 
@@ -60,6 +58,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         _nap(self.server.get_delay)
+        if getattr(self.server, "kiosk_404", False) and self.path.split("?", 1)[0] == "/api/kiosk":
+            try:
+                self.send_error(404)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+            return
         name = GET_MAP.get(self.path)
         if not name:
             self.send_error(404)
@@ -97,6 +101,7 @@ def main() -> int:
     p.add_argument("--port", type=int, default=0)
     p.add_argument("--get-delay", type=float, default=0, help="seconds to hold each GET")
     p.add_argument("--post-delay", type=float, default=0, help="seconds to hold each POST after logging it")
+    p.add_argument("--kiosk-404", action="store_true", help="GET /api/kiosk returns 404")
     args = p.parse_args()
 
     httpd = FixtureServer(("127.0.0.1", args.port), FixtureHandler)
@@ -105,6 +110,7 @@ def main() -> int:
     httpd.log_lock = threading.Lock()
     httpd.get_delay = args.get_delay if args.get_delay > 0 else 0.0
     httpd.post_delay = args.post_delay if args.post_delay > 0 else 0.0
+    httpd.kiosk_404 = bool(args.kiosk_404)
     log_dir = os.path.dirname(os.path.abspath(args.log))
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)

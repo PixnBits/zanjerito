@@ -148,7 +148,7 @@ static void check_pause_gap(const zk_ui_label_box_t *name, const zk_ui_label_box
     if (!name || !sub) {
         return;
     }
-    TCHECK(name->y_rel == 52, "info_name y_rel %d", name->y_rel);
+    TCHECK(name->y_rel == 54, "info_name y_rel %d", name->y_rel);
     TCHECK(sub->y_rel == 112, "info_sub0 y_rel %d", sub->y_rel);
     TCHECK(name->h > 0 && name->y_rel + name->h <= 112, "info_name bottom %d", name->y_rel + name->h);
     TCHECK(name->y + name->h <= sub->y, "info_name abs bottom %d sub %d", name->y + name->h, sub->y);
@@ -200,7 +200,7 @@ static void test_paused_short(void)
     sub = find_box(b, n, "info_sub0");
     TCHECK(name != NULL, "short info_name");
     if (name) {
-        TEQ_S(name->text, "Morning cycle \xC2\xB7 Daily 8:23 AM");
+        TEQ_S(name->text, "Runs again when you resume");
         TCHECK(!ends_ellipsis(name->text), "short name ellipsized: %s", name->text);
     }
     check_pause_gap(name, sub);
@@ -213,7 +213,7 @@ static void test_paused_long(void)
     const zk_ui_label_box_t *name;
     const zk_ui_label_box_t *sub;
     const char *full =
-        "live parity: alpha 2, beta 3, gamma 3 (bash cron 08:23) \xC2\xB7 Daily 8:23 AM \xC2\xB7 Daily 8:23 AM";
+        "live parity: alpha 2, beta 3, gamma 3 (bash cron 08:23) \xC2\xB7 Daily 8:23 AM \xC2\xB7 Tomorrow 8:23 AM";
     TCHECK(load_fix("paused-long", ZK_SCREEN_PAUSED) == 0, "load paused-long");
     n = grab(b, 96);
     if (n < 0) {
@@ -302,6 +302,68 @@ static void test_running_long(void)
     }
 }
 
+static void test_station_sheet_and_needs_update(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    const zk_ui_label_box_t *title;
+    const zk_ui_label_box_t *state;
+    const zk_ui_label_box_t *exempt;
+    const zk_ui_label_box_t *msg;
+    const zk_ui_label_box_t *nu;
+    const zk_ui_label_box_t *sched;
+    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load home for schedules");
+    n = grab(b, 96);
+    sched = find_box(b, n, "sched_btn");
+    TCHECK(sched != NULL, "schedules label");
+    if (sched) {
+        TEQ_S(sched->text, "Schedules");
+        TCHECK(inside_parent(sched), "schedules box");
+    }
+    zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 0);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    check_geometry(b, n, "station-sheet");
+    title = find_box(b, n, "st_title");
+    state = find_box(b, n, "st_state");
+    TCHECK(title && state, "sheet labels");
+    if (title) {
+        TEQ_S(title->text, "Test Station 1");
+    }
+    if (state) {
+        TEQ_S(state->text, "Idle");
+    }
+    zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    exempt = find_box(b, n, "st_exempt");
+    TCHECK(exempt != NULL, "exempt");
+    if (exempt) {
+        TCHECK(strstr(exempt->text, "Skips rain") != NULL, "exempt %s", exempt->text);
+    }
+    TCHECK(load_fix("home-stale", ZK_SCREEN_STATION) == 0, "stale sheet");
+    zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 0);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    msg = find_box(b, n, "st_soil_msg");
+    TCHECK(msg != NULL, "stale soil msg");
+    if (msg) {
+        TCHECK(strstr(msg->text, "ET data old") != NULL, "stale msg %s", msg->text);
+    }
+    TCHECK(load_fix("home-rain", ZK_SCREEN_NEEDS_UPDATE) == 0, "needs-update");
+    zk_data_debug_force_needs_update(1);
+    zk_ui_debug_set_view(ZK_SCREEN_NEEDS_UPDATE, 0, -1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    check_geometry(b, n, "needs-update");
+    nu = find_box(b, n, "nu_title");
+    TCHECK(nu != NULL, "nu title");
+    if (nu) {
+        TEQ_S(nu->text, "Controller needs an update");
+    }
+    zk_data_debug_force_needs_update(0);
+}
+
 int main(void)
 {
     zk_platform_opts_t opts;
@@ -318,6 +380,7 @@ int main(void)
     test_paused_long();
     test_home_long();
     test_running_long();
+    test_station_sheet_and_needs_update();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");

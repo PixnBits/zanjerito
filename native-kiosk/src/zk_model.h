@@ -19,7 +19,6 @@ enum {
 #define ZK_MAX_STATIONS  8
 #define ZK_MAX_SCHEDULES 16
 #define ZK_MAX_STEPS     16
-#define ZK_MAX_ZONES     8
 #define ZK_MAX_ON        8
 
 #define ZK_ID_MAX      32
@@ -32,6 +31,8 @@ enum {
 #define ZK_LABEL_MAX   96
 #define ZK_REASON_MAX  32
 #define ZK_SRC_MAX     32
+#define ZK_STATE_MAX   16
+#define ZK_KIND_MAX    16
 
 #define ZK_WD_SUN (1u << 0)
 #define ZK_WD_MON (1u << 1)
@@ -57,36 +58,100 @@ typedef struct {
 } zk_rain_t;
 
 typedef struct {
-    char phase[ZK_PHASE_MAX];
-    int watering;
-    int fault;
-    char stations_on[ZK_MAX_ON][ZK_ID_MAX];
-    int n_on;
-    char current_station[ZK_ID_MAX];
-    char last_error[ZK_ERRSTR_MAX];
-    int lockout;
+    int show;
+    double inches;
+    int hours;
+} zk_rain_strip_t;
+
+typedef struct {
     int paused;
-    zk_wall_t paused_until;
-    int has_paused_until;
-    char paused_label[ZK_LABEL_MAX];
-    char pause_source[ZK_SRC_MAX];
+    zk_wall_t until;
+    int has_until;
+    char label[ZK_LABEL_MAX];
     char reason[ZK_REASON_MAX];
-    zk_rain_t rain;
-    zk_wall_t now;
-    int has_now;
-    char timezone[ZK_TZ_MAX];
-} zk_status_t;
+    char source[ZK_SRC_MAX];
+    double rain_inches;
+} zk_pause_t;
+
+typedef struct {
+    char schedule_id[ZK_ID_MAX];
+    char name[ZK_NOTE_MAX];
+    zk_wall_t at;
+    int has_at;
+    zk_wall_t ends_at;
+    int has_ends_at;
+    int total_min;
+    int skipped_by_pause;
+} zk_kiosk_fire_t;
+
+typedef struct {
+    char station_id[ZK_ID_MAX];
+    char title[ZK_TITLE_MAX];
+    int planned_sec;
+    int elapsed_sec;
+    int remaining_sec;
+    char state[ZK_STATE_MAX];
+} zk_kiosk_run_step_t;
+
+typedef struct {
+    char kind[ZK_KIND_MAX];
+    char program[ZK_NOTE_MAX];
+    int step_index;
+    int step_count;
+    char current_station[ZK_ID_MAX];
+    char next_station[ZK_ID_MAX];
+    int step_elapsed_sec;
+    int step_remaining_sec;
+    int run_remaining_sec;
+    int run_total_sec;
+    zk_kiosk_run_step_t steps[ZK_MAX_STEPS];
+    int n_steps;
+} zk_kiosk_run_t;
 
 typedef struct {
     char id[ZK_ID_MAX];
     char title[ZK_TITLE_MAX];
     char color[ZK_COLOR_MAX];
-} zk_station_t;
+    int on;
+    char state[ZK_STATE_MAX];
+    int rain_pause_exempt;
+    int soil_percent; /* -1 if null / unusable */
+} zk_kiosk_station_t;
 
 typedef struct {
-    zk_station_t items[ZK_MAX_STATIONS];
-    int n;
-} zk_stations_t;
+    int enabled;
+    int et_known;
+    int et_stale;
+    int show_bars;
+    zk_wall_t updated_at;
+    int has_updated_at;
+} zk_kiosk_soil_t;
+
+typedef struct {
+    zk_wall_t now;
+    int has_now;
+    char timezone[ZK_TZ_MAX];
+    char phase[ZK_PHASE_MAX];
+    int watering;
+    int fault;
+    int lockout;
+    char last_error[ZK_ERRSTR_MAX];
+    char current_station[ZK_ID_MAX];
+    char stations_on[ZK_MAX_ON][ZK_ID_MAX];
+    int n_on;
+    zk_pause_t pause;
+    zk_rain_strip_t rain_strip;
+    zk_rain_t rain;
+    zk_kiosk_fire_t next_run;
+    int has_next_run;
+    zk_kiosk_fire_t next_effective;
+    int has_next_effective;
+    zk_kiosk_run_t run;
+    int has_run;
+    zk_kiosk_station_t stations[ZK_MAX_STATIONS];
+    int n_stations;
+    zk_kiosk_soil_t soil;
+} zk_kiosk_t;
 
 typedef struct {
     char station_id[ZK_ID_MAX];
@@ -113,20 +178,6 @@ typedef struct {
     int n;
 } zk_schedules_t;
 
-typedef struct {
-    char station_id[ZK_ID_MAX];
-    int percent; /* -1 if null / unusable */
-    int rate_measured;
-} zk_zone_t;
-
-typedef struct {
-    int enabled;
-    int et_known;
-    int et_stale;
-    zk_zone_t zones[ZK_MAX_ZONES];
-    int n_zones;
-} zk_soil_t;
-
 void zk_str_copy(char *dst, size_t cap, const char *src);
 void zk_str_upper(char *s);
 void zk_str_trim_copy(char *dst, size_t cap, const char *src);
@@ -141,9 +192,7 @@ void zk_civil_from_days(int z, int *y, int *m, int *d);
 int64_t zk_wall_epoch_sec(zk_wall_t w);
 int zk_date_cmp(int y1, int m1, int d1, int y2, int m2, int d2);
 
-int zk_parse_status(const char *json, zk_status_t *out);
-int zk_parse_stations(const char *json, zk_stations_t *out);
+int zk_parse_kiosk(const char *json, zk_kiosk_t *out);
 int zk_parse_schedules(const char *json, zk_schedules_t *out);
-int zk_parse_soil(const char *json, zk_soil_t *out);
 
 #endif

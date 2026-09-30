@@ -20,7 +20,7 @@ The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its hi
 
 | Then | Now |
 |---|---|
-| Optimize for Nick writing and maintaining the code | Optimize for **machine efficiency on the Pi** (CPU, RAM, flash, boot, idle) |
+| Optimize for the owner writing and maintaining the code | Optimize for **machine efficiency on the Pi** (CPU, RAM, flash, boot, idle) |
 | GraphQL because it was interesting | **REST + JSON + SSE** — small, clear, cheap on-device |
 | UI as a first sketch | **Direction D hybrid** with stakeholder feedback; current UI is prototype only |
 
@@ -93,7 +93,7 @@ The bash MVP (preserved at tag `bash-mvp`) was the **production truth** when thi
 | Persona | Need |
 |---|---|
 | Household operator (primary) | Know what’s on, STOP, start/stop a station, change schedules without SSH |
-| Nick (builder / ops) | Safe deploy, easy rollback to bash, clear logs, low Pi resource use |
+| Owner (builder / ops) | Safe deploy, easy rollback to bash, clear logs, low Pi resource use |
 | Wall-screen user (v1) | Glanceable status + dominant STOP; edits optional |
 
 ---
@@ -186,7 +186,7 @@ Open / proposed choices live in [decisions.md](./decisions.md).
 3. **Implement** on a follow-on branch (e.g. `rewrite/go`): runtime skeleton → GPIO → schedules → API → UI → systemd → dual-run → parity → cutover.
 4. Keep the Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) and the bash MVP (preserved at tag `bash-mvp`) as read-only references.
 
-Work runs on Nick’s connected Linux machine (not Cloud Agents). Specialist bots review and implement against these docs.
+Work runs on the owner’s connected Linux machine (not Cloud Agents). Specialist bots review and implement against these docs.
 
 ---
 

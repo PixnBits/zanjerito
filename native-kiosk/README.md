@@ -10,14 +10,16 @@ Screens the client actually builds:
 
 | Screen | What you see |
 |---|---|
-| Home | Next-run header, optional rain strip, station tiles, STOP and Pause |
-| Running | Step countdown, taller STOP, Pause |
-| Paused | Pause banner, info card, STOP and Resume |
+| Home | Next-run header, Schedules button, optional rain strip, station tiles, STOP and Pause |
+| Running | Step countdown from `run.*`, taller STOP, Pause |
+| Paused | Pause banner, ON HOLD card from `next_effective_run`, Schedules button, STOP and Resume |
+| Station sheet | Read-only detail for one station. Close on the rail; STOP stays |
+| Needs update | Card when `GET /api/kiosk` is HTTP 404. STOP stays; Pause and Schedules are hidden |
 | Pause picker | Tomorrow morning, 2 days, 1 week, until further notice |
 | Schedules | Read-only rows. Hold to edit shows a toast; it does not edit |
 | Confirm STOP / Confirm pause | Modal over the screen. Only OK and Cancel are tappable |
 
-Next-run text and remaining time are inferred on the device from `/api/schedules` and `/api/status`. The daemon does not yet send those as kiosk fields.
+The daemon owns next run, run progress, rain-strip visibility, and soil percents. The client formats those fields. Pause-picker preview still uses `/api/schedules` (`zk_pause_preview` / `zk_morning_cutoff`).
 
 ## Layout
 
@@ -26,8 +28,9 @@ The framebuffer is 800×480. Hit targets use **267 px/in** (`ZK_PX_PER_INCH`). `
 | Target | Size | At 267 px/in |
 |---|---|---|
 | Screen | 800×480 | — |
-| STOP (home, paused, picker, schedules) | 236×264 | height 0.99 in |
+| STOP (home, paused, picker, schedules, station, needs-update) | 236×264 | height 0.99 in |
 | STOP while running | 236×304 | height 1.14 in |
+| Schedules button (Home idle, Paused) | 120×108 | at least 0.4 in |
 | Every other hit target | at least 107×107 | at least 0.4 in |
 
 ## Build
@@ -66,7 +69,7 @@ The base URL is never compiled in. With no `--api`, no `ZAN_API`, and no `--fixt
 | `--api URL` | API base URL. Otherwise the `ZAN_API` environment variable |
 | `ZAN_API` | Same as `--api` when that flag is omitted |
 | `--fixture DIR` | Load one scenario directory from disk. No socket |
-| `--live-clock` | Advance the clock from the system clock. Fixture mode otherwise freezes `status.now` |
+| `--live-clock` | Advance the clock from the system clock. Fixture mode otherwise freezes `kiosk.now` |
 | `--allow-writes` | Permit the three mutating POSTs. Default is read-only |
 | `--fb PATH` | Framebuffer to open. There is no default device |
 | `--touch PATH` | evdev device. Default is autodetect |
@@ -89,18 +92,18 @@ Example against a daemon already listening on localhost (nothing in this tree st
 
 ## Fixtures and shots
 
-`tests/fixtures/<scenario>/` holds `status.json`, `stations.json`, `schedules.json`, and `soil.json`. Scenarios: `home-rain`, `home-norain`, `home-nosoil`, `home-stale`, `home-fault`, `running`, `paused-rain`, `paused-manual`. Names and station ids in those files are generic.
+`tests/fixtures/<scenario>/` holds `kiosk.json` (same keys as `GET /api/kiosk`) and `schedules.json` when the Schedules screen or pause preview needs it. Scenarios: `home-rain`, `home-norain`, `home-nosoil`, `home-stale`, `home-fault`, `running`, `paused-rain`, `paused-manual`, `paused-long`, `home-longnames`, `running-long`. Names and station ids are generic (`Test Station N`, timezone `America/Denver`).
 
 `make shots` writes `build/shots/`:
 
 | File | Scenario | Screen |
 |---|---|---|
-| `01-home-idle-rain.png` | home-rain | Home |
+| `01-home-idle-rain.png` | home-rain | Home (includes Schedules button) |
 | `01b-home-idle-no-rain.png` | home-norain | Home |
 | `01c-home-no-soil.png` | home-nosoil | Home |
 | `01d-home-soil-stale.png` | home-stale | Home |
 | `01e-home-fault.png` | home-fault | Home |
-| `02-running.png` | running | Running |
+| `02-running.png` | running | Running (`run.*` from the fixture) |
 | `03-paused-rain.png` | paused-rain | Paused |
 | `03b-paused-manual.png` | paused-manual | Paused |
 | `04-pause-picker.png` | home-rain | Pause picker |
@@ -109,6 +112,14 @@ Example against a daemon already listening on localhost (nothing in this tree st
 | `07-confirm-pause.png` | home-rain | Confirm pause (tomorrow-morning chip) |
 | `08-home-stop-pressed.png` | home-rain | Home, STOP pressed |
 | `09-offline.png` | home-rain | Home with the stale pill |
+| `10-station-sheet-soil.png` | home-rain | Station sheet, tile 0 |
+| `10b-station-sheet-soil-stale.png` | home-stale | Station sheet |
+| `10c-station-sheet-nosoil.png` | home-nosoil | Station sheet |
+| `10d-station-sheet-running.png` | running | Station sheet, running station |
+| `10e-station-sheet-exempt.png` | home-rain | Station sheet, rain-exempt tile |
+| `11-controller-needs-update.png` | home-rain | Needs-update card |
+| `12-home-schedules-button.png` | home-rain | Same Home as `01` |
+| `13-paused-schedules-button.png` | paused-rain | Paused with Schedules button |
 
 `--shot` and `--shot-all` use the memory display. They do not open a framebuffer.
 
@@ -118,20 +129,24 @@ Example against a daemon already listening on localhost (nothing in this tree st
 
 | Binary | Covers |
 |---|---|
-| `test_json` | Parse every fixture; garbage and defaults; non-finite or huge rain totals hide the strip; wall-clock parse and advance |
-| `test_logic` | Next run, rain strip, soil percent, pause-preview bodies, run inference, pause title and until text; inches clamp for NaN, inf, and huge values |
-| `test_layout` | Every screen, no overlap, hit testing, STOP 264/304 px tall and tallest, other targets at least 107 px, picker chips 255×188, 267 px/in |
+| `test_json` | Parse every fixture kiosk.json; nulls and missing optional; garbage, truncated, wrong types; 1e999 / huge arrays; `rain_strip.show` is the only visibility input; console cursor write to `ZK_TTY` |
+| `test_logic` | Formatting (relative day, fire when, rain strip text, inches clamp); remaining pause-preview from `/api/schedules`; pause title and until text |
+| `test_layout` | Every screen including station sheet and needs-update; no overlap; STOP 264/304; Schedules button and tiles ≥107; 1..8 stations |
 | `test_http` | GET and POST to a localhost stub; read-only stop does not connect; cancel, pause, and resume paths; timeout; oversized body; non-`http` URL rejected |
-| `test_data` | Status poll and slow polls; stale after the stub stops; fixture load opens no socket; read-only actions do not POST; writes POST cancel, pause, and resume and repoll status; `zk_data_get` does not block on a slow stub |
+| `test_data` | `/api/kiosk` poll and `/api/schedules` slow poll; 404 => NEEDS_UPDATE and no `/api/status`; stale after the stub stops; fixture load opens no socket; writes POST and repoll kiosk |
 | `test_stop_latency` | STOP is posted while a GET is in flight; a repeated STOP or resume is one POST; identical pause bodies collapse; a different pause is still sent; the queue still overflows; read-only sends no POST |
 
-`ZK_POLL_MS_STATUS` overrides the 2 second status poll inside those data tests. It is not a user-facing flag.
+`ZK_POLL_MS_STATUS` overrides the 2 second `/api/kiosk` poll inside those data tests. It is not a user-facing flag.
 
-`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured. It also checks that extra taps just after pause OK do not send a second pause, that two STOP confirms about a second apart are one cancel when that POST is slow, and that STOP is logged while GETs are delayed. The stub takes `--get-delay SEC` and `--post-delay SEC` and serves each connection on its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
+`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured. It also checks tile tap (station sheet, zero non-GET writes), Schedules button, STOP from the sheet, and `--kiosk-404` needs-update with STOP still working. The stub takes `--get-delay SEC`, `--post-delay SEC`, and `--kiosk-404`. Each connection is its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
 
 ## Behaviour
 
-In HTTP mode a poll thread GETs `/api/status` about every 2 seconds and `/api/stations`, `/api/schedules`, and `/api/soil` about every 30 seconds. STOP, pause, and resume run on a second thread. That thread opens its own sockets and does not wait for a poll to finish, so STOP is not stuck behind a slow GET. After a write succeeds, status is polled again.
+In HTTP mode a poll thread GETs `/api/kiosk` about every 2 seconds and `/api/schedules` about every 30 seconds. It does not poll `/api/status`, `/api/stations`, or `/api/soil`. HTTP 404 from `/api/kiosk` is the needs-update state: the main area shows a card, Pause and Schedules are hidden, STOP still works, and the client does not fall back to `/api/status` or recompute. Transport, 5xx, and malformed bodies are unreachable (existing stale pill). STOP, pause, and resume run on a second thread. That thread opens its own sockets and does not wait for a poll to finish, so STOP is not stuck behind a slow GET. After a write succeeds, `/api/kiosk` is polled again.
+
+A station tile opens a read-only sheet (title, colour, Running/Queued/Idle, rain-exempt line, soil bar only when `soil.show_bars` and `soil_percent` are set). Last run is not in `/api/kiosk` and is omitted; adding `last_run` to that snapshot later would fill it. The sheet never POSTs. If the station disappears from a later snapshot, the sheet closes.
+
+A visible Schedules button (icon + label, at least 107×107) is on Home idle and Paused. Next-run header and the paused info card remain shortcuts. Running has no Schedules button. The Home brand mark is dropped so that button fits in the header's right slot without shrinking STOP or Pause.
 
 A second STOP is not posted while one is already queued or in flight. Resume is treated the same way. A pause is skipped only when the same body is already queued or in flight; a different pause body is sent. The screen still gets one result for the submit it is waiting on. The queue holds 8 actions; one more reports overflow and sends nothing.
 
@@ -149,15 +164,15 @@ The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pa
 
 ## Raspberry Pi
 
-Target board is a Pi 3B (armv7). The display is the legacy 800×480 32 bpp framebuffer: pass `--fb /dev/fb0`. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
+Target board is a Pi 3B (armv7). The display is the legacy 800×480 32 bpp framebuffer: pass `--fb /dev/fb0`. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
 
 On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Nothing here installs a systemd unit or a boot hook.
 
 ## Known gaps
 
-- No daemon `GET /api/kiosk`. The client polls `/api/status`, `/api/stations`, `/api/schedules`, and `/api/soil`.
+- Last run is omitted on the station sheet because it is not in `GET /api/kiosk`. Recommend adding `last_run` to that snapshot later.
+- Pause-picker preview is still computed on the client from `/api/schedules`.
 - `getaddrinfo` has no timeout. A hostname in `--api` can stall one request for as long as the resolver takes. Use an IPv4 literal on the kiosk.
-- Next-run and remaining time are computed in the client. The daemon does not send those fields.
 - Hold to edit is not implemented (toast only).
 - No systemd unit.
 

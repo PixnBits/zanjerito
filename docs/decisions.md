@@ -19,7 +19,7 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 
 ### D2. Valve sequencing policy vs bash
 - **Status:** decided → **overlap default; isolation configurable** (2026-09-12)
-- **Context:** Bash drops 24VAC and fully offs between channels (flow slams shut — hammer risk). The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) overlaps ~2s while keeping power on (two solenoids briefly, anti-hammer). Nick: water hammer is the bigger danger.
+- **Context:** Bash drops 24VAC and fully offs between channels (flow slams shut — hammer risk). The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) overlaps ~2s while keeping power on (two solenoids briefly, anti-hammer). Owner: water hammer is the bigger danger.
 - **Choice:**
   - Default: `sequencing: overlap`, `overlap_ms: 2000`. 24VAC stays up for the itinerary. Next station ON, then previous OFF. If duration < overlap, shrink overlap.
   - Config enum per schedule (or global fallback): `overlap | isolate`.
@@ -68,7 +68,7 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 ## P1 — Decide before UI build / cutover packaging
 
 ### D6. UI direction (stakeholder pick)
-- **Status:** decided → **Direction D hybrid strip** (Nick, 2026-09-12)
+- **Status:** decided → **Direction D hybrid strip** (owner, 2026-09-12)
 - **Choice:** Status-first home + compact station chips + always-visible STOP. Schedules on page 2 with clock + weekday chips + minutes (no raw cron / `PT3M` in the household UI).
 - **MVP vs v1:** phone-on-LAN is MVP. Wall / `screen-mount-part` screen is **v1, not MVP** — same layout, bigger type, STOP dominant, edits tucked. One UI, two densities (`?mode=kiosk` or equivalent). Not a second app.
 - **Preempt:** manual run may interrupt a schedule **with an explicit warning dialog**. STOP itself needs no extra confirm when already watering (safety action). See [ui-directions.md](./ui-directions.md).
@@ -108,11 +108,11 @@ Seasonal date windows (winter grass in October) are **not** P2 — they are v1 s
 | ID | Decision | Date | Notes |
 |---|---|---|---|
 | D1 | Go + `go-gpiocdev` | 2026-09-12 | decided; Pi 3; confirm 32 vs 64-bit OS (`uname -m`) |
-| D2 | overlap default, isolate configurable | 2026-09-12 | decided; Nick: hammer is the bigger danger; field-test still recommended |
+| D2 | overlap default, isolate configurable | 2026-09-12 | decided; owner: hammer is the bigger danger; field-test still recommended |
 | D3 | config + pin-map.md | 2026-09-12 | decided |
 | D4 | atomic JSON | 2026-09-12 | decided |
 | D5 | REST+JSON+SSE | 2026-09-12 | decided |
-| D6 | Direction D; wall = v1 not MVP | 2026-09-12 | decided; Nick |
+| D6 | Direction D; wall = v1 not MVP | 2026-09-12 | decided; owner |
 | D7 | LAN trust only | 2026-09-12 | decided for MVP/v1 |
 | D8 | systemd + static binary + ExecStop force-off | 2026-09-12 | decided; install path / update story still open |
 | D9 | dual-run then flip | 2026-09-12 | decided |

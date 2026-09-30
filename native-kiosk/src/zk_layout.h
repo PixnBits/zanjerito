@@ -13,6 +13,8 @@ enum zk_screen {
     ZK_SCREEN_PAUSED,
     ZK_SCREEN_PICKER,
     ZK_SCREEN_SCHEDULES,
+    ZK_SCREEN_STATION,
+    ZK_SCREEN_NEEDS_UPDATE,
     ZK_SCREEN_CONFIRM_STOP,
     ZK_SCREEN_CONFIRM_PAUSE
 };
@@ -39,7 +41,8 @@ enum zk_target_id {
     ZK_TARGET_INFO_CARD,
     ZK_TARGET_HOLD_EDIT,
     ZK_TARGET_MODAL_OK,
-    ZK_TARGET_MODAL_CANCEL
+    ZK_TARGET_MODAL_CANCEL,
+    ZK_TARGET_SCHEDULES
 };
 
 enum zk_target_kind {
@@ -91,6 +94,7 @@ typedef struct {
     zk_rect sched_header;
     zk_rect sched_rows[5];
     int n_sched_rows;
+    zk_rect schedules;
 } zk_layout_rects;
 
 void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout_rects *out);

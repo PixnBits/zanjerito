@@ -20,7 +20,9 @@ typedef struct {
     pthread_t th;
     int stop;
     int delay_ms;
+    int kiosk_404;
     pthread_mutex_t mu;
+    int n_kiosk;
     int n_status;
     int n_stations;
     int n_sched;
@@ -36,6 +38,7 @@ typedef struct {
 } stub_t;
 
 typedef struct {
+    int n_kiosk;
     int n_status;
     int n_stations;
     int n_sched;
@@ -49,6 +52,32 @@ typedef struct {
     char last_post_req[512];
     char last_post_body[512];
 } counts_t;
+
+static const char *kiosk_idle =
+    "{\"now\":\"2026-09-29T06:52:00-06:00\",\"timezone\":\"America/Denver\",\"phase\":\"Idle\","
+    "\"lockout\":false,\"last_error\":\"\",\"current_station\":\"\",\"stations_on\":[],"
+    "\"pause\":{\"paused\":false,\"until\":null,\"label\":\"\",\"reason\":\"\",\"source\":\"\",\"rain_inches\":0},"
+    "\"rain_strip\":{\"show\":false,\"inches\":0,\"hours\":0},"
+    "\"rain\":{\"enabled\":false,\"unavailable\":false,\"total_24h_inches\":0,\"total_72h_inches\":0,\"have_totals\":false},"
+    "\"next_run\":null,\"next_effective_run\":null,\"run\":null,"
+    "\"stations\":[{\"id\":\"front\",\"title\":\"Front\",\"color\":\"red\",\"on\":false,\"state\":\"idle\","
+    "\"rain_pause_exempt\":false,\"soil_percent\":40}],"
+    "\"soil\":{\"enabled\":true,\"et_known\":true,\"et_stale\":false,\"show_bars\":true,\"updated_at\":null}}";
+
+static const char *kiosk_run =
+    "{\"now\":\"2026-09-29T06:52:05-06:00\",\"timezone\":\"America/Denver\",\"phase\":\"Run\","
+    "\"lockout\":false,\"last_error\":\"\",\"current_station\":\"front\",\"stations_on\":[\"front\"],"
+    "\"pause\":{\"paused\":false,\"until\":null,\"label\":\"\",\"reason\":\"\",\"source\":\"\",\"rain_inches\":0},"
+    "\"rain_strip\":{\"show\":false,\"inches\":0,\"hours\":0},"
+    "\"rain\":{\"enabled\":false,\"unavailable\":false,\"total_24h_inches\":0,\"total_72h_inches\":0,\"have_totals\":false},"
+    "\"next_run\":null,\"next_effective_run\":null,"
+    "\"run\":{\"kind\":\"schedule\",\"program_id\":\"am\",\"program\":\"Morning\",\"started_at\":\"2026-09-29T06:52:00-06:00\","
+    "\"step_index\":0,\"step_count\":1,\"current_station\":\"front\",\"next_station\":\"\","
+    "\"step_elapsed_sec\":5,\"step_remaining_sec\":115,\"run_remaining_sec\":115,\"run_total_sec\":120,"
+    "\"steps\":[{\"station_id\":\"front\",\"title\":\"Front\",\"planned_sec\":120,\"elapsed_sec\":5,\"remaining_sec\":115,\"state\":\"active\"}]},"
+    "\"stations\":[{\"id\":\"front\",\"title\":\"Front\",\"color\":\"red\",\"on\":true,\"state\":\"running\","
+    "\"rain_pause_exempt\":false,\"soil_percent\":40}],"
+    "\"soil\":{\"enabled\":true,\"et_known\":true,\"et_stale\":false,\"show_bars\":true,\"updated_at\":null}}";
 
 static int64_t now_ms(void)
 {
@@ -268,20 +297,42 @@ static void *stub_main(void *arg)
         pthread_mutex_lock(&s->mu);
         zk_str_copy(s->last_req, sizeof s->last_req, req);
         zk_str_copy(s->last_body, sizeof s->last_body, body);
-        if (req_is(req, "GET", "/api/status")) {
+        if (req_is(req, "GET", "/api/kiosk")) {
+            s->n_kiosk++;
+            if (s->kiosk_404) {
+                pthread_mutex_unlock(&s->mu);
+                {
+                    const char *body404 = "{\"error\":\"not found\"}";
+                    char hdr[192];
+                    int m = snprintf(hdr, sizeof hdr,
+                                     "HTTP/1.0 404 Not Found\r\nContent-Type: application/json\r\n"
+                                     "Content-Length: %zu\r\nConnection: close\r\n\r\n",
+                                     strlen(body404));
+                    delay = __atomic_load_n(&s->delay_ms, __ATOMIC_ACQUIRE);
+                    if (delay > 0) {
+                        sleep_ms_flag(s, delay);
+                    }
+                    if (!__atomic_load_n(&s->stop, __ATOMIC_ACQUIRE) && m > 0) {
+                        send_all(cfd, hdr, (size_t)m);
+                        send_all(cfd, body404, strlen(body404));
+                    }
+                    close(cfd);
+                    continue;
+                }
+            }
+            json = (s->n_kiosk <= 1) ? kiosk_idle : kiosk_run;
+        } else if (req_is(req, "GET", "/api/status")) {
             s->n_status++;
-            json = (s->n_status <= 1)
-                       ? "{\"phase\":\"Idle\",\"now\":\"2026-09-29T06:52:00-06:00\"}"
-                       : "{\"phase\":\"Run\",\"now\":\"2026-09-29T06:52:05-06:00\"}";
+            json = "{\"phase\":\"Idle\"}";
         } else if (req_is(req, "GET", "/api/stations")) {
             s->n_stations++;
-            json = "{\"stations\":[{\"id\":\"front\",\"title\":\"Front\",\"color\":\"red\"}]}";
+            json = "{\"stations\":[]}";
         } else if (req_is(req, "GET", "/api/schedules")) {
             s->n_sched++;
             json = "{\"schedules\":[{\"id\":\"am\",\"note\":\"Morning\",\"enabled\":true,\"start\":\"08:00\",\"steps\":[{\"station_id\":\"front\",\"minutes\":2}]}]}";
         } else if (req_is(req, "GET", "/api/soil")) {
             s->n_soil++;
-            json = "{\"enabled\":true,\"et_known\":true,\"zones\":[{\"station_id\":\"front\",\"percent\":40,\"rate_measured\":true}]}";
+            json = "{\"enabled\":true}";
         } else if (req_is(req, "POST", "/api/run/cancel")) {
             s->n_post++;
             s->n_cancel++;
@@ -367,6 +418,7 @@ static void stub_counts(stub_t *s, counts_t *c)
 {
     pthread_mutex_lock(&s->mu);
     memset(c, 0, sizeof *c);
+    c->n_kiosk = s->n_kiosk;
     c->n_status = s->n_status;
     c->n_stations = s->n_stations;
     c->n_sched = s->n_sched;
@@ -408,7 +460,7 @@ static const char *find_home_rain(void)
     int i;
     for (i = 0; cands[i]; i++) {
         char p[512];
-        int wr = snprintf(p, sizeof p, "%s/status.json", cands[i]);
+        int wr = snprintf(p, sizeof p, "%s/kiosk.json", cands[i]);
         if (wr > 0 && (size_t)wr < sizeof p && access(p, R_OK) == 0) {
             return cands[i];
         }
@@ -446,26 +498,27 @@ static void test_initial_and_repoll(void)
     for (i = 0; i < 150; i++) {
         stub_counts(&s, &c);
         zk_data_get(&snap);
-        if (c.n_status >= 1 && c.n_stations >= 1 && c.n_sched >= 1 && c.n_soil >= 1 && snap.have_status &&
-            snap.have_stations && snap.have_schedules && snap.have_soil) {
+        if (c.n_kiosk >= 1 && c.n_sched >= 1 && snap.have_kiosk && snap.have_schedules) {
             break;
         }
         usleep(20000);
     }
     stub_counts(&s, &c);
     zk_data_get(&snap);
-    TEQ_I(c.n_status, 1);
-    TEQ_I(c.n_stations, 1);
+    TEQ_I(c.n_kiosk, 1);
+    TEQ_I(c.n_status, 0);
+    TEQ_I(c.n_stations, 0);
     TEQ_I(c.n_sched, 1);
-    TEQ_I(c.n_soil, 1);
+    TEQ_I(c.n_soil, 0);
     TEQ_I(c.n_post, 0);
-    TEQ_I(snap.have_status, 1);
-    TEQ_S(snap.status.phase, "Idle");
+    TEQ_I(snap.have_kiosk, 1);
+    TEQ_S(snap.kiosk.phase, "Idle");
     TEQ_I(snap.stale, 0);
+    TEQ_I(snap.api_state, ZK_API_OK);
     TCHECK(snap.status_age_s < 6.0, "age %g", snap.status_age_s);
-    TEQ_S(snap.stations.items[0].id, "front");
+    TEQ_S(snap.kiosk.stations[0].id, "front");
     TEQ_S(snap.schedules.items[0].id, "am");
-    TEQ_I(snap.soil.zones[0].percent, 40);
+    TEQ_I(snap.kiosk.stations[0].soil_percent, 40);
     TCHECK(snap.version >= 1, "version %u", snap.version);
     nr = read(zk_data_wake_fd(), junk, sizeof junk);
     TCHECK(nr > 0, "wake byte %zd", nr);
@@ -473,7 +526,7 @@ static void test_initial_and_repoll(void)
     t0 = now_ms();
     for (i = 0; i < 250; i++) {
         zk_data_get(&snap);
-        if (strcmp(snap.status.phase, "Run") == 0) {
+        if (strcmp(snap.kiosk.phase, "Run") == 0) {
             saw_run = 1;
             break;
         }
@@ -483,10 +536,11 @@ static void test_initial_and_repoll(void)
     TCHECK(now_ms() - t0 >= 1200, "second status too soon %ld", (long)(now_ms() - t0));
     TCHECK(now_ms() - t0 < 4500, "second status too late %ld", (long)(now_ms() - t0));
     stub_counts(&s, &c);
-    TEQ_I(c.n_stations, 1);
+    TEQ_I(c.n_stations, 0);
     TEQ_I(c.n_sched, 1);
-    TEQ_I(c.n_soil, 1);
-    TCHECK(c.n_status >= 2, "status polls %d", c.n_status);
+    TEQ_I(c.n_soil, 0);
+    TEQ_I(c.n_status, 0);
+    TCHECK(c.n_kiosk >= 2, "kiosk polls %d", c.n_kiosk);
     TCHECK(snap.version > v0, "version %u -> %u", v0, snap.version);
     zk_data_stop();
     stub_stop(&s);
@@ -514,19 +568,19 @@ static void test_stale_when_stub_stops(void)
     t0 = now_ms();
     for (i = 0; i < 100; i++) {
         stub_counts(&s, &c);
-        if (c.n_status >= 3 && c.n_stations >= 1) {
+        if (c.n_kiosk >= 3 && c.n_sched >= 1) {
             break;
         }
         usleep(20000);
     }
     stub_counts(&s, &c);
-    TCHECK(c.n_status >= 3, "short poll got %d status in %ld ms", c.n_status, (long)(now_ms() - t0));
+    TCHECK(c.n_kiosk >= 3, "short poll got %d kiosk in %ld ms", c.n_kiosk, (long)(now_ms() - t0));
     TCHECK(now_ms() - t0 < 1500, "short poll too slow %ld", (long)(now_ms() - t0));
     zk_data_get(&snap);
-    TEQ_I(snap.have_status, 1);
+    TEQ_I(snap.have_kiosk, 1);
     TEQ_I(snap.stale, 0);
-    zk_str_copy(phase, sizeof phase, snap.status.phase);
-    zk_str_copy(sid, sizeof sid, snap.stations.items[0].id);
+    zk_str_copy(phase, sizeof phase, snap.kiosk.phase);
+    zk_str_copy(sid, sizeof sid, snap.kiosk.stations[0].id);
     stub_stop(&s);
     for (i = 0; i < 180; i++) {
         int64_t g0 = now_ms();
@@ -539,10 +593,9 @@ static void test_stale_when_stub_stops(void)
         usleep(50000);
     }
     TCHECK(became, "stale age %g flag %d", snap.status_age_s, snap.stale);
-    TEQ_I(snap.have_status, 1);
-    TEQ_I(snap.have_stations, 1);
-    TEQ_S(snap.status.phase, phase);
-    TEQ_S(snap.stations.items[0].id, sid);
+    TEQ_I(snap.have_kiosk, 1);
+    TEQ_S(snap.kiosk.phase, phase);
+    TEQ_S(snap.kiosk.stations[0].id, sid);
     zk_data_stop();
 }
 
@@ -570,22 +623,19 @@ static void test_fixture(void)
     TEQ_I(thread_count(), threads);
     TEQ_I(count_sockets(), sockets);
     zk_data_get(&snap);
-    TEQ_I(snap.have_status, 1);
-    TEQ_I(snap.have_stations, 1);
+    TEQ_I(snap.have_kiosk, 1);
     TEQ_I(snap.have_schedules, 1);
-    TEQ_I(snap.have_soil, 1);
-    TEQ_S(snap.status.phase, "Idle");
-    TEQ_I(snap.status.has_now, 1);
-    TEQ_S(snap.status.timezone, "UTC");
-    TEQ_I(snap.stations.n, 4);
-    TEQ_S(snap.stations.items[0].id, "az01");
-    TEQ_S(snap.stations.items[0].title, "Test Station 1");
+    TEQ_S(snap.kiosk.phase, "Idle");
+    TEQ_I(snap.kiosk.has_now, 1);
+    TEQ_S(snap.kiosk.timezone, "America/Denver");
+    TEQ_I(snap.kiosk.n_stations, 4);
+    TEQ_S(snap.kiosk.stations[0].id, "az01");
+    TEQ_S(snap.kiosk.stations[0].title, "Test Station 1");
     TEQ_I(snap.schedules.n, 2);
     TEQ_S(snap.schedules.items[0].id, "morning");
-    TEQ_I(snap.soil.enabled, 1);
-    TEQ_I(snap.soil.n_zones, 4);
-    TEQ_I(snap.soil.zones[0].percent, 58);
-    TCHECK(wall_eq(snap.wall, snap.status.now), "frozen wall %04d-%02d-%02d %02d:%02d:%02d vs status",
+    TEQ_I(snap.kiosk.soil.enabled, 1);
+    TEQ_I(snap.kiosk.stations[0].soil_percent, 58);
+    TCHECK(wall_eq(snap.wall, snap.kiosk.now), "frozen wall %04d-%02d-%02d %02d:%02d:%02d vs status",
            snap.wall.y, snap.wall.m, snap.wall.d, snap.wall.hh, snap.wall.mm, snap.wall.ss);
     TCHECK(snap.status_age_s < 2.0, "fixture age %g", snap.status_age_s);
     zk_data_submit_action(ZK_ACT_STOP, NULL);
@@ -620,7 +670,7 @@ static void test_fixture(void)
         usleep(20000);
     }
     zk_data_get(&snap);
-    TCHECK(zk_wall_epoch_sec(snap.wall) >= zk_wall_epoch_sec(snap.status.now) + 1, "live wall did not advance");
+    TCHECK(zk_wall_epoch_sec(snap.wall) >= zk_wall_epoch_sec(snap.kiosk.now) + 1, "live wall did not advance");
     TEQ_I(thread_count(), threads);
     zk_data_stop();
     TEQ_I(thread_count(), threads);
@@ -646,12 +696,12 @@ static void test_actions(void)
     TCHECK(zk_data_start(&app) == 0, "start ro");
     for (i = 0; i < 100; i++) {
         zk_data_get(&snap);
-        if (snap.have_status) {
+        if (snap.have_kiosk) {
             break;
         }
         usleep(20000);
     }
-    TEQ_I(snap.have_status, 1);
+    TEQ_I(snap.have_kiosk, 1);
     stub_counts(&s, &c);
     zk_data_submit_action(ZK_ACT_STOP, NULL);
     TCHECK(wait_done(&res, 2000) == 0, "ro result");
@@ -663,7 +713,7 @@ static void test_actions(void)
     stub_counts(&s, &c1);
     TEQ_I(c1.n_post, 0);
     TEQ_I(c1.n_cancel, 0);
-    TEQ_I(c1.n_status, c.n_status);
+    TEQ_I(c1.n_kiosk, c.n_kiosk);
     zk_data_stop();
 
     memset(&app, 0, sizeof app);
@@ -673,7 +723,7 @@ static void test_actions(void)
     for (i = 0; i < 100; i++) {
         zk_data_get(&snap);
         stub_counts(&s, &c);
-        if (snap.have_status && c.n_status >= 1 && c.n_stations >= 1) {
+        if (snap.have_kiosk && c.n_kiosk >= 1 && c.n_sched >= 1) {
             break;
         }
         usleep(20000);
@@ -686,7 +736,7 @@ static void test_actions(void)
     TEQ_I(res.http_status, 200);
     for (i = 0; i < 50; i++) {
         stub_counts(&s, &c1);
-        if (c1.n_status > c.n_status) {
+        if (c1.n_kiosk > c.n_kiosk) {
             break;
         }
         usleep(20000);
@@ -695,7 +745,8 @@ static void test_actions(void)
     TEQ_I(c1.n_cancel, 1);
     TEQ_I(c1.n_post, 1);
     TCHECK(strncmp(c1.last_post_req, "POST /api/run/cancel", 20) == 0, "cancel req %s", c1.last_post_req);
-    TCHECK(c1.n_status > c.n_status, "no immediate status repoll %d -> %d", c.n_status, c1.n_status);
+    TCHECK(c1.n_kiosk > c.n_kiosk, "no immediate kiosk repoll %d -> %d", c.n_kiosk, c1.n_kiosk);
+    TEQ_I(c1.n_status, 0);
 
     zk_data_submit_action(ZK_ACT_PAUSE, "{\"days\":2}");
     TCHECK(wait_done(&res, 2000) == 0, "pause");
@@ -736,18 +787,18 @@ static void test_get_does_not_block(void)
     TCHECK(zk_data_start(&app) == 0, "start");
     for (i = 0; i < 200; i++) {
         stub_counts(&s, &c);
-        if (c.n_status >= 1) {
+        if (c.n_kiosk >= 1) {
             break;
         }
         usleep(5000);
     }
     stub_counts(&s, &c);
-    TCHECK(c.n_status >= 1, "worker never requested status");
+    TCHECK(c.n_kiosk >= 1, "worker never requested kiosk");
     t0 = now_ms();
     zk_data_get(&snap);
     dt = now_ms() - t0;
     TCHECK(dt < 50, "get took %ld ms while worker blocked", (long)dt);
-    TEQ_I(snap.have_status, 0);
+    TEQ_I(snap.have_kiosk, 0);
     t0 = now_ms();
     for (i = 0; i < 100; i++) {
         int64_t a = now_ms();
@@ -760,19 +811,51 @@ static void test_get_does_not_block(void)
     dt = now_ms() - t0;
     TCHECK(dt < 100, "100 gets took %ld ms", (long)dt);
     TCHECK(worst < 30, "slowest get %ld ms", (long)worst);
-    TEQ_I(snap.have_status, 0);
+    TEQ_I(snap.have_kiosk, 0);
     for (i = 0; i < 400; i++) {
         zk_data_get(&snap);
-        if (snap.have_status && snap.have_stations && snap.have_schedules && snap.have_soil) {
+        if (snap.have_kiosk && snap.have_schedules) {
             break;
         }
         usleep(20000);
     }
-    TEQ_I(snap.have_status, 1);
-    TEQ_I(snap.have_stations, 1);
+    TEQ_I(snap.have_kiosk, 1);
     TEQ_I(snap.have_schedules, 1);
-    TEQ_I(snap.have_soil, 1);
-    TEQ_S(snap.stations.items[0].id, "front");
+    TEQ_S(snap.kiosk.stations[0].id, "front");
+    zk_data_stop();
+    stub_stop(&s);
+}
+
+static void test_kiosk_404(void)
+{
+    stub_t s;
+    zk_app_t app;
+    zk_snapshot_t snap;
+    counts_t c;
+    char base[64];
+    int i;
+
+    TCHECK(setenv("ZK_POLL_MS_STATUS", "200", 1) == 0, "setenv");
+    TCHECK(stub_start(&s, 0) == 0, "stub");
+    s.kiosk_404 = 1;
+    snprintf(base, sizeof base, "http://127.0.0.1:%d", s.port);
+    memset(&app, 0, sizeof app);
+    app.api = base;
+    TCHECK(zk_data_start(&app) == 0, "start");
+    for (i = 0; i < 80; i++) {
+        zk_data_get(&snap);
+        stub_counts(&s, &c);
+        if (c.n_kiosk >= 1 && snap.api_state == ZK_API_NEEDS_UPDATE) {
+            break;
+        }
+        usleep(20000);
+    }
+    stub_counts(&s, &c);
+    zk_data_get(&snap);
+    TCHECK(c.n_kiosk >= 1, "404 kiosk polls %d", c.n_kiosk);
+    TEQ_I(c.n_status, 0);
+    TEQ_I(snap.api_state, ZK_API_NEEDS_UPDATE);
+    TEQ_I(snap.have_kiosk, 0);
     zk_data_stop();
     stub_stop(&s);
 }
@@ -785,5 +868,6 @@ int main(void)
     test_fixture();
     test_actions();
     test_get_does_not_block();
+    test_kiosk_404();
     return zk_test_report("test_data");
 }

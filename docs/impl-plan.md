@@ -9,7 +9,7 @@
 
 - Scoped PRs; one concern each.
 - Reviews from specialist bots (Architect, Coder, Tester, CISO as relevant); merge when the team agrees.
-- Work on Nick’s Linux host (not Cloud Agents).
+- Work on the owner’s Linux host (not Cloud Agents).
 - Bash (`mvp-bash`) stays production until dual-run flip (D9).
 
 ## PR sequence
@@ -21,7 +21,7 @@
 | 3 | Atomic JSON store (load/save pin map, stations, schedules) | `rewrite/go-store` | Coder, Tester |
 | 4 | Scheduler + Front West 4 / North 8 / South 8 fixture; skip+log collision | `rewrite/go-schedule` | Architect, Tester |
 | 5 | REST + JSON + SSE API | `rewrite/go-api` | Architect, Coder |
-| 6 | Direction D phone UI (MVP) embedded | `rewrite/go-ui` | Nick + stakeholders, Tester |
+| 6 | Direction D phone UI (MVP) embedded | `rewrite/go-ui` | Owner + stakeholders, Tester |
 | 7 | systemd unit + deploy docs (`/opt/zanjerito` lean) | `rewrite/go-deploy` | CISO, Coder |
 | 8 | Dual-run / parity helpers + cutover checklist | `rewrite/go-cutover` | Architect, Tester |
 

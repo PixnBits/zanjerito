@@ -65,7 +65,7 @@ All of (completed for this Pi):
 
 - [x] **N GOOD** dual-run mornings (journal match vs bash).
 - [x] `gpiocdev` PR **merged** and binary **deployed** to `/opt/zanjerito` while still `DRIVER=dualrun` (or a brief `lockout` smoke — never flip DRIVER early).
-- [x] Nick / portfolio green-light to cut bash cron (~2026-09-22).
+- [x] Owner / portfolio green-light to cut bash cron (~2026-09-22).
 
 ## Flip (copy-paste) — done ~2026-09-22
 

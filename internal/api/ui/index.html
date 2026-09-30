@@ -964,13 +964,31 @@
       if (name.length > 28) name = name.slice(0, 26).trimEnd() + "…";
       return p.ymd + " " + hm + (name ? " · " + name : "");
     }
+    /** Only a JSON object that carries next_run counts. A malformed 200 keeps the old scan. */
+    function kioskNextFrom(d) {
+      if (!d || typeof d !== "object" || Array.isArray(d)) return { ok: false, next: null };
+      if (!Object.prototype.hasOwnProperty.call(d, "next_run")) return { ok: false, next: null };
+      return { ok: true, next: d.next_run };
+    }
+    let kioskNextBusy = false;
     async function loadKioskNext() {
+      if (kioskNextBusy) return; // one in flight; a hung fetch must not pile up
+      kioskNextBusy = true;
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 3000);
       try {
-        const d = await j("/api/kiosk", { cache: "no-store" });
-        state.kioskNext = d ? d.next_run : null;
-        state.kioskNextReady = true;
-        paintStatus();
-      } catch (e) {}
+        const d = await j("/api/kiosk", { cache: "no-store", signal: ctl.signal });
+        const k = kioskNextFrom(d);
+        if (k.ok) {
+          state.kioskNext = k.next;
+          state.kioskNextReady = true;
+          paintStatus();
+        }
+      } catch (e) {
+      } finally {
+        clearTimeout(timer);
+        kioskNextBusy = false;
+      }
     }
     function weekdaysOverlap(a, b) {
       const A = (a.weekdays || []).map((d) => String(d).toLowerCase());

@@ -40,7 +40,7 @@ enum {
 #define MIDDOT "\xC2\xB7"
 #define ELLIPSIS ZK_TEXT_ELLIPSIS
 
-enum { HIT_N = 24, ACT_SCHED_BODY = 1000 };
+enum { HIT_N = 32, ACT_SCHED_BODY = 1000 };
 
 typedef struct {
     int content;
@@ -51,6 +51,7 @@ typedef struct {
     int soil_mask;
     int steps;
     int sched_i;
+    int station_i;
     int have;
 } view_key;
 
@@ -97,6 +98,16 @@ typedef struct {
     lv_obj_t *stale;
     lv_obj_t *toast;
     lv_obj_t *toast_lbl;
+    lv_obj_t *st_title;
+    lv_obj_t *st_dot;
+    lv_obj_t *st_state;
+    lv_obj_t *st_exempt;
+    lv_obj_t *st_soil_pct;
+    lv_obj_t *st_soil_fill;
+    lv_obj_t *st_soil_msg;
+    int st_bar_w;
+    lv_obj_t *nu_title;
+    lv_obj_t *nu_body;
 } widgets_t;
 
 static zk_app_t g_app;
@@ -112,6 +123,8 @@ static int g_modal;
 static int g_pressed;
 static int g_pick_chip = -1;
 static int g_sched_i;
+static int g_station_i;
+static char g_station_id[ZK_ID_MAX];
 static uint32_t g_ver;
 static uint32_t g_seen_seq;
 static int g_seen_ok;
@@ -378,34 +391,52 @@ static void lab_width(lv_obj_t *lb, int w, lv_text_align_t align)
 
 static int fault_on(const zk_snapshot_t *s)
 {
-    if (!s->have_status) {
+    if (!s->have_kiosk) {
         return 0;
     }
-    if (s->status.fault || s->status.lockout) {
+    if (s->kiosk.fault || s->kiosk.lockout) {
         return 1;
     }
-    return s->status.last_error[0] ? 1 : 0;
+    return s->kiosk.last_error[0] ? 1 : 0;
 }
 
 static int base_screen(const zk_snapshot_t *s)
 {
-    if (s->have_status && s->status.watering) {
+    if (s->api_state == ZK_API_NEEDS_UPDATE) {
+        return ZK_SCREEN_NEEDS_UPDATE;
+    }
+    if (s->have_kiosk && s->kiosk.has_run) {
         return ZK_SCREEN_RUNNING;
     }
-    if (s->have_status && s->status.paused) {
+    if (s->have_kiosk && s->kiosk.pause.paused) {
         return ZK_SCREEN_PAUSED;
     }
     return ZK_SCREEN_HOME;
 }
 
+static int station_still_there(const zk_snapshot_t *s)
+{
+    if (!s->have_kiosk || !g_station_id[0]) {
+        return g_station_i >= 0 && s->have_kiosk && g_station_i < s->kiosk.n_stations;
+    }
+    return zk_kiosk_station_index(&s->kiosk, g_station_id) >= 0;
+}
+
 static void resolve(const zk_snapshot_t *s, int *content, int *modal)
 {
     int base = base_screen(s);
+    if (g_nav == ZK_SCREEN_STATION && !station_still_there(s)) {
+        g_nav = -1;
+        g_station_id[0] = 0;
+        g_station_i = -1;
+    }
     if (g_override == ZK_SCREEN_CONFIRM_STOP || g_override == ZK_SCREEN_CONFIRM_PAUSE) {
         *modal = g_override;
         *content = base;
-        if (g_nav == ZK_SCREEN_PICKER || g_nav == ZK_SCREEN_SCHEDULES) {
-            *content = g_nav;
+        if (g_nav == ZK_SCREEN_PICKER || g_nav == ZK_SCREEN_SCHEDULES || g_nav == ZK_SCREEN_STATION) {
+            if (base != ZK_SCREEN_NEEDS_UPDATE) {
+                *content = g_nav;
+            }
         }
         return;
     }
@@ -415,7 +446,11 @@ static void resolve(const zk_snapshot_t *s, int *content, int *modal)
         return;
     }
     *modal = g_modal;
-    if (g_nav == ZK_SCREEN_PICKER || g_nav == ZK_SCREEN_SCHEDULES) {
+    if (base == ZK_SCREEN_NEEDS_UPDATE) {
+        *content = base;
+        return;
+    }
+    if (g_nav == ZK_SCREEN_PICKER || g_nav == ZK_SCREEN_SCHEDULES || g_nav == ZK_SCREEN_STATION) {
         *content = g_nav;
     } else {
         *content = base;
@@ -430,17 +465,18 @@ static void fill_key(const zk_snapshot_t *s, int content, int modal, view_key *k
     memset(in, 0, sizeof *in);
     k->content = content;
     k->modal = modal;
-    k->have = s->have_status ? 1 : 0;
+    k->have = s->have_kiosk ? 1 : 0;
     k->fault = fault_on(s);
-    k->rain = (s->have_status && zk_rain_strip_visible(&s->status)) ? 1 : 0;
-    nst = (s->have_stations && s->stations.n > 0) ? s->stations.n : 0;
+    k->rain = (s->have_kiosk && zk_rain_strip_visible(&s->kiosk)) ? 1 : 0;
+    nst = (s->have_kiosk && s->kiosk.n_stations > 0) ? s->kiosk.n_stations : 0;
     if (nst > 8) {
         nst = 8;
     }
     k->n_st = nst;
-    if (s->have_stations && s->have_soil) {
+    k->station_i = g_station_i;
+    if (s->have_kiosk) {
         for (i = 0; i < nst; i++) {
-            if (zk_soil_percent(&s->soil, s->stations.items[i].id) >= 0) {
+            if (zk_station_soil_percent(&s->kiosk, i) >= 0) {
                 k->soil_mask |= 1 << i;
             }
         }
@@ -475,35 +511,15 @@ static void fill_key(const zk_snapshot_t *s, int content, int modal, view_key *k
 
 static const char *station_title(const zk_snapshot_t *s, const char *id)
 {
-    int i;
+    const zk_kiosk_station_t *st;
     if (!id || !id[0]) {
         return "";
     }
-    if (s->have_stations) {
-        for (i = 0; i < s->stations.n; i++) {
-            if (strcmp(s->stations.items[i].id, id) == 0) {
-                return s->stations.items[i].title;
-            }
-        }
+    st = s->have_kiosk ? zk_kiosk_station(&s->kiosk, id) : NULL;
+    if (st && st->title[0]) {
+        return st->title;
     }
     return id;
-}
-
-static int station_on(const zk_status_t *st, const char *id)
-{
-    int i;
-    if (!st || !id || !id[0]) {
-        return 0;
-    }
-    if (st->current_station[0] && strcmp(st->current_station, id) == 0) {
-        return 1;
-    }
-    for (i = 0; i < st->n_on; i++) {
-        if (strcmp(st->stations_on[i], id) == 0) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 static void name_upper(const zk_schedule_t *sch, char *out, size_t cap)
@@ -515,14 +531,6 @@ static void name_upper(const zk_schedule_t *sch, char *out, size_t cap)
     }
     zk_str_upper(tmp);
     zk_str_copy(out, cap, tmp);
-}
-
-static void name_raw(const zk_schedule_t *sch, char *out, size_t cap)
-{
-    zk_str_trim_copy(out, cap, sch->note);
-    if (!out[0]) {
-        zk_str_trim_copy(out, cap, sch->id);
-    }
 }
 
 static void sched_summary(const zk_schedule_t *sch, char *out, size_t cap)
@@ -590,19 +598,15 @@ static void ends_about(const zk_schedule_t *sch, char *line, size_t cap)
     snprintf(line, cap, "%s", t);
 }
 
-static void rain_parts(const zk_status_t *st, char *bold, size_t cb, char *rest, size_t cr)
+static void rain_parts(const zk_rain_strip_t *rs, char *bold, size_t cb, char *rest, size_t cr)
 {
-    double inches;
-    int hours;
     char amt[16];
-    if ((st->rain.total_24h + 1e-9) >= 0.05) {
+    int hours;
+    hours = rs && (rs->hours == 24 || rs->hours == 72) ? rs->hours : (rs ? rs->hours : 24);
+    if (hours <= 0) {
         hours = 24;
-        inches = st->rain.total_24h;
-    } else {
-        hours = 72;
-        inches = st->rain.total_72h;
     }
-    zk_fmt_inches(inches, amt, sizeof amt);
+    zk_fmt_inches(rs ? rs->inches : 0, amt, sizeof amt);
     snprintf(bold, cb, "Rain %s in", amt);
     snprintf(rest, cr, " in the last %d h", hours);
 }
@@ -758,6 +762,7 @@ static void on_evt(lv_event_t *e)
         break;
     case ZK_TARGET_HEADER_NEXT:
     case ZK_TARGET_INFO_CARD:
+    case ZK_TARGET_SCHEDULES:
         g_nav = ZK_SCREEN_SCHEDULES;
         g_modal = 0;
         g_dirty = 1;
@@ -796,6 +801,18 @@ static void on_evt(lv_event_t *e)
         note_result();
         break;
     default:
+        if (id >= ZK_TARGET_TILE0 && id <= ZK_TARGET_TILE7) {
+            int ti = id - ZK_TARGET_TILE0;
+            zk_data_get(&snap);
+            g_station_i = ti;
+            g_station_id[0] = 0;
+            if (snap.have_kiosk && ti >= 0 && ti < snap.kiosk.n_stations) {
+                zk_str_copy(g_station_id, sizeof g_station_id, snap.kiosk.stations[ti].id);
+            }
+            g_nav = ZK_SCREEN_STATION;
+            g_modal = 0;
+            g_dirty = 1;
+        }
         break;
     }
 }
@@ -848,19 +865,67 @@ static void build_rail(lv_obj_t *scr, const zk_layout_rects *L, int content)
 {
     int running = content == ZK_SCREEN_RUNNING;
     build_stop(scr, L->stop, running);
+    if (content == ZK_SCREEN_NEEDS_UPDATE) {
+        return;
+    }
     if (content == ZK_SCREEN_HOME || content == ZK_SCREEN_RUNNING) {
         build_slot(scr, L->slot, ZK_TARGET_PAUSE, "Pause", &zk_icon_pause_44, COL_PAUSE, COL_WHITE, running);
     } else if (content == ZK_SCREEN_PAUSED) {
         build_slot(scr, L->slot, ZK_TARGET_RESUME, "Resume", &zk_icon_play_44, COL_TEAL, COL_WHITE, 0);
+    } else if (content == ZK_SCREEN_STATION) {
+        build_slot(scr, L->slot, ZK_TARGET_BACK, "Close", &zk_icon_back_44, COL_BACK, COL_INK, 0);
     } else {
         build_slot(scr, L->slot, ZK_TARGET_BACK, "Back", &zk_icon_back_44, COL_BACK, COL_INK, 0);
     }
 }
 
+static void build_schedules_btn(lv_obj_t *scr, zk_rect r)
+{
+    lv_obj_t *b;
+    lv_obj_t *lb;
+    int y0;
+    if (r.w <= 0 || r.h <= 0) {
+        return;
+    }
+    b = target(scr, r, ZK_TARGET_SCHEDULES, COL_CARD, 22, 1);
+    y0 = (r.h - 44 - 8 - 28) / 2;
+    if (y0 < 6) {
+        y0 = 6;
+    }
+    icon_at(b, &zk_icon_list_52, COL_TEAL, (r.w - 52) / 2, y0);
+    mark_lab("sched_btn", 1);
+    lb = lab(b, "Schedules", &zk_font_b_26, COL_INK, 4, y0 + 44 + 4);
+    lab_width(lb, r.w - 8, LV_TEXT_ALIGN_CENTER);
+}
+
+static uint32_t station_color(const char *c)
+{
+    unsigned r, g, b;
+    if (!c || !c[0]) {
+        return COL_TEAL;
+    }
+    if (c[0] == '#' && strlen(c) >= 7 &&
+        sscanf(c, "#%2x%2x%2x", &r, &g, &b) == 3) {
+        return (r << 16) | (g << 8) | b;
+    }
+    if (strcmp(c, "red") == 0) {
+        return 0xC44536;
+    }
+    if (strcmp(c, "yellow") == 0) {
+        return 0xD4A017;
+    }
+    if (strcmp(c, "blue") == 0) {
+        return 0x2A6F97;
+    }
+    if (strcmp(c, "green") == 0) {
+        return 0x4F7C4A;
+    }
+    return COL_TEAL;
+}
+
 static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapshot_t *s, const view_key *k)
 {
     lv_obj_t *hdr;
-    lv_obj_t *brand;
     int i;
     hdr = target(scr, L->header, ZK_TARGET_HEADER_NEXT, COL_BG, 0, 0);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
@@ -868,18 +933,12 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
     lv_obj_set_style_translate_y(hdr, 0, LV_STATE_PRESSED);
     mark_lab("hdr_kicker", 1);
     g_w.hdr_kicker = lab(hdr, "", &zk_font_b_26, COL_MUT, 4, 6);
-    lab_width(g_w.hdr_kicker, L->header.w - 160, LV_TEXT_ALIGN_LEFT);
+    lab_width(g_w.hdr_kicker, L->header.w - 8, LV_TEXT_ALIGN_LEFT);
     lv_obj_set_style_text_letter_space(g_w.hdr_kicker, 1, 0);
     mark_lab("hdr_big", 1);
     g_w.hdr_big = lab(hdr, "", &zk_font_xb_50, COL_INK, 4, 38);
-    lab_width(g_w.hdr_big, L->header.w - 160, LV_TEXT_ALIGN_LEFT);
-    brand = box_at(hdr, L->header.w - 148, 0, 144, 96, COL_BG, 0);
-    lv_obj_set_style_bg_opa(brand, LV_OPA_TRANSP, 0);
-    icon_at(brand, &zk_icon_mark_44, COL_TEAL, (144 - 44) / 2, 0);
-    {
-        lv_obj_t *nm = lab(brand, "Zanjerito", &zk_font_alfa_26, COL_TEAL, 0, 46);
-        lab_width(nm, 144, LV_TEXT_ALIGN_CENTER);
-    }
+    lab_width(g_w.hdr_big, L->header.w - 8, LV_TEXT_ALIGN_LEFT);
+    build_schedules_btn(scr, L->schedules);
     if (k->fault && L->rain.w > 0) {
         lv_obj_t *pill = box_rect(scr, L->rain, COL_STOP, 16);
         mark_lab("fault_lbl", 1);
@@ -979,15 +1038,16 @@ static void build_paused(lv_obj_t *scr, const zk_layout_rects *L, const view_key
     if (L->banner.w <= 0) {
         return;
     }
+    build_schedules_btn(scr, L->schedules);
     ban = box_rect(scr, L->banner, COL_PAUSE, 24);
-    icon_at(ban, &zk_icon_cloud_64, COL_WHITE, 18, (L->banner.h - 64) / 2);
+    icon_at(ban, &zk_icon_cloud_36, COL_WHITE, 14, (L->banner.h - 36) / 2);
     mark_lab("ban_title", 1);
-    g_w.ban_title = lab(ban, "", &zk_font_b_26, COL_WHITE, 18 + 64 + 16, 18);
+    g_w.ban_title = lab(ban, "", &zk_font_b_26, COL_WHITE, 14 + 36 + 12, 18);
     lv_obj_set_style_text_letter_space(g_w.ban_title, 1, 0);
-    lab_width(g_w.ban_title, L->banner.w - 18 - 64 - 16 - 16, LV_TEXT_ALIGN_LEFT);
+    lab_width(g_w.ban_title, L->banner.w - 14 - 36 - 12 - 12, LV_TEXT_ALIGN_LEFT);
     mark_lab("ban_until", 1);
-    g_w.ban_until = lab(ban, "", &zk_font_xb_48, COL_WHITE, 18 + 64 + 16, 48);
-    lab_width(g_w.ban_until, L->banner.w - 18 - 64 - 16 - 16, LV_TEXT_ALIGN_LEFT);
+    g_w.ban_until = lab(ban, "", &zk_font_xb_36, COL_WHITE, 14 + 36 + 12, 54);
+    lab_width(g_w.ban_until, L->banner.w - 14 - 36 - 12 - 12, LV_TEXT_ALIGN_LEFT);
     if (k->rain && L->rain.w > 0) {
         lv_obj_t *strip = box_rect(scr, L->rain, COL_RAINBG, 16);
         icon_at(strip, &zk_icon_cloud_36, COL_RAINFG, 14, 11);
@@ -1005,7 +1065,7 @@ static void build_paused(lv_obj_t *scr, const zk_layout_rects *L, const view_key
         lv_obj_set_style_text_letter_space(kicker, 1, 0);
     }
     mark_lab("info_name", 1);
-    g_w.info_name = lab(info, "", &zk_font_xb_36, COL_INK, 20, 52);
+    g_w.info_name = lab(info, "", &zk_font_xb_32, COL_INK, 20, 54);
     lab_width(g_w.info_name, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
     mark_lab("info_sub0", 0);
     g_w.info_sub0 = lab(info, "Runs again after you resume", &zk_font_sb_28, COL_MUT, 20, 112);
@@ -1162,6 +1222,69 @@ static void build_schedules(lv_obj_t *scr, const zk_layout_rects *L, const zk_sn
     (void)s;
 }
 
+static const char *station_state_label(const char *state)
+{
+    if (state && strcmp(state, "running") == 0) {
+        return "Running";
+    }
+    if (state && strcmp(state, "queued") == 0) {
+        return "Queued";
+    }
+    return "Idle";
+}
+
+static void build_station(lv_obj_t *scr, const zk_layout_rects *L)
+{
+    lv_obj_t *card;
+    lv_obj_t *bar;
+    int bar_w;
+    if (L->title.w > 0) {
+        lv_obj_t *t = lab(scr, "Station", &zk_font_xb_44, COL_INK, L->title.x + 2, L->title.y + 2);
+        (void)t;
+    }
+    card = box_rect(scr, L->card, COL_CARD, 26);
+    border_on(card, 3);
+    mark_lab("st_title", 1);
+    g_w.st_title = lab(card, "", &zk_font_xb_50, COL_INK, 20, 18);
+    lab_width(g_w.st_title, L->card.w - 40, LV_TEXT_ALIGN_LEFT);
+    g_w.st_dot = box_at(card, 20, 78, 22, 22, COL_TEAL, 11);
+    mark_lab("st_state", 1);
+    g_w.st_state = lab(card, "", &zk_font_xb_36, COL_INK, 52, 72);
+    lab_width(g_w.st_state, L->card.w - 72, LV_TEXT_ALIGN_LEFT);
+    mark_lab("st_exempt", 1);
+    g_w.st_exempt = lab(card, "", &zk_font_sb_28, COL_MUT, 20, 118);
+    lab_width(g_w.st_exempt, L->card.w - 40, LV_TEXT_ALIGN_LEFT);
+    mark_lab("st_soil_msg", 1);
+    g_w.st_soil_msg = lab(card, "", &zk_font_sb_28, COL_MUT, 20, 160);
+    lab_width(g_w.st_soil_msg, L->card.w - 40, LV_TEXT_ALIGN_LEFT);
+    bar_w = L->card.w - 40 - 92;
+    if (bar_w < 40) {
+        bar_w = 40;
+    }
+    bar = box_at(card, 20, 210, bar_w, 38, COL_TRACK, 12);
+    border_on(bar, 2);
+    lv_obj_set_style_clip_corner(bar, true, 0);
+    g_w.st_bar_w = bar_w - 4;
+    g_w.st_soil_fill = box_at(bar, 2, 2, 0, 34, COL_FILL, 8);
+    mark_lab("st_soil_pct", 1);
+    g_w.st_soil_pct = lab(card, "", &zk_font_xb_44, COL_INK, L->card.w - 20 - 92, 206);
+    lab_width(g_w.st_soil_pct, 92, LV_TEXT_ALIGN_RIGHT);
+}
+
+static void build_needs_update(lv_obj_t *scr, const zk_layout_rects *L)
+{
+    lv_obj_t *card = box_rect(scr, L->card, COL_CARD, 26);
+    border_on(card, 3);
+    mark_lab("nu_title", 0);
+    g_w.nu_title = lab(card, "Controller needs an update", &zk_font_xb_44, COL_INK, 24, 40);
+    lab_width(g_w.nu_title, L->card.w - 48, LV_TEXT_ALIGN_LEFT);
+    lv_label_set_long_mode(g_w.nu_title, LV_LABEL_LONG_WRAP);
+    mark_lab("nu_body", 1);
+    g_w.nu_body = lab(card, "Please update the controller.", &zk_font_sb_28, COL_MUT, 24, 160);
+    lab_width(g_w.nu_body, L->card.w - 48, LV_TEXT_ALIGN_LEFT);
+    lv_label_set_long_mode(g_w.nu_body, LV_LABEL_LONG_WRAP);
+}
+
 static void build_modal(lv_obj_t *scr, int modal)
 {
     zk_layout_in in;
@@ -1256,55 +1379,126 @@ static void apply_rain(const char *bold, const char *rest)
     set_lab_fit_px(g_w.rain_rest, rest, rest_max);
 }
 
+static void apply_station_sheet(const zk_snapshot_t *s)
+{
+    const zk_kiosk_station_t *st = NULL;
+    int idx = -1;
+    int pct;
+    char a[160];
+    if (s->have_kiosk) {
+        if (g_station_id[0]) {
+            idx = zk_kiosk_station_index(&s->kiosk, g_station_id);
+        }
+        if (idx < 0) {
+            idx = g_station_i;
+        }
+        if (idx >= 0 && idx < s->kiosk.n_stations) {
+            st = &s->kiosk.stations[idx];
+            zk_str_copy(g_station_id, sizeof g_station_id, st->id);
+            g_station_i = idx;
+        }
+    }
+    if (!st) {
+        set_lab_fit(g_w.st_title, "--");
+        set_lab_fit(g_w.st_state, "");
+        set_lab_fit(g_w.st_exempt, "");
+        set_lab_fit(g_w.st_soil_msg, "");
+        set_lab(g_w.st_soil_pct, "");
+        return;
+    }
+    set_lab_fit(g_w.st_title, st->title[0] ? st->title : st->id);
+    if (g_w.st_dot) {
+        lv_obj_set_style_bg_color(g_w.st_dot, hex(station_color(st->color)), 0);
+    }
+    set_lab_fit(g_w.st_state, station_state_label(st->state));
+    if (st->rain_pause_exempt) {
+        set_lab_fit(g_w.st_exempt, "Skips rain pauses");
+        lv_obj_remove_flag(g_w.st_exempt, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        set_lab_fit(g_w.st_exempt, "");
+        lv_obj_add_flag(g_w.st_exempt, LV_OBJ_FLAG_HIDDEN);
+    }
+    pct = zk_station_soil_percent(&s->kiosk, idx);
+    if (pct >= 0) {
+        int low = zk_soil_low(pct);
+        int fill_w;
+        set_lab_fit(g_w.st_soil_msg, "");
+        lv_obj_add_flag(g_w.st_soil_msg, LV_OBJ_FLAG_HIDDEN);
+        snprintf(a, sizeof a, "%d%%", pct);
+        set_lab(g_w.st_soil_pct, a);
+        lv_obj_set_style_text_color(g_w.st_soil_pct, hex(low ? COL_LOWTX : COL_INK), 0);
+        fill_w = g_w.st_bar_w * pct / 100;
+        if (fill_w < 0) {
+            fill_w = 0;
+        }
+        if (g_w.st_soil_fill) {
+            lv_obj_remove_flag(lv_obj_get_parent(g_w.st_soil_fill), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_width(g_w.st_soil_fill, fill_w);
+            lv_obj_set_style_bg_color(g_w.st_soil_fill, hex(low ? COL_LOW : COL_FILL), 0);
+        }
+        if (g_w.st_soil_pct) {
+            lv_obj_remove_flag(g_w.st_soil_pct, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        if (g_w.st_soil_fill) {
+            lv_obj_add_flag(lv_obj_get_parent(g_w.st_soil_fill), LV_OBJ_FLAG_HIDDEN);
+        }
+        if (g_w.st_soil_pct) {
+            lv_obj_add_flag(g_w.st_soil_pct, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (s->kiosk.soil.enabled && s->kiosk.soil.et_stale) {
+            set_lab_fit(g_w.st_soil_msg, "Soil estimate paused (ET data old)");
+            lv_obj_remove_flag(g_w.st_soil_msg, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            set_lab_fit(g_w.st_soil_msg, "");
+            lv_obj_add_flag(g_w.st_soil_msg, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
 static void apply_content(const zk_snapshot_t *s)
 {
-    char a[256];
+    char a[320];
     char b[192];
     char c[96];
-    zk_next_run_t next;
     int i;
 
     if (g_key.content == ZK_SCREEN_HOME) {
-        memset(&next, 0, sizeof next);
-        if (s->have_status && s->have_schedules) {
-            zk_next_run(&s->schedules, s->have_stations ? &s->stations : NULL, s->wall, &next);
-        }
-        if (!s->have_status) {
+        if (!s->have_kiosk) {
             snprintf(a, sizeof a, "NEXT RUN " MIDDOT " --");
             set_lab_fit(g_w.hdr_kicker, a);
             set_lab_fit(g_w.hdr_big, "Connecting" ELLIPSIS);
-        } else if (!next.have) {
+        } else if (!s->kiosk.has_next_run) {
             snprintf(a, sizeof a, "NEXT RUN " MIDDOT " --");
             set_lab_fit(g_w.hdr_kicker, a);
             set_lab_fit(g_w.hdr_big, "--");
         } else {
-            snprintf(a, sizeof a, "NEXT RUN " MIDDOT " %s", next.name);
+            zk_fmt_name_upper(s->kiosk.next_run.name, c, sizeof c);
+            snprintf(a, sizeof a, "NEXT RUN " MIDDOT " %s", c[0] ? c : "--");
             set_lab_fit(g_w.hdr_kicker, a);
-            snprintf(b, sizeof b, "%s %s", next.day, next.time);
-            set_lab_fit(g_w.hdr_big, b);
+            zk_fmt_fire_when(&s->kiosk.next_run, s->wall, b, sizeof b);
+            set_lab_fit(g_w.hdr_big, b[0] ? b : "--");
         }
         if (g_w.fault_lbl) {
-            const char *err = (s->have_status && s->status.last_error[0]) ? s->status.last_error : "check controller";
+            const char *err = (s->have_kiosk && s->kiosk.last_error[0]) ? s->kiosk.last_error : "check controller";
             snprintf(a, sizeof a, "Fault: %s", err);
             set_lab_fit(g_w.fault_lbl, a);
         }
-        if (g_w.rain_bold && s->have_status) {
-            rain_parts(&s->status, a, sizeof a, b, sizeof b);
+        if (g_w.rain_bold && s->have_kiosk) {
+            rain_parts(&s->kiosk.rain_strip, a, sizeof a, b, sizeof b);
             apply_rain(a, b);
         }
         for (i = 0; i < g_w.n_tiles; i++) {
-            const zk_station_t *stn;
+            const zk_kiosk_station_t *stn;
             int pct = -1;
             int low;
             int fill_w;
-            if (!s->have_stations || i >= s->stations.n) {
+            if (!s->have_kiosk || i >= s->kiosk.n_stations) {
                 continue;
             }
-            stn = &s->stations.items[i];
+            stn = &s->kiosk.stations[i];
             set_lab_fit(g_w.tile_title[i], stn->title);
-            if (s->have_soil) {
-                pct = zk_soil_percent(&s->soil, stn->id);
-            }
+            pct = zk_station_soil_percent(&s->kiosk, i);
             if (g_w.tile_pct[i] && pct >= 0) {
                 low = zk_soil_low(pct);
                 snprintf(a, sizeof a, "%d%%", pct);
@@ -1320,7 +1514,7 @@ static void apply_content(const zk_snapshot_t *s)
                 }
             }
             if (g_w.tile_pill[i]) {
-                int on = s->have_status && station_on(&s->status, stn->id);
+                int on = stn->on || strcmp(stn->state, "running") == 0;
                 if (on) {
                     lv_obj_remove_flag(g_w.tile_pill[i], LV_OBJ_FLAG_HIDDEN);
                 } else {
@@ -1329,77 +1523,106 @@ static void apply_content(const zk_snapshot_t *s)
             }
         }
     } else if (g_key.content == ZK_SCREEN_RUNNING) {
-        zk_run_info_t info;
+        const zk_kiosk_run_t *run = s->have_kiosk && s->kiosk.has_run ? &s->kiosk.run : NULL;
         const char *cur = "";
-        memset(&info, 0, sizeof info);
-        info.remaining_sec = -1;
-        if (s->have_status) {
-            zk_run_infer(&s->status, s->have_schedules ? &s->schedules : NULL, s->wall, &info);
-            cur = s->status.current_station;
-            if (!cur[0] && s->status.n_on > 0) {
-                cur = s->status.stations_on[0];
+        if (run) {
+            if (run->step_index < 0) {
+                cur = run->next_station[0] ? run->next_station : run->current_station;
+            } else {
+                cur = run->current_station;
             }
         }
         set_lab_fit(g_w.run_title, cur[0] ? station_title(s, cur) : "--");
-        if (!info.have || info.remaining_sec < 0) {
+        if (!run) {
             set_lab(g_w.run_count, "--:--");
+            set_lab(g_w.run_step, "Step --");
+            set_lab_fit(g_w.run_next, "Next: --");
+        } else if (run->step_index < 0) {
+            set_lab(g_w.run_count, "--:--");
+            set_lab(g_w.run_step, "Starting");
+            if (run->next_station[0]) {
+                snprintf(b, sizeof b, "Next: %s", station_title(s, run->next_station));
+            } else {
+                snprintf(b, sizeof b, "Next: --");
+            }
+            set_lab_fit(g_w.run_next, b);
         } else {
-            zk_fmt_mmss(info.remaining_sec, a, sizeof a);
+            zk_fmt_mmss(run->step_remaining_sec, a, sizeof a);
             set_lab(g_w.run_count, a);
+            if (run->step_count > 0) {
+                zk_fmt_step(run->step_index, run->step_count, a, sizeof a);
+            } else {
+                snprintf(a, sizeof a, "Step --");
+            }
+            set_lab(g_w.run_step, a);
+            if (run->next_station[0]) {
+                snprintf(b, sizeof b, "Next: %s", station_title(s, run->next_station));
+            } else {
+                snprintf(b, sizeof b, "Next: --");
+            }
+            set_lab_fit(g_w.run_next, b);
         }
-        if (info.have && info.step_count > 0) {
-            zk_fmt_step(info.step_index, info.step_count, a, sizeof a);
-        } else {
-            snprintf(a, sizeof a, "Step --");
-        }
-        set_lab(g_w.run_step, a);
-        if (info.next_station_id[0]) {
-            snprintf(b, sizeof b, "Next: %s", station_title(s, info.next_station_id));
-        } else {
-            snprintf(b, sizeof b, "Next: --");
-        }
-        set_lab_fit(g_w.run_next, b);
         {
             int fw = 0;
-            if (info.total_step_sec > 0 && info.remaining_sec >= 0) {
-                int elapsed = info.total_step_sec - info.remaining_sec;
-                if (elapsed < 0) {
-                    elapsed = 0;
+            int planned;
+            if (run && run->step_index >= 0) {
+                planned = run->step_elapsed_sec + run->step_remaining_sec;
+                if (planned > 0) {
+                    fw = g_w.run_bar_w * run->step_elapsed_sec / planned;
                 }
-                if (elapsed > info.total_step_sec) {
-                    elapsed = info.total_step_sec;
-                }
-                fw = g_w.run_bar_w * elapsed / info.total_step_sec;
             }
             if (g_w.run_fill) {
                 lv_obj_set_width(g_w.run_fill, fw);
             }
         }
     } else if (g_key.content == ZK_SCREEN_PAUSED) {
-        memset(&next, 0, sizeof next);
-        if (s->have_status) {
-            zk_pause_title(&s->status, a, sizeof a);
-            zk_pause_until_text(&s->status, s->wall, b, sizeof b);
+        if (s->have_kiosk) {
+            zk_pause_title(&s->kiosk.pause, a, sizeof a);
+            zk_pause_until_text(&s->kiosk.pause, s->wall, b, sizeof b);
         } else {
             snprintf(a, sizeof a, "PAUSED");
             snprintf(b, sizeof b, "--");
         }
         set_lab_fit(g_w.ban_title, a);
         set_lab_fit(g_w.ban_until, b);
-        if (g_w.rain_bold && s->have_status) {
-            rain_parts(&s->status, a, sizeof a, b, sizeof b);
+        if (g_w.rain_bold && s->have_kiosk) {
+            rain_parts(&s->kiosk.rain_strip, a, sizeof a, b, sizeof b);
             apply_rain(a, b);
         }
-        if (s->have_schedules) {
-            zk_next_run(&s->schedules, s->have_stations ? &s->stations : NULL, s->wall, &next);
-        }
-        if (next.have && next.sched_index >= 0 && next.sched_index < s->schedules.n) {
-            name_raw(&s->schedules.items[next.sched_index], c, sizeof c);
-            snprintf(a, sizeof a, "%s " MIDDOT " %s", c, next.summary);
+        if (s->have_kiosk && s->kiosk.has_next_effective) {
+            zk_str_trim_copy(c, sizeof c, s->kiosk.next_effective.name);
+            zk_fmt_fire_when(&s->kiosk.next_effective, s->wall, b, sizeof b);
+            snprintf(a, sizeof a, "%s " MIDDOT " %s", c[0] ? c : "--", b);
+            set_lab_fit(g_w.info_name, a);
+            if (s->kiosk.has_next_run && s->kiosk.next_run.skipped_by_pause) {
+                zk_str_trim_copy(c, sizeof c, s->kiosk.next_run.name);
+                snprintf(a, sizeof a, "%s will be skipped", c[0] ? c : "Next run");
+                set_lab_fit(g_w.info_sub0, a);
+                set_lab_fit(g_w.info_sub1, "");
+            } else {
+                set_lab_fit(g_w.info_sub0, "");
+                set_lab_fit(g_w.info_sub1, "");
+            }
         } else {
-            snprintf(a, sizeof a, "--");
+            set_lab_fit(g_w.info_name, "Runs again when you resume");
+            if (s->have_kiosk && s->kiosk.has_next_run && s->kiosk.next_run.skipped_by_pause) {
+                zk_str_trim_copy(c, sizeof c, s->kiosk.next_run.name);
+                snprintf(a, sizeof a, "%s will be skipped", c[0] ? c : "Next run");
+                set_lab_fit(g_w.info_sub0, a);
+            } else {
+                set_lab_fit(g_w.info_sub0, "");
+            }
+            set_lab_fit(g_w.info_sub1, "");
         }
-        set_lab_fit(g_w.info_name, a);
+    } else if (g_key.content == ZK_SCREEN_STATION) {
+        apply_station_sheet(s);
+    } else if (g_key.content == ZK_SCREEN_NEEDS_UPDATE) {
+        if (g_w.nu_title) {
+            set_lab(g_w.nu_title, "Controller needs an update");
+        }
+        if (g_w.nu_body) {
+            set_lab_fit(g_w.nu_body, "Please update the controller.");
+        }
     } else if (g_key.content == ZK_SCREEN_PICKER) {
         for (i = 0; i < 4; i++) {
             zk_pause_preview_t pv;
@@ -1463,30 +1686,43 @@ static void apply_content(const zk_snapshot_t *s)
     }
 }
 
+static int g_ov_have_prev, g_ov_prev_stale, g_ov_prev_toast;
+static char g_ov_prev_text[96];
+static lv_obj_t *g_ov_prev_stale_obj, *g_ov_prev_toast_obj;
+
+static void overlays_reset(void)
+{
+    g_ov_have_prev = 0;
+    g_ov_prev_stale = 0;
+    g_ov_prev_toast = 0;
+    g_ov_prev_text[0] = 0;
+    g_ov_prev_stale_obj = NULL;
+    g_ov_prev_toast_obj = NULL;
+}
+
 static void overlays(const zk_snapshot_t *s)
 {
     /* Touch LVGL only when the overlay state changes: set_pos and
-     * move_foreground invalidate the area and would redraw every tick. */
-    static int have_prev, prev_stale, prev_toast;
-    static char prev_text[sizeof g_toast_text];
-    static lv_obj_t *prev_stale_obj, *prev_toast_obj;
+     * move_foreground invalidate the area and would redraw every tick.
+     * After rebuild, LVGL may reuse object addresses, so rebuild clears
+     * this cache via overlays_reset. */
     int show_toast = g_toast_text[0] && zk_platform_mono() < g_toast_until;
     int y = 474 - 10 - 48;
     int stale = s->stale ? 1 : 0;
     if (!show_toast) {
         g_toast_text[0] = 0;
     }
-    if (have_prev && stale == prev_stale && show_toast == prev_toast &&
-        strcmp(prev_text, g_toast_text) == 0 && prev_stale_obj == g_w.stale &&
-        prev_toast_obj == g_w.toast) {
+    if (g_ov_have_prev && stale == g_ov_prev_stale && show_toast == g_ov_prev_toast &&
+        strcmp(g_ov_prev_text, g_toast_text) == 0 && g_ov_prev_stale_obj == g_w.stale &&
+        g_ov_prev_toast_obj == g_w.toast) {
         return;
     }
-    have_prev = 1;
-    prev_stale = stale;
-    prev_toast = show_toast;
-    prev_stale_obj = g_w.stale;
-    prev_toast_obj = g_w.toast;
-    snprintf(prev_text, sizeof prev_text, "%s", g_toast_text);
+    g_ov_have_prev = 1;
+    g_ov_prev_stale = stale;
+    g_ov_prev_toast = show_toast;
+    g_ov_prev_stale_obj = g_w.stale;
+    g_ov_prev_toast_obj = g_w.toast;
+    snprintf(g_ov_prev_text, sizeof g_ov_prev_text, "%s", g_toast_text);
     if (g_w.stale) {
         if (stale) {
             lv_obj_set_pos(g_w.stale, 28, y);
@@ -1516,6 +1752,7 @@ static void rebuild(const zk_snapshot_t *s)
     zk_layout_rects L;
     view_key key = g_key;
     tracks_reset();
+    overlays_reset();
     lv_obj_clean(scr);
     memset(&g_w, 0, sizeof g_w);
     fill_key(s, key.content, key.modal, &g_key, &in);
@@ -1532,6 +1769,10 @@ static void rebuild(const zk_snapshot_t *s)
             build_picker(scr, &L);
         } else if (g_key.content == ZK_SCREEN_SCHEDULES) {
             build_schedules(scr, &L, s, &g_key);
+        } else if (g_key.content == ZK_SCREEN_STATION) {
+            build_station(scr, &L);
+        } else if (g_key.content == ZK_SCREEN_NEEDS_UPDATE) {
+            build_needs_update(scr, &L);
         }
     }
     build_overlays(scr);
@@ -1609,8 +1850,13 @@ void zk_ui_debug_set_view(int screen, int pressed_target, int pick_chip)
         g_nav = -1;
     } else if (screen >= 0) {
         g_modal = 0;
-        if (screen == ZK_SCREEN_PICKER || screen == ZK_SCREEN_SCHEDULES) {
+        if (screen == ZK_SCREEN_PICKER || screen == ZK_SCREEN_SCHEDULES ||
+            screen == ZK_SCREEN_STATION) {
             g_nav = screen;
+            if (screen == ZK_SCREEN_STATION) {
+                g_station_i = pick_chip;
+                g_station_id[0] = 0;
+            }
         } else {
             g_nav = -1;
         }
@@ -1677,6 +1923,8 @@ void zk_ui_init(lv_display_t *disp, const zk_app_t *app)
     g_modal = 0;
     g_quiet_until = 0;
     g_pick_chip = -1;
+    g_station_i = -1;
+    g_station_id[0] = 0;
     g_pressed = 0;
     g_have_key = 0;
     g_dirty = 1;

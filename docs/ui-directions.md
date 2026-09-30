@@ -2,7 +2,7 @@
 
 **Status:** Draft v0.5 · 2026-09-23 (Polish v1 Style A locked)  
 **Companion:** [prd.md](./prd.md) · [decisions.md](./decisions.md)  
-**Selected (decided):** **Direction D — hybrid strip** (Nick, 2026-09-12)
+**Selected (decided):** **Direction D — hybrid strip** (owner, 2026-09-12)
 
 The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its history is now part of `main`) was a learning prototype (stations list, schedules, GraphiQL). It is a reference for *capabilities*, not layout or brand. `server/` and `client/` remain in the tree.
 
@@ -56,7 +56,7 @@ The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its hi
 
 **Idea:** Status-first home with an always-visible compact station strip for quick manual runs; schedules on a second page; **STOP** always on screen.
 
-- **Pros:** Covers daily glance + tuning; matches Nick’s preference.
+- **Pros:** Covers daily glance + tuning; matches the owner’s preference.
 - **Cons:** Needs careful visual hierarchy so it doesn’t feel cluttered.
 - **MVP:** phone. **v1:** wall density of the same layout.
 
@@ -73,8 +73,8 @@ The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its hi
 
 | Who | Date | Preference | Notes |
 |---|---|---|---|
-| Nick | 2026-09-12 | D hybrid | STOP on app and wall. Manual run may preempt a schedule with warnings. Wall screen is v1, not MVP. |
-| Nick | 2026-09-23 | Style A | **Polish v1 — Cards + desert light.** Direction D IA unchanged. Brand: sand/cream chrome, adobe terracotta STOP, canal teal active, dusk plum paused. Flat sand UI; dune photos/illustration are mood/line-art only — **not** photo thumbnail cards. Visual language Style A (hero status) on **both** Home and Schedules. **Rejected Style B** illustrated-list with season photo thumbs. |
+| Owner | 2026-09-12 | D hybrid | STOP on app and wall. Manual run may preempt a schedule with warnings. Wall screen is v1, not MVP. |
+| Owner | 2026-09-23 | Style A | **Polish v1 — Cards + desert light.** Direction D IA unchanged. Brand: sand/cream chrome, adobe terracotta STOP, canal teal active, dusk plum paused. Flat sand UI; dune photos/illustration are mood/line-art only — **not** photo thumbnail cards. Visual language Style A (hero status) on **both** Home and Schedules. **Rejected Style B** illustrated-list with season photo thumbs. |
 
 
 ---
@@ -83,7 +83,7 @@ The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its hi
 
 ## Polish v1 — Cards + desert light (Style A)
 
-**Locked (Nick, 2026-09-23).** Direction D hybrid-strip IA is unchanged. This section is the visual/brand contract for a later CSS/UI polish PR — **docs only here; no CSS/React in this revision.**
+**Locked (owner, 2026-09-23).** Direction D hybrid-strip IA is unchanged. This section is the visual/brand contract for a later CSS/UI polish PR — **docs only here; no CSS/React in this revision.**
 
 **Not Style B.** Do not use an illustrated-list Schedules page with season **photo thumbnail** cards (mesa/dune photos as card art). Dune photography and desert illustration are **mood / line-art accents only**, never photo thumbs on program cards.
 

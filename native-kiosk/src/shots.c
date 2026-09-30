@@ -18,26 +18,35 @@ typedef struct {
     int pressed;
     int chip;
     int stale;
+    int needs_update;
 } shot_t;
 
 static const shot_t k_shots[] = {
-    {"home-rain", "01-home-idle-rain.png", ZK_SCREEN_HOME, 0, -1, 0},
-    {"home-norain", "01b-home-idle-no-rain.png", ZK_SCREEN_HOME, 0, -1, 0},
-    {"home-nosoil", "01c-home-no-soil.png", ZK_SCREEN_HOME, 0, -1, 0},
-    {"home-stale", "01d-home-soil-stale.png", ZK_SCREEN_HOME, 0, -1, 0},
-    {"home-fault", "01e-home-fault.png", ZK_SCREEN_HOME, 0, -1, 0},
-    {"running", "02-running.png", ZK_SCREEN_RUNNING, 0, -1, 0},
-    {"paused-rain", "03-paused-rain.png", ZK_SCREEN_PAUSED, 0, -1, 0},
-    {"paused-manual", "03b-paused-manual.png", ZK_SCREEN_PAUSED, 0, -1, 0},
-    {"home-rain", "04-pause-picker.png", ZK_SCREEN_PICKER, 0, -1, 0},
-    {"home-rain", "05-schedules.png", ZK_SCREEN_SCHEDULES, 0, -1, 0},
-    {"home-rain", "06-confirm-stop.png", ZK_SCREEN_CONFIRM_STOP, 0, -1, 0},
-    {"home-rain", "07-confirm-pause.png", ZK_SCREEN_CONFIRM_PAUSE, 0, 0, 0},
-    {"home-rain", "08-home-stop-pressed.png", ZK_SCREEN_HOME, ZK_TARGET_STOP, -1, 0},
-    {"home-rain", "09-offline.png", ZK_SCREEN_HOME, 0, -1, 1},
-    {"paused-long", "03c-paused-long-reason.png", ZK_SCREEN_PAUSED, 0, -1, 0},
-    {"home-longnames", "01f-home-long-names.png", ZK_SCREEN_HOME, 0, -1, 0},
-    {"running-long", "02b-running-long.png", ZK_SCREEN_RUNNING, 0, -1, 0}
+    {"home-rain", "01-home-idle-rain.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"home-norain", "01b-home-idle-no-rain.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"home-nosoil", "01c-home-no-soil.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"home-stale", "01d-home-soil-stale.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"home-fault", "01e-home-fault.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"running", "02-running.png", ZK_SCREEN_RUNNING, 0, -1, 0, 0},
+    {"paused-rain", "03-paused-rain.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
+    {"paused-manual", "03b-paused-manual.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
+    {"home-rain", "04-pause-picker.png", ZK_SCREEN_PICKER, 0, -1, 0, 0},
+    {"home-rain", "05-schedules.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0},
+    {"home-rain", "06-confirm-stop.png", ZK_SCREEN_CONFIRM_STOP, 0, -1, 0, 0},
+    {"home-rain", "07-confirm-pause.png", ZK_SCREEN_CONFIRM_PAUSE, 0, 0, 0, 0},
+    {"home-rain", "08-home-stop-pressed.png", ZK_SCREEN_HOME, ZK_TARGET_STOP, -1, 0, 0},
+    {"home-rain", "09-offline.png", ZK_SCREEN_HOME, 0, -1, 1, 0},
+    {"paused-long", "03c-paused-long-reason.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
+    {"home-longnames", "01f-home-long-names.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"running-long", "02b-running-long.png", ZK_SCREEN_RUNNING, 0, -1, 0, 0},
+    {"home-rain", "10-station-sheet-soil.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
+    {"home-stale", "10b-station-sheet-soil-stale.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
+    {"home-nosoil", "10c-station-sheet-nosoil.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
+    {"running", "10d-station-sheet-running.png", ZK_SCREEN_STATION, 0, 1, 0, 0},
+    {"home-rain", "10e-station-sheet-exempt.png", ZK_SCREEN_STATION, 0, 1, 0, 0},
+    {"home-rain", "11-controller-needs-update.png", ZK_SCREEN_NEEDS_UPDATE, 0, -1, 0, 1},
+    {"home-rain", "12-home-schedules-button.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
+    {"paused-rain", "13-paused-schedules-button.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0}
 };
 
 static int join2(char *dst, size_t cap, const char *a, const char *b)
@@ -78,12 +87,15 @@ static int one_shot(const char *root, const char *outdir, const shot_t *sc)
         return -1;
     }
     zk_data_debug_force_stale(sc->stale);
+    zk_data_debug_force_needs_update(sc->needs_update);
     zk_ui_debug_set_view(sc->screen, sc->pressed, sc->chip);
     zk_ui_refresh();
     if (zk_snapshot_png(out) != 0) {
         fprintf(stderr, "shots: write failed %s\n", out);
         return -1;
     }
+    zk_data_debug_force_stale(0);
+    zk_data_debug_force_needs_update(0);
     return 0;
 }
 

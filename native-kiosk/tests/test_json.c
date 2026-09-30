@@ -1,15 +1,19 @@
 #include "zk_test.h"
+#include "zk_console.h"
 #include "zk_logic.h"
 #include "zk_model.h"
 
-static void check_common_stations(const zk_stations_t *st)
+#include <fcntl.h>
+#include <unistd.h>
+
+static void check_common_stations(const zk_kiosk_t *k)
 {
-    TEQ_I(st->n, 4);
-    TEQ_S(st->items[0].id, "az01");
-    TEQ_S(st->items[0].title, "Test Station 1");
-    TEQ_S(st->items[0].color, "red");
-    TEQ_S(st->items[3].id, "az04");
-    TEQ_S(st->items[2].title, "Test Station 3");
+    TEQ_I(k->n_stations, 4);
+    TEQ_S(k->stations[0].id, "az01");
+    TEQ_S(k->stations[0].title, "Test Station 1");
+    TEQ_S(k->stations[0].color, "red");
+    TEQ_S(k->stations[3].id, "az04");
+    TEQ_S(k->stations[2].title, "Test Station 3");
 }
 
 static void check_common_schedules(const zk_schedules_t *sc)
@@ -42,172 +46,245 @@ static void check_common_schedules(const zk_schedules_t *sc)
 
 static void parse_scenario(const char *name)
 {
-    char *status = zk_fixture(name, "status.json");
-    char *stations = zk_fixture(name, "stations.json");
+    char *kiosk = zk_fixture(name, "kiosk.json");
     char *schedules = zk_fixture(name, "schedules.json");
-    char *soil = zk_fixture(name, "soil.json");
-    zk_status_t st;
-    zk_stations_t sta;
+    zk_kiosk_t k;
     zk_schedules_t sch;
-    zk_soil_t so;
-    TCHECK(status && stations && schedules && soil, "load %s", name);
-    if (!status || !stations || !schedules || !soil) {
-        free(status);
-        free(stations);
+    TCHECK(kiosk && schedules, "load %s", name);
+    if (!kiosk || !schedules) {
+        free(kiosk);
         free(schedules);
-        free(soil);
         return;
     }
-    TEQ_I(zk_parse_status(status, &st), ZK_OK);
-    TEQ_I(zk_parse_stations(stations, &sta), ZK_OK);
+    TEQ_I(zk_parse_kiosk(kiosk, &k), ZK_OK);
     TEQ_I(zk_parse_schedules(schedules, &sch), ZK_OK);
-    TEQ_I(zk_parse_soil(soil, &so), ZK_OK);
-    TEQ_S(st.timezone, "UTC");
-    TEQ_I(st.has_now, 1);
-    TEQ_I(st.now.y, 2026);
-    TEQ_I(st.now.m, 9);
-    TEQ_I(st.now.d, 29);
-    TEQ_I(st.now.wday, 2); /* Tuesday */
-    check_common_stations(&sta);
+    TEQ_S(k.timezone, "America/Denver");
+    TEQ_I(k.has_now, 1);
+    TEQ_I(k.now.y, 2026);
+    TEQ_I(k.now.m, 9);
+    TEQ_I(k.now.d, 29);
+    TEQ_I(k.now.wday, 2); /* Tuesday */
+    if (strcmp(name, "home-longnames") != 0 && strcmp(name, "running-long") != 0) {
+        check_common_stations(&k);
+    }
     check_common_schedules(&sch);
 
     if (strcmp(name, "home-rain") == 0) {
-        TEQ_S(st.phase, "Idle");
-        TEQ_I(st.watering, 0);
-        TEQ_I(st.fault, 0);
-        TEQ_I(st.paused, 0);
-        TEQ_I(st.rain.enabled, 1);
-        TEQ_I(st.rain.unavailable, 0);
-        TEQ_I(st.rain.have_totals, 1);
-        TEQ_D(st.rain.total_72h, 0.24);
-        TEQ_I(so.enabled, 1);
-        TEQ_I(so.et_known, 1);
-        TEQ_I(so.et_stale, 0);
-        TEQ_I(so.n_zones, 4);
-        TEQ_I(so.zones[0].percent, 58);
-        TEQ_I(so.zones[2].percent, 34);
-        TEQ_I(so.zones[2].rate_measured, 1);
+        TEQ_S(k.phase, "Idle");
+        TEQ_I(k.watering, 0);
+        TEQ_I(k.fault, 0);
+        TEQ_I(k.pause.paused, 0);
+        TEQ_I(k.rain.enabled, 1);
+        TEQ_I(k.rain.unavailable, 0);
+        TEQ_I(k.rain.have_totals, 1);
+        TEQ_D(k.rain.total_72h, 0.24);
+        TEQ_I(k.rain_strip.show, 1);
+        TEQ_I(zk_rain_strip_visible(&k), 1);
+        TEQ_I(k.soil.enabled, 1);
+        TEQ_I(k.soil.et_known, 1);
+        TEQ_I(k.soil.et_stale, 0);
+        TEQ_I(k.soil.show_bars, 1);
+        TEQ_I(k.stations[0].soil_percent, 58);
+        TEQ_I(k.stations[2].soil_percent, 34);
+        TEQ_I(k.stations[1].rain_pause_exempt, 1);
+        TEQ_I(zk_station_soil_percent(&k, 0), 58);
     } else if (strcmp(name, "home-norain") == 0) {
-        TEQ_D(st.rain.total_72h, 0.03);
-        TEQ_I(st.rain.have_totals, 1);
+        TEQ_D(k.rain.total_72h, 0.03);
+        TEQ_I(k.rain.have_totals, 1);
+        TEQ_I(k.rain_strip.show, 0);
+        TEQ_I(zk_rain_strip_visible(&k), 0);
     } else if (strcmp(name, "home-nosoil") == 0) {
-        TEQ_I(so.enabled, 0);
-        TEQ_I(so.et_known, 0);
-        TEQ_I(so.n_zones, 0);
+        TEQ_I(k.soil.enabled, 0);
+        TEQ_I(k.soil.et_known, 0);
+        TEQ_I(k.soil.show_bars, 0);
+        TEQ_I(k.stations[0].soil_percent, -1);
+        TEQ_I(zk_station_soil_percent(&k, 0), -1);
     } else if (strcmp(name, "home-stale") == 0) {
-        TEQ_I(so.enabled, 1);
-        TEQ_I(so.et_stale, 1);
-        TEQ_I(so.zones[0].percent, 58);
+        TEQ_I(k.soil.enabled, 1);
+        TEQ_I(k.soil.et_stale, 1);
+        TEQ_I(k.soil.show_bars, 0);
+        TEQ_I(zk_station_soil_percent(&k, 0), -1);
     } else if (strcmp(name, "home-fault") == 0) {
-        TEQ_S(st.phase, "Fault");
-        TEQ_I(st.fault, 1);
-        TEQ_I(st.watering, 0);
-        TEQ_I(st.lockout, 1);
-        TCHECK(strstr(st.last_error, "valve") != NULL, "last_error %s", st.last_error);
+        TEQ_S(k.phase, "Fault");
+        TEQ_I(k.fault, 1);
+        TEQ_I(k.watering, 0);
+        TEQ_I(k.lockout, 1);
+        TCHECK(strstr(k.last_error, "valve") != NULL, "last_error %s", k.last_error);
     } else if (strcmp(name, "running") == 0) {
-        TEQ_S(st.phase, "StationOn");
-        TEQ_I(st.watering, 1);
-        TEQ_I(st.fault, 0);
-        TEQ_S(st.current_station, "az02");
-        TEQ_I(st.n_on, 1);
-        TEQ_S(st.stations_on[0], "az02");
-        TEQ_I(st.now.hh, 8);
-        TEQ_I(st.now.mm, 25);
-        TEQ_I(st.now.ss, 19);
+        TEQ_S(k.phase, "StationOn");
+        TEQ_I(k.has_run, 1);
+        TEQ_I(k.watering, 1);
+        TEQ_I(k.fault, 0);
+        TEQ_S(k.current_station, "az02");
+        TEQ_I(k.n_on, 1);
+        TEQ_S(k.stations_on[0], "az02");
+        TEQ_I(k.now.hh, 8);
+        TEQ_I(k.now.mm, 25);
+        TEQ_I(k.now.ss, 19);
+        TEQ_I(k.run.step_index, 1);
+        TEQ_I(k.run.step_count, 3);
+        TEQ_I(k.run.step_remaining_sec, 161);
+        TEQ_S(k.run.current_station, "az02");
+        TEQ_S(k.run.next_station, "az04");
     } else if (strcmp(name, "paused-rain") == 0) {
-        TEQ_I(st.paused, 1);
-        TEQ_S(st.pause_source, "auto");
-        TEQ_S(st.reason, "rain");
-        TEQ_I(st.has_paused_until, 1);
-        TEQ_I(st.paused_until.y, 2026);
-        TEQ_I(st.paused_until.m, 9);
-        TEQ_I(st.paused_until.d, 30);
-        TEQ_I(st.paused_until.hh, 6);
-        TEQ_I(st.paused_until.wday, 3); /* Wed */
+        TEQ_I(k.pause.paused, 1);
+        TEQ_S(k.pause.source, "auto");
+        TEQ_S(k.pause.reason, "rain");
+        TEQ_I(k.pause.has_until, 1);
+        TEQ_I(k.pause.until.y, 2026);
+        TEQ_I(k.pause.until.m, 9);
+        TEQ_I(k.pause.until.d, 30);
+        TEQ_I(k.pause.until.hh, 6);
+        TEQ_I(k.pause.until.wday, 3); /* Wed */
+        TEQ_I(k.has_next_run, 1);
+        TEQ_I(k.next_run.skipped_by_pause, 1);
+        TEQ_I(k.has_next_effective, 1);
+        TEQ_I(k.next_effective.skipped_by_pause, 0);
+        TEQ_I(k.rain_strip.show, 0);
     } else if (strcmp(name, "paused-manual") == 0) {
-        TEQ_I(st.paused, 1);
-        TEQ_S(st.pause_source, "manual");
-        TEQ_I(st.has_paused_until, 0);
-        TEQ_S(st.reason, "rain");
+        TEQ_I(k.pause.paused, 1);
+        TEQ_S(k.pause.source, "manual");
+        TEQ_I(k.pause.has_until, 0);
+        TEQ_I(k.has_next_effective, 0);
+        TEQ_I(k.next_run.skipped_by_pause, 1);
     }
 
-    free(status);
-    free(stations);
+    free(kiosk);
     free(schedules);
-    free(soil);
+}
+
+static const char *k_full =
+    "{"
+    "\"now\":\"2026-09-29T06:52:00-06:00\","
+    "\"timezone\":\"America/Denver\","
+    "\"phase\":\"Idle\","
+    "\"lockout\":false,"
+    "\"last_error\":\"\","
+    "\"current_station\":\"\","
+    "\"stations_on\":[],"
+    "\"pause\":{\"paused\":false,\"until\":null,\"label\":\"\",\"reason\":\"\",\"source\":\"\",\"rain_inches\":0},"
+    "\"rain_strip\":{\"show\":true,\"inches\":0.049,\"hours\":24},"
+    "\"rain\":{\"enabled\":true,\"unavailable\":false,\"total_24h_inches\":0.049,\"total_72h_inches\":0.049,\"have_totals\":true},"
+    "\"next_run\":{\"schedule_id\":\"morning\",\"name\":\"Morning cycle\",\"at\":\"2026-09-29T08:23:00-06:00\","
+    "\"ends_at\":\"2026-09-29T08:31:00-06:00\",\"total_min\":8,\"skipped_by_pause\":false},"
+    "\"next_effective_run\":null,"
+    "\"run\":null,"
+    "\"stations\":[{\"id\":\"az01\",\"title\":\"Test Station 1\",\"color\":\"red\",\"on\":false,\"state\":\"idle\","
+    "\"rain_pause_exempt\":false,\"soil_percent\":58}],"
+    "\"soil\":{\"enabled\":true,\"et_known\":true,\"et_stale\":false,\"show_bars\":true,\"updated_at\":null}"
+    "}";
+
+static void test_full_and_nulls(void)
+{
+    zk_kiosk_t k;
+    TEQ_I(zk_parse_kiosk(k_full, &k), ZK_OK);
+    TEQ_I(k.has_now, 1);
+    TEQ_I(k.has_next_run, 1);
+    TEQ_I(k.has_next_effective, 0);
+    TEQ_I(k.has_run, 0);
+    TEQ_I(k.rain_strip.show, 1);
+    TEQ_I(zk_rain_strip_visible(&k), 1);
+    TEQ_I(k.n_stations, 1);
+    TEQ_I(k.stations[0].soil_percent, 58);
+    TEQ_I(zk_station_soil_percent(&k, 0), 58);
+}
+
+static void test_show_vs_totals(void)
+{
+    zk_kiosk_t k;
+    char json[2048];
+    snprintf(json, sizeof json,
+             "{\"now\":\"2026-09-29T06:52:00-06:00\",\"timezone\":\"America/Denver\",\"phase\":\"Idle\","
+             "\"lockout\":false,\"rain_strip\":{\"show\":true,\"inches\":0.049,\"hours\":24},"
+             "\"rain\":{\"enabled\":true,\"unavailable\":false,\"total_24h_inches\":0.049,"
+             "\"total_72h_inches\":0.049,\"have_totals\":true},\"stations\":[],\"soil\":{}}");
+    TEQ_I(zk_parse_kiosk(json, &k), ZK_OK);
+    TEQ_I(zk_rain_strip_visible(&k), 1);
+    snprintf(json, sizeof json,
+             "{\"now\":\"2026-09-29T06:52:00-06:00\",\"timezone\":\"America/Denver\",\"phase\":\"Idle\","
+             "\"lockout\":false,\"rain_strip\":{\"show\":false,\"inches\":0.2,\"hours\":24},"
+             "\"rain\":{\"enabled\":true,\"unavailable\":false,\"total_24h_inches\":0.2,"
+             "\"total_72h_inches\":0.2,\"have_totals\":true},\"stations\":[],\"soil\":{}}");
+    TEQ_I(zk_parse_kiosk(json, &k), ZK_OK);
+    TEQ_I(zk_rain_strip_visible(&k), 0);
+}
+
+static void test_show_bars_false(void)
+{
+    zk_kiosk_t k;
+    const char *json =
+        "{\"now\":\"2026-09-29T06:52:00-06:00\",\"timezone\":\"America/Denver\",\"phase\":\"Idle\","
+        "\"stations\":[{\"id\":\"az01\",\"title\":\"T\",\"color\":\"red\",\"on\":false,\"state\":\"idle\","
+        "\"rain_pause_exempt\":false,\"soil_percent\":80}],"
+        "\"soil\":{\"enabled\":true,\"et_known\":true,\"et_stale\":false,\"show_bars\":false}}";
+    TEQ_I(zk_parse_kiosk(json, &k), ZK_OK);
+    TEQ_I(k.stations[0].soil_percent, 80);
+    TEQ_I(k.soil.show_bars, 0);
+    TEQ_I(zk_station_soil_percent(&k, 0), -1);
 }
 
 static void test_garbage(void)
 {
-    zk_status_t st;
-    zk_stations_t sta;
+    zk_kiosk_t k;
     zk_schedules_t sch;
-    zk_soil_t so;
-    TEQ_I(zk_parse_status(NULL, &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status("", &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status("{", &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status("null", &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status("[]", &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status("{]", &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status("{\"phase\":", &st), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_status(NULL, NULL), ZK_ERR_ARG);
-    TEQ_I(zk_parse_stations("not json", &sta), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk(NULL, &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("null", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("[]", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{]", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{\"phase\":", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk(NULL, NULL), ZK_ERR_ARG);
     TEQ_I(zk_parse_schedules("", &sch), ZK_ERR_PARSE);
-    TEQ_I(zk_parse_soil("[1,2,3]", &so), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{\"pause\":1}", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{\"now\":123}", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{\"lockout\":\"yes\"}", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{\"stations\":{}}", &k), ZK_ERR_PARSE);
+    TEQ_I(zk_parse_kiosk("{\"run\":\"nope\"}", &k), ZK_ERR_PARSE);
 }
 
 static void test_defaults(void)
 {
-    zk_status_t st;
-    zk_stations_t sta;
+    zk_kiosk_t k;
     zk_schedules_t sch;
-    zk_soil_t so;
-    TEQ_I(zk_parse_status("{}", &st), ZK_OK);
-    TEQ_S(st.phase, "");
-    TEQ_I(st.watering, 0);
-    TEQ_I(st.fault, 0);
-    TEQ_I(st.paused, 0);
-    TEQ_I(st.has_paused_until, 0);
-    TEQ_I(st.rain.have_totals, 0);
-    TEQ_I(zk_parse_status("{\"phase\":null,\"paused_until\":null,\"stations_on\":null,\"rain\":{}}", &st), ZK_OK);
-    TEQ_S(st.phase, "");
-    TEQ_I(st.has_paused_until, 0);
-    TEQ_I(st.n_on, 0);
-    TEQ_I(st.rain.enabled, 0);
-    TEQ_I(zk_parse_status("{\"phase\":1,\"lockout\":\"yes\",\"now\":123}", &st), ZK_OK);
-    TEQ_S(st.phase, "");
-    TEQ_I(st.lockout, 0);
-    TEQ_I(st.has_now, 0);
-    TEQ_I(zk_parse_stations("{}", &sta), ZK_OK);
-    TEQ_I(sta.n, 0);
-    TEQ_I(zk_parse_stations("{\"stations\":[null,{\"id\":\"az01\"},\"x\",{}]}", &sta), ZK_OK);
-    TEQ_I(sta.n, 1);
-    TEQ_S(sta.items[0].id, "az01");
+    TEQ_I(zk_parse_kiosk("{}", &k), ZK_OK);
+    TEQ_S(k.phase, "");
+    TEQ_I(k.watering, 0);
+    TEQ_I(k.fault, 0);
+    TEQ_I(k.pause.paused, 0);
+    TEQ_I(k.pause.has_until, 0);
+    TEQ_I(k.rain.have_totals, 0);
+    TEQ_I(k.has_run, 0);
+    TEQ_I(zk_parse_kiosk("{\"phase\":null,\"pause\":null,\"stations_on\":null,\"run\":null,\"next_run\":null}", &k), ZK_OK);
+    TEQ_S(k.phase, "");
+    TEQ_I(k.pause.has_until, 0);
+    TEQ_I(k.n_on, 0);
+    TEQ_I(k.has_run, 0);
     TEQ_I(zk_parse_schedules("{\"schedules\":[{\"id\":\"x\",\"enabled\":true,\"start\":\"25:99\",\"weekdays\":[\"nope\"]}]}", &sch), ZK_OK);
     TEQ_I(sch.n, 1);
     TEQ_I(sch.items[0].has_start, 0);
     TEQ_I(sch.items[0].weekdays, 0);
-    TEQ_I(zk_parse_soil("{\"enabled\":true,\"zones\":[{\"station_id\":\"az01\",\"percent\":null}]}", &so), ZK_OK);
-    TEQ_I(so.n_zones, 1);
-    TEQ_I(so.zones[0].percent, -1);
 }
 
-static void test_huge_rain(void)
+static void test_huge(void)
 {
-    zk_status_t st;
-    TEQ_I(zk_parse_status("{\"phase\":\"Idle\",\"rain\":{\"enabled\":true,\"unavailable\":false,\"total_72h_inches\":1e999,\"total_24h_inches\":0.2}}", &st), ZK_OK);
-    TEQ_I(st.rain.enabled, 1);
-    TEQ_I(st.rain.have_totals, 0);
-    TEQ_I(zk_rain_strip_visible(&st), 0);
-    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":0.2,\"total_24h_inches\":1e999}}", &st), ZK_OK);
-    TEQ_I(st.rain.have_totals, 0);
-    TEQ_I(zk_rain_strip_visible(&st), 0);
-    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":1e30}}", &st), ZK_OK);
-    TEQ_I(st.rain.have_totals, 0);
-    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":1000}}", &st), ZK_OK);
-    TEQ_I(st.rain.have_totals, 1);
-    TEQ_I(zk_parse_status("{\"rain\":{\"enabled\":true,\"total_72h_inches\":1000.1}}", &st), ZK_OK);
-    TEQ_I(st.rain.have_totals, 0);
+    zk_kiosk_t k;
+    TEQ_I(zk_parse_kiosk("{\"rain\":{\"enabled\":true,\"unavailable\":false,\"have_totals\":true,"
+                         "\"total_72h_inches\":1e999,\"total_24h_inches\":0.2}}",
+                         &k),
+          ZK_OK);
+    TEQ_I(k.rain.enabled, 1);
+    TEQ_I(k.rain.have_totals, 0);
+    TEQ_I(zk_parse_kiosk("{\"rain_strip\":{\"show\":true,\"inches\":1e999,\"hours\":24}}", &k), ZK_OK);
+    TEQ_D(k.rain_strip.inches, 0);
+    TEQ_I(zk_parse_kiosk("{\"stations\":[{\"id\":\"az01\",\"soil_percent\":150}]}", &k), ZK_OK);
+    TEQ_I(k.stations[0].soil_percent, -1);
+    TEQ_I(zk_parse_kiosk("{\"run\":{\"kind\":\"schedule\",\"program\":\"x\",\"step_index\":0,\"step_count\":1,"
+                         "\"step_remaining_sec\":1e999,\"steps\":[]}}",
+                         &k),
+          ZK_OK);
+    TEQ_I(k.has_run, 1);
+    TEQ_I(k.run.step_remaining_sec, 0);
 }
 
 static void test_wall_parse(void)
@@ -245,6 +322,48 @@ static void test_wall_advance(void)
     TEQ_I(w.wday, 5); /* Friday */
 }
 
+static void test_console_cursor(void)
+{
+    char path[256];
+    char *got;
+    int wr;
+    wr = snprintf(path, sizeof path, "build/zk-tty-%d", (int)getpid());
+    TCHECK(wr > 0, "path");
+    unlink(path);
+    {
+        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        TCHECK(fd >= 0, "creat tty file");
+        if (fd >= 0) {
+            close(fd);
+        }
+    }
+    TCHECK(setenv("ZK_TTY", path, 1) == 0, "setenv");
+    zk_console_cursor(1);
+    got = zk_read_file(path);
+    TCHECK(got != NULL, "wrote hide");
+    if (got) {
+        TCHECK(strcmp(got, "\033[?25l") == 0, "hide seq [%s]", got);
+        free(got);
+    }
+    {
+        int fd = open(path, O_WRONLY | O_TRUNC);
+        if (fd >= 0) {
+            close(fd);
+        }
+    }
+    zk_console_cursor(0);
+    got = zk_read_file(path);
+    TCHECK(got != NULL, "wrote show");
+    if (got) {
+        TCHECK(strcmp(got, "\033[?25h") == 0, "show seq [%s]", got);
+        free(got);
+    }
+    unlink(path);
+    TCHECK(setenv("ZK_TTY", "build/zk-tty-missing-nope", 1) == 0, "missing path");
+    zk_console_cursor(1);
+    unsetenv("ZK_TTY");
+}
+
 int main(void)
 {
     const char *scen[] = {
@@ -255,10 +374,14 @@ int main(void)
     for (i = 0; i < sizeof(scen) / sizeof(scen[0]); i++) {
         parse_scenario(scen[i]);
     }
+    test_full_and_nulls();
+    test_show_vs_totals();
+    test_show_bars_false();
     test_garbage();
     test_defaults();
-    test_huge_rain();
+    test_huge();
     test_wall_parse();
     test_wall_advance();
+    test_console_cursor();
     return zk_test_report("test_json");
 }

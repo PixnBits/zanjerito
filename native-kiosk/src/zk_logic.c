@@ -72,7 +72,6 @@ void zk_fmt_inches(double v, char *out, size_t cap)
     if (!(v == v) || v < 0) {
         v = 0;
     } else if (v > 999.99) {
-        /* +inf and anything the strip cannot show. */
         v = 999.99;
     }
     scaled = v * 100.0 + 0.5;
@@ -95,56 +94,99 @@ void zk_fmt_inches(double v, char *out, size_t cap)
     zk_str_copy(out, cap, s);
 }
 
-int zk_rain_strip_visible(const zk_status_t *st)
+void zk_fmt_relative_day(zk_wall_t at, zk_wall_t now, char *out, size_t cap)
 {
-    if (!st) {
-        return 0;
+    int i;
+    if (!out || cap == 0) {
+        return;
     }
-    if (!st->rain.enabled || st->rain.unavailable || !st->rain.have_totals) {
-        return 0;
+    i = zk_days_from_civil(at.y, at.m, at.d) - zk_days_from_civil(now.y, now.m, now.d);
+    if (i <= 0) {
+        zk_str_copy(out, cap, "Today");
+        return;
     }
-    return (st->rain.total_72h + 1e-9) >= 0.05;
+    if (i == 1) {
+        zk_str_copy(out, cap, "Tomorrow");
+        return;
+    }
+    if (at.wday < 0 || at.wday > 6) {
+        zk_wall_set_wday(&at);
+    }
+    if (i <= 6) {
+        zk_str_copy(out, cap, k_wd[at.wday < 0 || at.wday > 6 ? 0 : at.wday]);
+        return;
+    }
+    if (at.m < 1 || at.m > 12) {
+        at.m = 1;
+    }
+    if (at.wday < 0 || at.wday > 6) {
+        at.wday = 0;
+    }
+    snprintf(out, cap, "%s %s %d", k_wd[at.wday], k_mon[at.m], at.d);
 }
 
-void zk_rain_strip_text(const zk_status_t *st, char *out, size_t cap)
+void zk_fmt_fire_when(const zk_kiosk_fire_t *fire, zk_wall_t now, char *out, size_t cap)
 {
-    double inches;
-    int hours;
-    char amt[16];
+    char day[24];
+    char t[16];
     if (!out || cap == 0) {
         return;
     }
     out[0] = 0;
-    if (!st || !st->rain.have_totals) {
+    if (!fire || !fire->has_at) {
         return;
     }
-    if ((st->rain.total_24h + 1e-9) >= 0.05) {
-        hours = 24;
-        inches = st->rain.total_24h;
-    } else {
-        hours = 72;
-        inches = st->rain.total_72h;
-    }
-    zk_fmt_inches(inches, amt, sizeof(amt));
-    snprintf(out, cap, "%s in fell in the last %d hours", amt, hours);
+    zk_fmt_relative_day(fire->at, now, day, sizeof day);
+    zk_fmt_time12(fire->at.hh, fire->at.mm, t, sizeof t);
+    snprintf(out, cap, "%s %s", day, t);
 }
 
-int zk_soil_percent(const zk_soil_t *soil, const char *station_id)
+void zk_fmt_name_upper(const char *name, char *out, size_t cap)
 {
-    int i;
-    if (!soil || !station_id || !soil->enabled || !soil->et_known || soil->et_stale) {
+    char tmp[ZK_NOTE_MAX];
+    zk_str_trim_copy(tmp, sizeof tmp, name ? name : "");
+    zk_str_upper(tmp);
+    zk_str_copy(out, cap, tmp);
+}
+
+int zk_rain_strip_visible(const zk_kiosk_t *k)
+{
+    return k && k->rain_strip.show;
+}
+
+void zk_rain_strip_text(const zk_rain_strip_t *rs, char *out, size_t cap)
+{
+    char amt[16];
+    int hours;
+    if (!out || cap == 0) {
+        return;
+    }
+    out[0] = 0;
+    if (!rs) {
+        return;
+    }
+    hours = rs->hours;
+    if (hours != 24 && hours != 72) {
+        hours = rs->hours > 0 ? rs->hours : 24;
+    }
+    zk_fmt_inches(rs->inches, amt, sizeof amt);
+    snprintf(out, cap, "%s in fell in the last %d h", amt, hours);
+}
+
+int zk_station_soil_percent(const zk_kiosk_t *k, int station_index)
+{
+    int pct;
+    if (!k || !k->soil.show_bars) {
         return -1;
     }
-    for (i = 0; i < soil->n_zones; i++) {
-        if (strcmp(soil->zones[i].station_id, station_id) != 0) {
-            continue;
-        }
-        if (!soil->zones[i].rate_measured || soil->zones[i].percent < 0) {
-            return -1;
-        }
-        return soil->zones[i].percent;
+    if (station_index < 0 || station_index >= k->n_stations) {
+        return -1;
     }
-    return -1;
+    pct = k->stations[station_index].soil_percent;
+    if (pct < 0 || pct > 100) {
+        return -1;
+    }
+    return pct;
 }
 
 int zk_soil_low(int pct)
@@ -190,250 +232,6 @@ static void add_days(int y, int m, int d, int n, int *oy, int *om, int *od, int 
         zk_wall_set_wday(&w);
         *owd = w.wday;
     }
-}
-
-static void sched_name_upper(const zk_schedule_t *sch, char *out, size_t cap)
-{
-    char tmp[ZK_NOTE_MAX];
-    zk_str_trim_copy(tmp, sizeof(tmp), sch->note);
-    if (!tmp[0]) {
-        zk_str_trim_copy(tmp, sizeof(tmp), sch->id);
-    }
-    zk_str_upper(tmp);
-    zk_str_copy(out, cap, tmp);
-}
-
-static void sched_summary(const zk_schedule_t *sch, char *out, size_t cap)
-{
-    char t[16];
-    unsigned m;
-    const int order[7] = {1, 2, 3, 4, 5, 6, 0};
-    char days[48];
-    int n = 0;
-    int i;
-    size_t pos = 0;
-    zk_fmt_time12(sch->start_hh, sch->start_mm, t, sizeof(t));
-    m = sch->weekdays;
-    if (m == 0 || m == ZK_WD_ALL) {
-        snprintf(out, cap, "Daily %s", t);
-        return;
-    }
-    if (m == (ZK_WD_MON | ZK_WD_TUE | ZK_WD_WED | ZK_WD_THU | ZK_WD_FRI)) {
-        snprintf(out, cap, "Weekdays %s", t);
-        return;
-    }
-    days[0] = 0;
-    for (i = 0; i < 7; i++) {
-        int wd = order[i];
-        if (m & (1u << wd)) {
-            int wr;
-            if (n) {
-                wr = snprintf(days + pos, sizeof(days) - pos, " %s", k_wd[wd]);
-            } else {
-                wr = snprintf(days + pos, sizeof(days) - pos, "%s", k_wd[wd]);
-            }
-            if (wr < 0) {
-                break;
-            }
-            pos += (size_t)wr;
-            if (pos >= sizeof(days)) {
-                pos = sizeof(days) - 1;
-                break;
-            }
-            n++;
-        }
-    }
-    snprintf(out, cap, "%s %s", days, t);
-}
-
-static void fmt_day_word(int i, int y, int m, int d, int wday, char *out, size_t cap)
-{
-    if (i <= 0) {
-        zk_str_copy(out, cap, "Today");
-        return;
-    }
-    if (i == 1) {
-        zk_str_copy(out, cap, "Tomorrow");
-        return;
-    }
-    if (wday < 0 || wday > 6) {
-        wday = 0;
-    }
-    if (i <= 6) {
-        zk_str_copy(out, cap, k_wd[wday]);
-        return;
-    }
-    if (m < 1 || m > 12) {
-        m = 1;
-    }
-    snprintf(out, cap, "%s %s %d", k_wd[wday], k_mon[m], d);
-    (void)y;
-}
-
-int zk_next_run(const zk_schedules_t *schedules, const zk_stations_t *stations,
-                zk_wall_t now, zk_next_run_t *out)
-{
-    int best_i = 9999;
-    int best_hm = 9999;
-    int best_idx = -1;
-    int now_hm;
-    int i, s;
-    (void)stations;
-    if (!out) {
-        return ZK_ERR_ARG;
-    }
-    memset(out, 0, sizeof(*out));
-    out->sched_index = -1;
-    if (!schedules) {
-        return ZK_OK;
-    }
-    now_hm = now.hh * 60 + now.mm;
-    for (i = 0; i < 400; i++) {
-        int y, m, d, wd;
-        add_days(now.y, now.m, now.d, i, &y, &m, &d, &wd);
-        for (s = 0; s < schedules->n; s++) {
-            const zk_schedule_t *sch = &schedules->items[s];
-            int hm;
-            if (!sch->enabled || !sch->has_start) {
-                continue;
-            }
-            if (!zk_weekday_matches(sch->weekdays, wd)) {
-                continue;
-            }
-            if (!zk_in_season(sch, y, m, d)) {
-                continue;
-            }
-            hm = sch->start_hh * 60 + sch->start_mm;
-            if (i == 0 && hm <= now_hm) {
-                continue;
-            }
-            if (best_idx < 0 || i < best_i || (i == best_i && hm < best_hm)) {
-                best_i = i;
-                best_hm = hm;
-                best_idx = s;
-            }
-        }
-        if (best_idx >= 0 && i == best_i) {
-            /* earliest day is locked; later days cannot beat it */
-            break;
-        }
-    }
-    if (best_idx < 0) {
-        return ZK_OK;
-    }
-    {
-        const zk_schedule_t *sch = &schedules->items[best_idx];
-        int y, m, d, wd;
-        add_days(now.y, now.m, now.d, best_i, &y, &m, &d, &wd);
-        out->have = 1;
-        out->sched_index = best_idx;
-        fmt_day_word(best_i, y, m, d, wd, out->day, sizeof(out->day));
-        zk_fmt_time12(sch->start_hh, sch->start_mm, out->time, sizeof(out->time));
-        sched_name_upper(sch, out->name, sizeof(out->name));
-        sched_summary(sch, out->summary, sizeof(out->summary));
-    }
-    return ZK_OK;
-}
-
-int zk_run_infer(const zk_status_t *status, const zk_schedules_t *schedules,
-                 zk_wall_t now, zk_run_info_t *info)
-{
-    const char *cur;
-    int now_sec;
-    int s;
-    if (!info) {
-        return ZK_ERR_ARG;
-    }
-    memset(info, 0, sizeof(*info));
-    info->remaining_sec = -1;
-    if (!status || !status->watering) {
-        return ZK_OK;
-    }
-    cur = status->current_station;
-    if (!cur[0] && status->n_on > 0) {
-        cur = status->stations_on[0];
-    }
-    if (!cur || !cur[0]) {
-        return ZK_OK;
-    }
-    info->have = 1;
-    zk_str_copy(info->current_title_id, sizeof(info->current_title_id), cur);
-    info->step_count = 1;
-    info->remaining_sec = -1;
-    if (!schedules) {
-        return ZK_OK;
-    }
-    now_sec = now.hh * 3600 + now.mm * 60 + now.ss;
-    for (s = 0; s < schedules->n; s++) {
-        const zk_schedule_t *sch = &schedules->items[s];
-        int start_sec, elapsed, total_min, t, i, idx;
-        if (!sch->enabled || !sch->has_start || sch->n_steps <= 0) {
-            continue;
-        }
-        if (!zk_weekday_matches(sch->weekdays, now.wday)) {
-            continue;
-        }
-        if (!zk_in_season(sch, now.y, now.m, now.d)) {
-            continue;
-        }
-        start_sec = sch->start_hh * 3600 + sch->start_mm * 60;
-        elapsed = now_sec - start_sec;
-        if (elapsed < -60) {
-            continue;
-        }
-        if (elapsed < 0) {
-            elapsed = 0;
-        }
-        total_min = 0;
-        for (i = 0; i < sch->n_steps; i++) {
-            total_min += sch->steps[i].minutes;
-        }
-        if (elapsed > total_min * 60 + 90) {
-            continue;
-        }
-        t = 0;
-        for (i = 0; i < sch->n_steps; i++) {
-            int mins = sch->steps[i].minutes;
-            int end = t + mins * 60;
-            if (strcmp(sch->steps[i].station_id, cur) == 0 && elapsed <= end + 30) {
-                info->step_index = i;
-                info->step_count = sch->n_steps;
-                info->remaining_sec = end - elapsed;
-                if (info->remaining_sec < 0) {
-                    info->remaining_sec = 0;
-                }
-                info->total_step_sec = mins * 60;
-                if (i + 1 < sch->n_steps) {
-                    zk_str_copy(info->next_station_id, sizeof(info->next_station_id),
-                                sch->steps[i + 1].station_id);
-                } else {
-                    info->next_station_id[0] = 0;
-                }
-                return ZK_OK;
-            }
-            t = end;
-        }
-        idx = -1;
-        for (i = 0; i < sch->n_steps; i++) {
-            if (strcmp(sch->steps[i].station_id, cur) == 0) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx >= 0) {
-            int mins = sch->steps[idx].minutes;
-            info->step_index = idx;
-            info->step_count = sch->n_steps;
-            info->remaining_sec = mins * 60;
-            info->total_step_sec = mins * 60;
-            if (idx + 1 < sch->n_steps) {
-                zk_str_copy(info->next_station_id, sizeof(info->next_station_id),
-                            sch->steps[idx + 1].station_id);
-            }
-            return ZK_OK;
-        }
-    }
-    return ZK_OK;
 }
 
 zk_wall_t zk_morning_cutoff(const zk_schedules_t *schedules, int y, int m, int d)
@@ -530,19 +328,19 @@ int zk_pause_preview(const zk_schedules_t *schedules, zk_wall_t now,
     return ZK_OK;
 }
 
-void zk_pause_title(const zk_status_t *st, char *out, size_t cap)
+void zk_pause_title(const zk_pause_t *p, char *out, size_t cap)
 {
     if (!out || cap == 0) {
         return;
     }
-    if (st && strcmp(st->pause_source, "auto") == 0 && strcmp(st->reason, "rain") == 0) {
+    if (p && strcmp(p->source, "auto") == 0 && strcmp(p->reason, "rain") == 0) {
         zk_str_copy(out, cap, "PAUSED FOR RAIN");
         return;
     }
     zk_str_copy(out, cap, "PAUSED");
 }
 
-void zk_pause_until_text(const zk_status_t *st, zk_wall_t now, char *out, size_t cap)
+void zk_pause_until_text(const zk_pause_t *p, zk_wall_t now, char *out, size_t cap)
 {
     zk_wall_t u;
     int64_t dt;
@@ -550,11 +348,11 @@ void zk_pause_until_text(const zk_status_t *st, zk_wall_t now, char *out, size_t
     if (!out || cap == 0) {
         return;
     }
-    if (!st || !st->has_paused_until) {
+    if (!p || !p->has_until) {
         zk_str_copy(out, cap, "Until you resume");
         return;
     }
-    u = st->paused_until;
+    u = p->until;
     dt = zk_wall_epoch_sec(u) - zk_wall_epoch_sec(now);
     zk_fmt_time12(u.hh, u.mm, t, sizeof(t));
     if (u.wday < 0 || u.wday > 6) {
@@ -568,4 +366,32 @@ void zk_pause_until_text(const zk_status_t *st, zk_wall_t now, char *out, size_t
     } else {
         snprintf(out, cap, "Until %s %s %d, %s", k_wd[u.wday], k_mon[u.m], u.d, t);
     }
+}
+
+const zk_kiosk_station_t *zk_kiosk_station(const zk_kiosk_t *k, const char *id)
+{
+    int i;
+    if (!k || !id || !id[0]) {
+        return NULL;
+    }
+    for (i = 0; i < k->n_stations; i++) {
+        if (strcmp(k->stations[i].id, id) == 0) {
+            return &k->stations[i];
+        }
+    }
+    return NULL;
+}
+
+int zk_kiosk_station_index(const zk_kiosk_t *k, const char *id)
+{
+    int i;
+    if (!k || !id || !id[0]) {
+        return -1;
+    }
+    for (i = 0; i < k->n_stations; i++) {
+        if (strcmp(k->stations[i].id, id) == 0) {
+            return i;
+        }
+    }
+    return -1;
 }

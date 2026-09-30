@@ -122,8 +122,56 @@ static void test_home_tiles(void)
     TCHECK(!find_id(t, n, ZK_TARGET_TILE1), "no 2nd");
     in.n_stations = 6;
     n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
-    TCHECK(find_id(t, n, ZK_TARGET_TILE3), "clamp still has 4");
-    TCHECK(!find_id(t, n, ZK_TARGET_TILE4), "no 5th when 3-row too short");
+    TCHECK(find_id(t, n, ZK_TARGET_TILE5), "6 tiles");
+    TCHECK(!find_id(t, n, ZK_TARGET_TILE6), "no 7th of 6");
+    TCHECK(find_id(t, n, ZK_TARGET_TILE0)->rect.w >= ZK_MIN_TAP, "6-tile width");
+    TCHECK(find_id(t, n, ZK_TARGET_TILE0)->rect.h >= ZK_MIN_TAP, "6-tile height");
+    in.n_stations = 8;
+    n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+    TCHECK(find_id(t, n, ZK_TARGET_TILE7), "8 tiles");
+    TCHECK(find_id(t, n, ZK_TARGET_TILE0)->rect.w >= ZK_MIN_TAP &&
+               find_id(t, n, ZK_TARGET_TILE0)->rect.h >= ZK_MIN_TAP,
+           "8-tile min");
+}
+
+static void test_schedules_button(void)
+{
+    zk_layout_in in;
+    zk_target t[32];
+    int n;
+    const zk_target *s;
+    memset(&in, 0, sizeof in);
+    in.n_stations = 4;
+    in.rain_visible = 1;
+    n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+    s = find_id(t, n, ZK_TARGET_SCHEDULES);
+    TCHECK(s, "home schedules");
+    TCHECK(s && s->rect.w >= ZK_MIN_TAP && s->rect.h >= ZK_MIN_TAP, "home schedules %dx%d",
+           s ? s->rect.w : 0, s ? s->rect.h : 0);
+    n = zk_layout_targets(ZK_SCREEN_PAUSED, &in, t, 32);
+    s = find_id(t, n, ZK_TARGET_SCHEDULES);
+    TCHECK(s, "paused schedules");
+    TCHECK(s && s->rect.w >= ZK_MIN_TAP && s->rect.h >= ZK_MIN_TAP, "paused schedules %dx%d",
+           s ? s->rect.w : 0, s ? s->rect.h : 0);
+    n = zk_layout_targets(ZK_SCREEN_RUNNING, &in, t, 32);
+    TCHECK(!find_id(t, n, ZK_TARGET_SCHEDULES), "running has no schedules");
+}
+
+static void test_station_sheet(void)
+{
+    zk_layout_in in;
+    zk_target t[32];
+    int n;
+    const zk_target *stop;
+    const zk_target *close;
+    memset(&in, 0, sizeof in);
+    in.n_stations = 4;
+    n = zk_layout_targets(ZK_SCREEN_STATION, &in, t, 32);
+    stop = find_id(t, n, ZK_TARGET_STOP);
+    close = find_id(t, n, ZK_TARGET_BACK);
+    TCHECK(stop && stop->rect.h >= ZK_STOP_MIN_H, "station STOP");
+    TCHECK(close && close->rect.w >= ZK_MIN_TAP && close->rect.h >= ZK_MIN_TAP, "station Close");
+    TEQ_I(stop ? stop->rect.h : 0, 264);
 }
 
 static void test_picker_schedules(void)
@@ -150,19 +198,22 @@ int main(void)
 {
     static const enum zk_screen screens[] = {
         ZK_SCREEN_HOME, ZK_SCREEN_RUNNING, ZK_SCREEN_PAUSED,
-        ZK_SCREEN_PICKER, ZK_SCREEN_SCHEDULES,
+        ZK_SCREEN_PICKER, ZK_SCREEN_SCHEDULES, ZK_SCREEN_STATION,
+        ZK_SCREEN_NEEDS_UPDATE,
         ZK_SCREEN_CONFIRM_STOP, ZK_SCREEN_CONFIRM_PAUSE
     };
     int s, nst, rain;
     for (s = 0; s < (int)(sizeof(screens) / sizeof(screens[0])); s++) {
         for (rain = 0; rain <= 1; rain++) {
-            for (nst = 1; nst <= 4; nst++) {
+            for (nst = 1; nst <= 8; nst++) {
                 check_one(screens[s], nst, rain);
             }
         }
     }
     test_home_tiles();
     test_picker_schedules();
+    test_schedules_button();
+    test_station_sheet();
     TEQ_I(ZK_PX_PER_INCH, 267);
     TCHECK((int)(0.4 * ZK_PX_PER_INCH + 0.5) == ZK_MIN_TAP || ZK_MIN_TAP == 107, "0.4in");
     return zk_test_report("test_layout");
