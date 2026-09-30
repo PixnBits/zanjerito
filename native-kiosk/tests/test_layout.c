@@ -1,5 +1,8 @@
 #include "zk_test.h"
 #include "zk_layout.h"
+#include "zk_power.h"
+
+#include <unistd.h>
 
 static int overlap(zk_rect a, zk_rect b)
 {
@@ -194,6 +197,61 @@ static void test_picker_schedules(void)
     TEQ_I(R.chips[0].w, 255);
 }
 
+static void test_stop_hit_and_dim_rule(void)
+{
+    static const enum zk_screen screens[] = {
+        ZK_SCREEN_HOME, ZK_SCREEN_RUNNING, ZK_SCREEN_PAUSED, ZK_SCREEN_PICKER,
+        ZK_SCREEN_SCHEDULES, ZK_SCREEN_STATION, ZK_SCREEN_NEEDS_UPDATE,
+        ZK_SCREEN_CONFIRM_STOP, ZK_SCREEN_CONFIRM_PAUSE
+    };
+    char absent[64];
+    int s;
+
+    snprintf(absent, sizeof absent, "/tmp/zk-layout-power-absent-%d", (int)getpid());
+    for (s = 0; s < (int)(sizeof screens / sizeof screens[0]); s++) {
+        zk_layout_in in;
+        zk_target t[32];
+        int n;
+        int i;
+
+        memset(&in, 0, sizeof in);
+        in.n_stations = 4;
+        in.rain_visible = 1;
+        in.n_schedules = 3;
+        n = zk_layout_targets(screens[s], &in, t, 32);
+        for (i = 0; i < n; i++) {
+            int x = t[i].rect.x + t[i].rect.w / 2;
+            int y = t[i].rect.y + t[i].rect.h / 2;
+            int hit = zk_layout_hit_is_stop(screens[s], &in, x, y);
+            enum zk_target_id id = zk_hit_test(t, n, x, y);
+            zk_power_t p;
+            zk_power_config_t c;
+            zk_power_inputs_t zin;
+            zk_power_touch_action_t act;
+
+            TEQ_I(hit, id == ZK_TARGET_STOP ? 1 : 0);
+            TEQ_I((int)id, (int)t[i].id);
+            memset(&c, 0, sizeof c);
+            c.dim_after_sec = 2;
+            c.off_after_sec = 10;
+            c.dim_level = 40;
+            c.backlight_dir = absent;
+            zk_power_init(&p, &c);
+            memset(&zin, 0, sizeof zin);
+            zk_power_tick(&p, 0, &zin);
+            zk_power_tick(&p, 2000, &zin);
+            TEQ_I((int)zk_power_state(&p), (int)ZK_POWER_DIMMED);
+            act = zk_power_touch_event(&p, 2000, 1, hit);
+            if (t[i].id == ZK_TARGET_STOP) {
+                TEQ_I((int)act, (int)ZK_POWER_PASS);
+            } else {
+                TEQ_I((int)act, (int)ZK_POWER_SWALLOW);
+            }
+            TEQ_I((int)zk_power_state(&p), (int)ZK_POWER_ACTIVE);
+        }
+    }
+}
+
 int main(void)
 {
     static const enum zk_screen screens[] = {
@@ -214,6 +272,7 @@ int main(void)
     test_picker_schedules();
     test_schedules_button();
     test_station_sheet();
+    test_stop_hit_and_dim_rule();
     TEQ_I(ZK_PX_PER_INCH, 267);
     TCHECK((int)(0.4 * ZK_PX_PER_INCH + 0.5) == ZK_MIN_TAP || ZK_MIN_TAP == 107, "0.4in");
     return zk_test_report("test_layout");

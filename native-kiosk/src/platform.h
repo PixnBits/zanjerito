@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "lvgl.h"
+#include "zk_power.h"
 
 typedef struct {
     const char *fb_path; /* NULL: do not open a framebuffer */
@@ -40,5 +41,13 @@ int zk_snapshot_png(const char *file);
 const uint8_t *zk_platform_frame(int *w, int *h, int *stride);
 
 void zk_platform_print_stats(int enabled);
+
+int64_t zk_platform_mono_ms(void);
+/* NULL clears the gate. The pointer must outlive the indev reads. */
+void zk_platform_bind_power(zk_power_t *power);
+int zk_platform_fb_is_real(void);
+/* ctx is unused. powerdown 1 blanks, 0 unblanks. 0 on success, -1 on failure. */
+int zk_platform_fbio_blank(void *ctx, int powerdown);
+void zk_platform_set_power_transitions(int n);
 
 #endif

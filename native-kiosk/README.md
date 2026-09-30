@@ -139,7 +139,7 @@ Example against a daemon already listening on localhost (nothing in this tree st
 
 `ZK_POLL_MS_STATUS` overrides the 2 second `/api/kiosk` poll inside those data tests. It is not a user-facing flag.
 
-`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured. It also checks tile tap (station sheet, zero non-GET writes), Schedules button, STOP from the sheet, and `--kiosk-404` needs-update with STOP still working. The stub takes `--get-delay SEC`, `--post-delay SEC`, and `--kiosk-404`. Each connection is its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
+`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured. It also checks tile tap (station sheet, zero non-GET writes), Schedules button, STOP from the sheet, `--kiosk-404` needs-update with STOP still working, and display power against a temp backlight directory (`ZK_POWER_FORCE=1`: dim, off, swallowed wake, STOP while dimmed, watering and fault stay on, pause dims but does not blank, SIGTERM restores brightness). The stub takes `--get-delay SEC`, `--post-delay SEC`, and `--kiosk-404`. Each connection is its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
 
 ## Behaviour
 
@@ -169,6 +169,70 @@ Target board is a Pi 3B (armv7). The display is the legacy 800×480 32 bpp frame
 
 On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Boot-persistent install is opt-in; `make` does not enable it. See below.
 
+## Display power
+
+Idle dim and backlight-off run only with `--fb`, or when `ZK_POWER_FORCE=1` (test-only, so the memory display used by `tests/e2e.sh` can exercise the same state machine). Shot and fixture renders do not touch a backlight unless that variable is set. Nothing in this tree is applied to a panel; installing the unit on a board is a separate step.
+
+| Flag | Env (used only when the flag is omitted) | Default |
+|---|---|---|
+| `--dim-after SEC` | `ZAN_DIM_AFTER_SEC` | 120 |
+| `--off-after SEC` | `ZAN_OFF_AFTER_SEC` | 600 |
+| `--dim-level N` | `ZAN_DIM_LEVEL` | 51 (about 20% of 255) |
+| `--backlight DIR` | `ZAN_BACKLIGHT` | `/sys/class/backlight/rpi_backlight` |
+
+Flags win, including an explicit `0`. Junk and values above the cap (seconds `1000000000`, level `255`) exit 2 with the usage text. A bad env value does the same.
+
+`0` for `--dim-after` disables dimming and off. The directory is not opened. `0` for `--off-after` disables off only. If off is positive and not strictly greater than dim, off is disabled (not bumped by one second) so a bad pair cannot black the screen. Off is measured from the last touch, not from the moment of dim. The threshold is `idle >= N` seconds. A configured dim level of 0 is written as 1. The written dim is never below that level unless the panel max is lower, in which case the max is used.
+
+```
+ blockers (watering, lockout, fault, unreachable, confirm modal)
+ hold the idle clock at 0 and force ACTIVE immediately
+        |
+        v
+    +--------+   no touch for dim_after    +--------+
+    | ACTIVE | --------------------------> | DIMMED |
+    +--------+ <-------------------------- +--------+
+        ^          wake tap (see table)         |
+        |                                       | no touch until off_after
+        |                                       | from the last touch
+        |                                       v
+        |                                    +-----+
+        +----------------------------------- | OFF |
+                     wake tap                +-----+
+
+ paused: ACTIVE may go to DIMMED, and never to OFF
+         (an already-OFF screen moves to DIMMED)
+ dim_after 0: stay ACTIVE, no sysfs and no FBIOBLANK
+```
+
+Wake taps. The choice is latched on the press, so the UI sees both the press and the release, or neither. A swallowed touch cannot leave the pointer stuck down. Samples with no finger down are not touches and do not reset the idle clock. `now < release+300 ms` is still swallowed; the sample at exactly +300 ms is delivered. STOP does not arm that guard.
+
+| State when the finger goes down | Where | What the UI sees |
+|---|---|---|
+| ACTIVE | anywhere | PASS, idle clock resets |
+| DIMMED | STOP | PASS, and the screen wakes to ACTIVE |
+| DIMMED | anywhere else | SWALLOW until release + 300 ms, wake to ACTIVE |
+| OFF | anywhere, including STOP | SWALLOW until release + 300 ms, wake to ACTIVE |
+
+Blockers, any one of them: watering (run active, `current_station` set, or stations on), lockout, fault (`phase` Fault or `last_error`), unreachable (no fresh snapshot, offline, or needs-update), and an open STOP or pause confirm. A blocker that arrives while dimmed or off wakes the screen immediately. Pause is not a blocker: it may dim, and it must not turn the backlight off. A run starting, or a fault appearing, is a blocker, so it wakes the screen.
+
+Backlight writes, in order:
+
+- ACTIVE to DIMMED: `brightness` only.
+- Into OFF: `brightness` 0, then `bl_power` 1 if that file exists.
+- Wake, and restore on exit: `bl_power` 0, then the saved brightness. A saved value below 1 restores `max_brightness` (255 if that file cannot be read).
+
+The original brightness is read on the first successful write and restored by `zk_power_shutdown`. Normal exit and SIGINT/SIGTERM both get there: the signal handler only sets a flag, and the main loop calls shutdown. A second shutdown does not write again.
+
+`brightness` on the Pi panel is `root:root` mode `0644`. `prepare` in `deploy/zan-kiosk-run.sh` (root, `ExecStartPre=+`) runs `chgrp video` and `chmod g+w` on `brightness` and `bl_power` when the file exists. If `BACKLIGHT` is unset it also writes `max_brightness` first, so the client restores full brightness. If `BACKLIGHT` is set, that fixed level is the saved original. The unit's `ExecStopPost` is `reset-backlight` then `restore-cursor`. `reset-backlight` writes the panel max and `bl_power` 0. Rollback calls it best effort and still does not fail the desktop restore. This repository does not run those steps on a machine.
+
+Failure modes, all non-fatal, each logged once on stderr:
+
+- Directory missing: the state machine still runs. No crash. Dim does not write. Off uses `FBIOBLANK` (`FB_BLANK_POWERDOWN` / `FB_BLANK_UNBLANK`) only when the fb path is a real `/dev/fbN` and a blank function was supplied.
+- `brightness` present but not writable: same fallback. The process keeps running.
+- `bl_power` missing: that write is skipped. Brightness writes still happen.
+- Dimming with no backlight and no real framebuffer: no-op. The state still changes.
+
 ## Boot-persistent kiosk (full kiosk mode)
 
 `deploy/` can install a systemd unit that starts `/opt/zanjerito/zan-kiosk` on `/dev/fb0` at boot and keeps the desktop off that framebuffer. Copying the files does not enable the unit and does not change the boot target. The procedure, the framebuffer dump, and the rollback commands are in [docs/native-kiosk-boot.md](../docs/native-kiosk-boot.md).
@@ -191,7 +255,7 @@ There is no `ExecStop=` that sends STOP or all-off. The kiosk is only a client. 
 
 Writes stay off unless `ZAN_ALLOW_WRITES=1`. An existing install may already have writes on. The installed example leaves them off.
 
-`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. Missing files are skipped. `BACKLIGHT` (0–255) is a fixed level written to `rpi_backlight`; there is no idle dim. A screen timeout needs client support.
+`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. It also `chgrp video` and `chmod g+w` on the backlight nodes, and writes either `max_brightness` or the optional `BACKLIGHT` level. Missing files are skipped. Idle dim and off are the client's job; see Display power above. `ZAN_DIM_AFTER_SEC=0` turns both off. After the client exits, `ExecStopPost` runs `reset-backlight` and then `restore-cursor`. Applying this on a board is a separate step from the files in this tree.
 
 Kernel printk can still draw on tty1. `sudo dmesg -n 1` is optional and not persistent. Putting the tty in `KD_GRAPHICS` is a future client change.
 
@@ -219,7 +283,6 @@ Rollback restores lightdm and `graphical.target`. Installed files can stay, or b
 - Pause-picker preview is still computed on the client from `/api/schedules`.
 - `getaddrinfo` has no timeout. A hostname in `--api` can stall one request for as long as the resolver takes. Use an IPv4 literal on the kiosk.
 - Hold to edit is not implemented (toast only).
-- No idle dim or screen timeout. The boot unit can set a fixed backlight only.
 - The client does not set the tty to KD_GRAPHICS. Kernel messages can still draw on tty1.
 
 ## Licenses

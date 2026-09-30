@@ -1,6 +1,6 @@
 # Boot-persistent kiosk
 
-Full-kiosk boot for the native client on a Raspberry Pi 3B. The panel is the Osoyoo 800×480 framebuffer on `/dev/fb0`. The client binary on the Pi is `/opt/zanjerito/zan-kiosk`.
+Full-kiosk boot for the native client on a Raspberry Pi 3B. The panel is the 800×480 framebuffer on `/dev/fb0`. The client binary on the Pi is `/opt/zanjerito/zan-kiosk`.
 
 Nothing in this page is enabled by installing the files. The Pi keeps booting the desktop until you run the switch step yourself.
 
@@ -63,7 +63,11 @@ Optional:
 | `ZAN_FB` | Framebuffer. Default `/dev/fb0`. |
 | `ZAN_TOUCH` | evdev device. Omit to autodetect. |
 | `ZAN_EXTRA_ARGS` | Extra client arguments, split on spaces. |
-| `BACKLIGHT` | Fixed backlight, 0–255. See below. |
+| `ZAN_DIM_AFTER_SEC` | Seconds with no touch before dim. Example ships `120`. `0` disables dim and off. |
+| `ZAN_OFF_AFTER_SEC` | Seconds from the last touch before the backlight goes off. Example ships `600`. `0` disables off only. Must be greater than dim, or off stays off. |
+| `ZAN_DIM_LEVEL` | Dim brightness 0–255. Optional. Client default is 51. `0` does not disable the feature. |
+| `ZAN_BACKLIGHT` | Sysfs backlight directory. Optional. Default `/sys/class/backlight/rpi_backlight`. |
+| `BACKLIGHT` | Optional fixed level 0–255 written once at start. See below. |
 
 ## 3. Switch on next boot
 
@@ -148,7 +152,7 @@ PY
 - `lightdm` is disabled.
 - `zan-kiosk.service` is enabled (`WantedBy=multi-user.target`).
 - The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`, so the display manager and a login prompt on tty1 do not fight for `/dev/fb0`.
-- On each start, `prepare` hides the console cursor and turns console blank off. It can set a fixed backlight.
+- On each start, `prepare` hides the console cursor, turns console blank off, and prepares the backlight. The client then dims and blanks from the timers below. Copying these files does not change a running panel. Applying them on the board is a separate step.
 
 The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
 
@@ -175,7 +179,7 @@ Stopping `zan-kiosk` kills the client. Water that is already on keeps running un
 - Write `ESC[9;0]` to `/dev/tty1` to set the console blank timeout to 0 minutes.
 - If `setterm` exists, run `setterm --blank 0 --powerdown 0 --cursor off` with stdin and stdout on `/dev/tty1`. A failure is ignored.
 
-`ExecStopPost=+` runs `restore-cursor`, which writes `ESC[?25h` to `/dev/tty1`.
+`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
 
 Kernel messages can still land on tty1 and draw over the framebuffer. Optional, this boot only, and not done by the unit:
 
@@ -185,9 +189,31 @@ sudo dmesg -n 1
 
 Setting the tty to `KD_GRAPHICS` so printk cannot draw there is a future client change.
 
-## Backlight
+## Backlight and display power
 
-The Pi panel exposes `rpi_backlight` with a max of 255. If `BACKLIGHT` is set to 0–255, `prepare` writes that value to `/sys/class/backlight/*/brightness`. The level is fixed for the whole run. The client has no idle dim. A screen timeout needs client support; it is not this unit.
+The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
+
+- `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT`, or `/sys/class/backlight/rpi_backlight` when that is unset. `ZAN_ROOT` prefixes the directory in tests only.
+- If `BACKLIGHT` is unset, write `max_brightness` into `brightness` (the raw panel max, not capped at 255). The client saves that value and restores it on exit.
+- If `BACKLIGHT` is set to 0–255, write that fixed level to `/sys/class/backlight/*/brightness` instead. That level is what the client later restores. It is not the idle-dim level.
+
+The example file ships `ZAN_DIM_AFTER_SEC=120` and `ZAN_OFF_AFTER_SEC=600`. The client dims after 120 seconds with no touch, and turns the backlight off 600 seconds after the last touch. `ZAN_DIM_LEVEL` and `ZAN_BACKLIGHT` are commented. Flags on the client win over these variables. Invalid numbers are skipped with a stderr line; the unit still starts.
+
+`ZAN_DIM_AFTER_SEC=0` disables dimming and off. The client does not open the backlight directory. `ZAN_OFF_AFTER_SEC=0` disables off only. If off is not strictly greater than dim, off is disabled rather than raised.
+
+While a run is watering, the panel is locked out, a fault or `last_error` is set, the controller is unreachable (including needs-update), or a confirm modal is open, the screen stays on and the idle clock does not advance. Pause may dim and never turns the backlight off. A touch while the backlight is off is swallowed (the screen wakes, and that tap does not press a control), including STOP. A touch while dimmed is swallowed except STOP, which passes on that first tap and wakes. The swallow lasts until the finger lifts plus 300 ms.
+
+A missing directory, or a brightness node that cannot be written, is not fatal. The client logs it once and keeps running. With no writable backlight, dim is a no-op. Off then uses `FBIOBLANK` only when the framebuffer path is a real `/dev/fbN`.
+
+To turn the feature off without removing the unit, set `ZAN_DIM_AFTER_SEC=0` in `/etc/default/zan-kiosk` and restart the kiosk unit (do not restart the irrigation daemon for that).
+
+If the panel is left black, restore the backlight as root. This does not stop the daemon:
+
+```sh
+sudo /opt/zanjerito/zan-kiosk-run.sh reset-backlight
+```
+
+Rollback runs that same subcommand, best effort, after it stops the kiosk. A failure there does not fail the desktop restore. Nothing in this tree applies these steps on a board; that install is a separate step.
 
 ## If the panel is blank
 
@@ -215,7 +241,7 @@ sudo systemctl stop zan-kiosk && sudo systemctl start lightdm
 
 That does not change the default target. After `--switch`, use the longer command.
 
-`--dry-run` on `rollback-desktop.sh` prints the four commands and runs none.
+`--dry-run` on `rollback-desktop.sh` prints the four systemctl commands and `reset-backlight`, and runs none.
 
 ## Reversibility
 

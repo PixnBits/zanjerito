@@ -6,6 +6,7 @@
 #include "shots.h"
 #include "ui.h"
 #include "zk_console.h"
+#include "zk_power.h"
 
 #include <errno.h>
 #include <getopt.h>
@@ -21,7 +22,11 @@ enum {
     OPT_TOUCH_FLIP_X,
     OPT_TOUCH_FLIP_Y,
     OPT_SHOT_ALL,
-    OPT_FIXTURES_ROOT
+    OPT_FIXTURES_ROOT,
+    OPT_DIM_AFTER,
+    OPT_OFF_AFTER,
+    OPT_DIM_LEVEL,
+    OPT_BACKLIGHT
 };
 
 enum {
@@ -47,6 +52,19 @@ static int g_act_started;
 static double g_act_t0;
 static int g_script_fail;
 static volatile sig_atomic_t g_stop;
+static zk_power_t g_power;
+static int g_power_on;
+
+static void power_shutdown_now(void)
+{
+    if (!g_power_on) {
+        return;
+    }
+    zk_power_shutdown(&g_power);
+    zk_platform_set_power_transitions(zk_power_transitions(&g_power));
+    zk_platform_bind_power(NULL);
+    g_power_on = 0;
+}
 
 static void usage(FILE *fp, const char *argv0)
 {
@@ -66,8 +84,15 @@ static void usage(FILE *fp, const char *argv0)
             "  --shot-all OUTDIR    call zk_shots_run (needs --fixtures-root)\n"
             "  --fixtures-root DIR  fixture tree passed to zk_shots_run\n"
             "  --duration SEC       exit after SEC seconds from process start\n"
+            "  --dim-after SEC      idle seconds before dim (default 120; 0 disables dim and off)\n"
+            "  --off-after SEC      idle seconds from last touch before off (default 600; 0 disables off)\n"
+            "  --dim-level N        dim brightness 0-255 (default 51; written value is at least 1)\n"
+            "  --backlight DIR      sysfs backlight directory\n"
             "  --stats              print one JSON stats line on stderr\n"
-            "  --help               show this help\n",
+            "  --help               show this help\n"
+            "Display power runs only with --fb, unless ZK_POWER_FORCE=1 (test-only).\n"
+            "Env fallbacks when the flag is omitted: ZAN_DIM_AFTER_SEC, ZAN_OFF_AFTER_SEC,\n"
+            "ZAN_DIM_LEVEL, ZAN_BACKLIGHT. Flags win.\n",
             argv0);
 }
 
@@ -86,6 +111,47 @@ static int parse_nonneg(const char *s, int *out)
     }
     *out = (int)v;
     return 0;
+}
+
+/* 1 if set, 0 if unset, -1 if invalid. */
+static int take_env_nonneg(const char *name, int *out)
+{
+    const char *s = getenv(name);
+
+    if (!s || !s[0]) {
+        return 0;
+    }
+    if (parse_nonneg(s, out) != 0) {
+        fprintf(stderr, "%s: invalid\n", name);
+        return -1;
+    }
+    return 1;
+}
+
+static int take_env_level(const char *name, int *out)
+{
+    int rc = take_env_nonneg(name, out);
+
+    if (rc > 0 && *out > 255) {
+        fprintf(stderr, "%s: invalid\n", name);
+        return -1;
+    }
+    return rc;
+}
+
+static int take_env_backlight(const char **out)
+{
+    const char *s = getenv("ZAN_BACKLIGHT");
+
+    if (!s || !s[0]) {
+        return 0;
+    }
+    if (strlen(s) >= ZK_POWER_DIR_MAX) {
+        fprintf(stderr, "ZAN_BACKLIGHT: invalid\n");
+        return -1;
+    }
+    *out = s;
+    return 1;
 }
 
 static int dir_ok(const char *path)
@@ -311,6 +377,10 @@ int main(int argc, char **argv)
         {"shot-all", required_argument, 0, OPT_SHOT_ALL},
         {"fixtures-root", required_argument, 0, OPT_FIXTURES_ROOT},
         {"duration", required_argument, 0, 'd'},
+        {"dim-after", required_argument, 0, OPT_DIM_AFTER},
+        {"off-after", required_argument, 0, OPT_OFF_AFTER},
+        {"dim-level", required_argument, 0, OPT_DIM_LEVEL},
+        {"backlight", required_argument, 0, OPT_BACKLIGHT},
         {"stats", no_argument, 0, 'T'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
@@ -333,6 +403,17 @@ int main(int argc, char **argv)
     int stats = 0;
     int duration = -1;
     int memory_only = 0;
+    int dim_after = -1;
+    int off_after = -1;
+    int dim_level = -1;
+    int saw_dim = 0;
+    int saw_off = 0;
+    int saw_level = 0;
+    int saw_bl = 0;
+    int want_power = 0;
+    int env_rc;
+    const char *backlight = NULL;
+    const char *force;
     int rc = 0;
     int data_on = 0;
     zk_app_t app;
@@ -391,6 +472,35 @@ int main(int argc, char **argv)
                 return 2;
             }
             break;
+        case OPT_DIM_AFTER:
+            if (parse_nonneg(optarg, &dim_after) != 0) {
+                usage(stderr, argv[0]);
+                return 2;
+            }
+            saw_dim = 1;
+            break;
+        case OPT_OFF_AFTER:
+            if (parse_nonneg(optarg, &off_after) != 0) {
+                usage(stderr, argv[0]);
+                return 2;
+            }
+            saw_off = 1;
+            break;
+        case OPT_DIM_LEVEL:
+            if (parse_nonneg(optarg, &dim_level) != 0 || dim_level > 255) {
+                usage(stderr, argv[0]);
+                return 2;
+            }
+            saw_level = 1;
+            break;
+        case OPT_BACKLIGHT:
+            if (!optarg[0] || strlen(optarg) >= ZK_POWER_DIR_MAX) {
+                usage(stderr, argv[0]);
+                return 2;
+            }
+            backlight = optarg;
+            saw_bl = 1;
+            break;
         case 'T':
             stats = 1;
             break;
@@ -401,6 +511,55 @@ int main(int argc, char **argv)
             usage(stderr, argv[0]);
             return 2;
         }
+    }
+    if (!saw_dim) {
+        env_rc = take_env_nonneg("ZAN_DIM_AFTER_SEC", &dim_after);
+        if (env_rc < 0) {
+            usage(stderr, argv[0]);
+            return 2;
+        }
+        if (env_rc > 0) {
+            saw_dim = 1;
+        }
+    }
+    if (!saw_off) {
+        env_rc = take_env_nonneg("ZAN_OFF_AFTER_SEC", &off_after);
+        if (env_rc < 0) {
+            usage(stderr, argv[0]);
+            return 2;
+        }
+        if (env_rc > 0) {
+            saw_off = 1;
+        }
+    }
+    if (!saw_level) {
+        env_rc = take_env_level("ZAN_DIM_LEVEL", &dim_level);
+        if (env_rc < 0) {
+            usage(stderr, argv[0]);
+            return 2;
+        }
+        if (env_rc > 0) {
+            saw_level = 1;
+        }
+    }
+    if (!saw_bl) {
+        env_rc = take_env_backlight(&backlight);
+        if (env_rc < 0) {
+            usage(stderr, argv[0]);
+            return 2;
+        }
+    }
+    if (!saw_dim) {
+        dim_after = ZK_POWER_DEFAULT_DIM_AFTER_SEC;
+    }
+    if (!saw_off) {
+        off_after = ZK_POWER_DEFAULT_OFF_AFTER_SEC;
+    }
+    if (!saw_level) {
+        dim_level = ZK_POWER_DEFAULT_DIM_LEVEL;
+    }
+    if (!backlight || !backlight[0]) {
+        backlight = ZK_POWER_DEFAULT_BACKLIGHT;
     }
     if (optind < argc) {
         fprintf(stderr, "unexpected argument: %s\n", argv[optind]);
@@ -452,6 +611,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "display: memory backend; not opening framebuffer\n");
         fb = NULL;
     }
+    force = getenv("ZK_POWER_FORCE");
+    want_power = (fb && fb[0]) || (force && strcmp(force, "1") == 0);
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
@@ -469,6 +630,22 @@ int main(int argc, char **argv)
         zk_platform_print_stats(stats);
         return 1;
     }
+    if (want_power) {
+        zk_power_config_t pc;
+
+        memset(&pc, 0, sizeof pc);
+        pc.dim_after_sec = dim_after;
+        pc.off_after_sec = off_after;
+        pc.dim_level = dim_level;
+        pc.backlight_dir = backlight;
+        pc.fb_real = zk_platform_fb_is_real();
+        if (pc.fb_real) {
+            pc.blank = zk_platform_fbio_blank;
+        }
+        zk_power_init(&g_power, &pc);
+        zk_platform_bind_power(&g_power);
+        g_power_on = 1;
+    }
     if (fb) {
         zk_console_cursor(1);
     }
@@ -482,28 +659,17 @@ int main(int argc, char **argv)
 
     if (shot_all) {
         rc = zk_shots_run(fixtures_root, shot_all);
-        zk_platform_print_stats(stats);
-        if (fb) {
-            zk_console_cursor(0);
-        }
-        return rc == 0 ? 0 : 1;
+        goto out;
     }
     if (shot_file && !script) {
         rc = zk_snapshot_png(shot_file);
-        zk_platform_print_stats(stats);
-        if (fb) {
-            zk_console_cursor(0);
-        }
-        return rc == 0 ? 0 : 1;
+        goto out;
     }
     if ((fixture && fixture[0]) || (api && api[0])) {
         if (zk_data_start(&app) != 0) {
             fprintf(stderr, "data: start failed\n");
-            zk_platform_print_stats(stats);
-            if (fb) {
-                zk_console_cursor(0);
-            }
-            return 1;
+            rc = 1;
+            goto out;
         }
         data_on = 1;
     }
@@ -520,6 +686,12 @@ int main(int argc, char **argv)
         }
         script_tick(now);
         zk_ui_tick();
+        if (g_power_on) {
+            zk_power_inputs_t pin;
+
+            zk_ui_power_inputs(&pin);
+            zk_power_tick(&g_power, zk_platform_mono_ms(), &pin);
+        }
         if (g_stop) {
             break;
         }
@@ -556,12 +728,15 @@ int main(int argc, char **argv)
         zk_platform_wait(wait);
     }
 
+    rc = g_script_fail ? 1 : 0;
+out:
     if (data_on) {
         zk_data_stop();
     }
+    power_shutdown_now();
     if (fb) {
         zk_console_cursor(0);
     }
     zk_platform_print_stats(stats);
-    return g_script_fail ? 1 : 0;
+    return rc == 0 ? 0 : 1;
 }

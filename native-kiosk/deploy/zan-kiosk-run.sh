@@ -1,14 +1,14 @@
 #!/bin/sh
-# prepare | run | restore-cursor for zan-kiosk.service.
+# prepare | run | restore-cursor | reset-backlight for zan-kiosk.service.
 # ZAN_ROOT prefixes paths this script opens (sysfs, tty, default binary).
 # It does not prefix --fb, --touch, or --api. Those are passed to the client.
-# Default ZAN_ROOT is empty, so the paths are the real ones.
+# ZAN_BACKLIGHT is prefixed. Default ZAN_ROOT is empty, so the paths are the real ones.
 set -u
 
 ZAN_ROOT=${ZAN_ROOT-}
 
 usage() {
-    printf 'usage: zan-kiosk-run.sh prepare|run|restore-cursor\n' >&2
+    printf 'usage: zan-kiosk-run.sh prepare|run|restore-cursor|reset-backlight\n' >&2
     exit 2
 }
 
@@ -31,6 +31,32 @@ normalize_level() {
         return 1
     fi
     printf '%s' "$n"
+}
+
+# Seconds, 0 through 1000000000. Not the 0-255 backlight cap.
+normalize_seconds() {
+    b=$1
+    if [ "${#b}" -gt 10 ]; then
+        return 1
+    fi
+    case $b in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    n=$b
+    while [ "${n#0}" != "$n" ]; do
+        n=${n#0}
+    done
+    if [ -z "$n" ]; then
+        n=0
+    fi
+    if [ "$n" -gt 1000000000 ]; then
+        return 1
+    fi
+    printf '%s' "$n"
+}
+
+backlight_sysdir() {
+    printf '%s%s' "$ZAN_ROOT" "${ZAN_BACKLIGHT:-/sys/class/backlight/rpi_backlight}"
 }
 
 prepare_cursor_blink() {
@@ -75,10 +101,61 @@ prepare_tty() {
     fi
 }
 
+# chgrp video and chmod g+w so the pi user (group video) can dim later.
+# Best effort. A missing file or a missing chgrp does not fail prepare.
+prepare_backlight_access() {
+    dir=$(backlight_sysdir)
+    for name in brightness bl_power; do
+        path=$dir/$name
+        if [ ! -e "$path" ]; then
+            printf 'prepare: skipped %s (absent)\n' "$path" >&2
+            continue
+        fi
+        if ! command -v chgrp >/dev/null 2>&1; then
+            printf 'prepare: chgrp not found, skipped %s\n' "$path" >&2
+        elif chgrp video "$path"; then
+            printf 'prepare: chgrp video %s\n' "$path" >&2
+        else
+            printf 'prepare: could not chgrp %s (ignored)\n' "$path" >&2
+        fi
+        if ! command -v chmod >/dev/null 2>&1; then
+            printf 'prepare: chmod not found, skipped %s\n' "$path" >&2
+        elif chmod g+w "$path"; then
+            printf 'prepare: chmod g+w %s\n' "$path" >&2
+        else
+            printf 'prepare: could not chmod %s (ignored)\n' "$path" >&2
+        fi
+    done
+}
+
+# BACKLIGHT unset: start from the panel max. The client saves that and restores it.
+prepare_backlight_max() {
+    dir=$(backlight_sysdir)
+    mx=$dir/max_brightness
+    br=$dir/brightness
+    if [ ! -f "$mx" ] || [ ! -e "$br" ]; then
+        printf 'prepare: skipped max brightness (absent)\n' >&2
+        return 0
+    fi
+    level=$(tr -d '[:space:]' <"$mx" 2>/dev/null || true)
+    case $level in
+        ''|*[!0-9]*)
+            printf 'prepare: skipped max brightness (unreadable)\n' >&2
+            return 0
+            ;;
+    esac
+    if printf '%s\n' "$level" >"$br"; then
+        printf 'prepare: wrote max brightness %s to %s\n' "$level" "$br" >&2
+    else
+        printf 'prepare: could not write %s (ignored)\n' "$br" >&2
+    fi
+}
+
 prepare_backlight() {
     level=${BACKLIGHT-}
+    prepare_backlight_access
     if [ -z "$level" ]; then
-        printf 'prepare: skipped backlight (BACKLIGHT unset)\n' >&2
+        prepare_backlight_max
         return 0
     fi
     norm=$(normalize_level "$level") || {
@@ -136,6 +213,36 @@ run_kiosk() {
     if [ -n "${ZAN_TOUCH-}" ]; then
         set -- "$@" --touch "$ZAN_TOUCH"
     fi
+    if [ -n "${ZAN_DIM_AFTER_SEC-}" ]; then
+        norm=$(normalize_seconds "$ZAN_DIM_AFTER_SEC") || {
+            printf 'zan-kiosk-run: skipped --dim-after (ZAN_DIM_AFTER_SEC=%s is not 0-1000000000)\n' "$ZAN_DIM_AFTER_SEC" >&2
+            norm=
+        }
+        if [ -n "$norm" ]; then
+            set -- "$@" --dim-after "$norm"
+        fi
+    fi
+    if [ -n "${ZAN_OFF_AFTER_SEC-}" ]; then
+        norm=$(normalize_seconds "$ZAN_OFF_AFTER_SEC") || {
+            printf 'zan-kiosk-run: skipped --off-after (ZAN_OFF_AFTER_SEC=%s is not 0-1000000000)\n' "$ZAN_OFF_AFTER_SEC" >&2
+            norm=
+        }
+        if [ -n "$norm" ]; then
+            set -- "$@" --off-after "$norm"
+        fi
+    fi
+    if [ -n "${ZAN_DIM_LEVEL-}" ]; then
+        norm=$(normalize_level "$ZAN_DIM_LEVEL") || {
+            printf 'zan-kiosk-run: skipped --dim-level (ZAN_DIM_LEVEL=%s is not 0-255)\n' "$ZAN_DIM_LEVEL" >&2
+            norm=
+        }
+        if [ -n "$norm" ]; then
+            set -- "$@" --dim-level "$norm"
+        fi
+    fi
+    if [ -n "${ZAN_BACKLIGHT-}" ]; then
+        set -- "$@" --backlight "$ZAN_BACKLIGHT"
+    fi
     if [ -n "${ZAN_EXTRA_ARGS-}" ]; then
         # Split on spaces. No glob and no second parse, so ';' stays an argument.
         case $- in
@@ -173,10 +280,46 @@ restore_cursor() {
     exit 0
 }
 
+# Root, best effort, always exits 0. Writes max_brightness into brightness and 0 into bl_power.
+reset_backlight() {
+    dir=$(backlight_sysdir)
+    br=$dir/brightness
+    mx=$dir/max_brightness
+    bl=$dir/bl_power
+    if [ -f "$mx" ] && [ -e "$br" ]; then
+        level=$(tr -d '[:space:]' <"$mx" 2>/dev/null || true)
+        case $level in
+            ''|*[!0-9]*)
+                printf 'reset-backlight: skipped brightness (bad max)\n' >&2
+                ;;
+            *)
+                if printf '%s\n' "$level" >"$br"; then
+                    printf 'reset-backlight: wrote %s to %s\n' "$level" "$br" >&2
+                else
+                    printf 'reset-backlight: could not write %s (ignored)\n' "$br" >&2
+                fi
+                ;;
+        esac
+    else
+        printf 'reset-backlight: skipped brightness (absent)\n' >&2
+    fi
+    if [ -e "$bl" ]; then
+        if printf '0\n' >"$bl"; then
+            printf 'reset-backlight: wrote 0 to %s\n' "$bl" >&2
+        else
+            printf 'reset-backlight: could not write %s (ignored)\n' "$bl" >&2
+        fi
+    else
+        printf 'reset-backlight: skipped bl_power (absent)\n' >&2
+    fi
+    exit 0
+}
+
 cmd=${1-}
 case $cmd in
     prepare) prepare ;;
     run) run_kiosk ;;
     restore-cursor) restore_cursor ;;
+    reset-backlight) reset_backlight ;;
     *) usage ;;
 esac
