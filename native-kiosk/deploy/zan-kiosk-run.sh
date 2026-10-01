@@ -151,8 +151,10 @@ prepare_backlight_max() {
     fi
 }
 
+# BACKLIGHT set: write that level to the configured directory only.
 prepare_backlight() {
     level=${BACKLIGHT-}
+    dir=$(backlight_sysdir)
     prepare_backlight_access
     if [ -z "$level" ]; then
         prepare_backlight_max
@@ -162,20 +164,15 @@ prepare_backlight() {
         printf 'prepare: skipped backlight (BACKLIGHT=%s is not 0-255)\n' "$level" >&2
         return 0
     }
-    found=0
-    for path in "$ZAN_ROOT"/sys/class/backlight/*/brightness; do
-        if [ ! -e "$path" ]; then
-            continue
-        fi
-        found=1
-        if printf '%s\n' "$norm" >"$path"; then
-            printf 'prepare: wrote backlight %s to %s\n' "$norm" "$path" >&2
-        else
-            printf 'prepare: could not write %s (ignored)\n' "$path" >&2
-        fi
-    done
-    if [ "$found" -eq 0 ]; then
+    br=$dir/brightness
+    if [ ! -e "$br" ]; then
         printf 'prepare: skipped backlight (no device)\n' >&2
+        return 0
+    fi
+    if printf '%s\n' "$norm" >"$br"; then
+        printf 'prepare: wrote backlight %s to %s\n' "$norm" "$br" >&2
+    else
+        printf 'prepare: could not write %s (ignored)\n' "$br" >&2
     fi
 }
 
@@ -280,7 +277,8 @@ restore_cursor() {
     exit 0
 }
 
-# Root, best effort, always exits 0. Writes max_brightness into brightness and 0 into bl_power.
+# Root, best effort, always exits 0. Configured directory only.
+# Writes max_brightness into brightness and 0 into bl_power.
 reset_backlight() {
     dir=$(backlight_sysdir)
     br=$dir/brightness

@@ -1,6 +1,7 @@
 #include "zk_test.h"
 #include "zk_power.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -431,7 +432,8 @@ static void test_shutdown_restore(void)
     boot(&p, 2, 5, 40);
     zk_power_tick(&p, 0, &in);
     zk_power_tick(&p, 2000, &in);
-    TEQ_I(file_int("brightness"), 40);
+    /* Original 0 is already dark: dim does not write. Shutdown restores max. */
+    TEQ_I(file_int("brightness"), 0);
     zk_power_shutdown(&p);
     TEQ_I(file_int("brightness"), 255);
     TEQ_I(file_int("bl_power"), 0);
@@ -576,7 +578,8 @@ static void test_clamp_and_disable(void)
     zk_power_tick(&p, 0, &in);
     zk_power_tick(&p, 1000000000LL * 1000, &in);
     TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
-    TEQ_I(file_int("brightness"), 255);
+    /* Configured level clamps to 255, but that must not raise the saved 200. */
+    TEQ_I(file_int("brightness"), 200);
     zk_power_tick(&p, 1000000000LL * 1000 + 100000, &in);
     TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
 
@@ -674,6 +677,371 @@ static void unlink_bl(void)
     expect_trace(&p, 1, "brightness", "0");
 }
 
+static void test_never_brighten(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+
+    reset_tree();
+    put_file("brightness", "20\n");
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 20);
+    expect_trace(&p, 0, "brightness", "20");
+    TEQ_I(zk_power_touch_event(&p, 2000, 1, 0), ZK_POWER_SWALLOW);
+    TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+    TEQ_I(file_int("brightness"), 20);
+    zk_power_shutdown(&p);
+    TEQ_I(file_int("brightness"), 20);
+
+    reset_tree();
+    put_file("brightness", "255\n");
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 51);
+    expect_trace(&p, 0, "brightness", "51");
+
+    reset_tree();
+    put_file("brightness", "0\n");
+    put_file("max_brightness", "180\n");
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 0);
+    TEQ_I(zk_power_trace_len(&p), 0);
+    TEQ_I(zk_power_touch_event(&p, 2100, 1, 0), ZK_POWER_SWALLOW);
+    TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+    TEQ_I(file_int("brightness"), 180);
+    cap_off();
+    TEQ_I(count_power_lines(), 0);
+
+    reset_tree();
+    put_file("brightness", "0\n");
+    put_file("max_brightness", "180\n");
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(file_int("brightness"), 0);
+    zk_power_shutdown(&p);
+    cap_off();
+    TEQ_I(file_int("brightness"), 180);
+    TEQ_I(file_int("bl_power"), 0);
+    TEQ_I(count_power_lines(), 0);
+
+    reset_tree();
+    put_file("brightness", "51\n");
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 51);
+    expect_trace(&p, 0, "brightness", "51");
+
+    reset_tree();
+    put_file("brightness", "40\n");
+    boot(&p, 2, 30, 0);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(file_int("brightness"), 1);
+    expect_trace(&p, 0, "brightness", "1");
+}
+
+static void bad_max_keeps_orig(const char *text, int drop_max)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+    char path[128];
+
+    reset_tree();
+    put_file("brightness", "40\n");
+    if (drop_max) {
+        path_of(path, sizeof path, "max_brightness");
+        unlink(path);
+    } else {
+        put_file("max_brightness", text);
+    }
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    cap_off();
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 40);
+    TEQ_I(count_power_lines(), 0);
+}
+
+static void test_bad_max(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+    char path[128];
+
+    bad_max_keeps_orig(NULL, 1);
+    bad_max_keeps_orig("nope\n", 0);
+    bad_max_keeps_orig("99999999999\n", 0);
+    bad_max_keeps_orig("0\n", 0);
+    bad_max_keeps_orig("-3\n", 0);
+
+    reset_tree();
+    put_file("brightness", "nope\n");
+    path_of(path, sizeof path, "max_brightness");
+    unlink(path);
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(file_int("brightness"), 51);
+    zk_power_shutdown(&p);
+    cap_off();
+    TEQ_I(file_int("brightness"), 255);
+    TEQ_I(count_power_lines(), 0);
+}
+
+static void test_unknown_original(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+    char path[128];
+
+    reset_tree();
+    put_file("brightness", "nope\n");
+    put_file("max_brightness", "180\n");
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 51);
+    zk_power_shutdown(&p);
+    cap_off();
+    TEQ_I(file_int("brightness"), 180);
+    TEQ_I(count_power_lines(), 0);
+
+    reset_tree();
+    path_of(path, sizeof path, "brightness");
+    unlink(path);
+    put_file("max_brightness", "180\n");
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_shutdown(&p);
+    cap_off();
+    TEQ_I(file_int("brightness"), -999);
+    TEQ_I(zk_power_trace_len(&p), 0);
+    TEQ_I(count_power_lines(), 0);
+
+    cap_on();
+    boot(&p, 2, 30, 51);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(file_int("brightness"), 51);
+    zk_power_shutdown(&p);
+    cap_off();
+    TEQ_I(file_int("brightness"), 180);
+    TEQ_I(count_power_lines(), 0);
+}
+
+static void test_init_saves_original(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+
+    reset_tree();
+    put_file("brightness", "180\n");
+    boot(&p, 2, 30, 51);
+    put_file("brightness", "7\n");
+    TEQ_I(zk_power_trace_len(&p), 0);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 51);
+    TEQ_I(zk_power_touch_event(&p, 2000, 1, 0), ZK_POWER_SWALLOW);
+    TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+    TEQ_I(file_int("brightness"), 180);
+    zk_power_shutdown(&p);
+    TEQ_I(file_int("brightness"), 180);
+
+    reset_tree();
+    put_file("brightness", "180\n");
+    boot(&p, 2, 30, 51);
+    put_file("brightness", "7\n");
+    zk_power_shutdown(&p);
+    TEQ_I(file_int("brightness"), 7);
+    TEQ_I(zk_power_trace_len(&p), 0);
+    TEQ_I((int)zk_power_state(&p), ZK_POWER_ACTIVE);
+}
+
+static void test_chmod_unwritable(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+    char path[128];
+    int st_dim;
+    int st_off;
+    zk_power_touch_action_t act;
+
+    if (geteuid() == 0) {
+        return;
+    }
+    reset_tree();
+    path_of(path, sizeof path, "brightness");
+    TCHECK(chmod(path, 0444) == 0, "chmod 0444 brightness");
+    g_blank_n = 0;
+    cap_on();
+    boot_dir(&p, 2, 5, 40, g_dir, 1);
+    zk_power_tick(&p, 0, &in);
+    zk_power_tick(&p, 2000, &in);
+    st_dim = (int)zk_power_state(&p);
+    zk_power_tick(&p, 5000, &in);
+    st_off = (int)zk_power_state(&p);
+    act = zk_power_touch_event(&p, 5000, 1, 0);
+    cap_off();
+    chmod(path, 0644);
+    TEQ_I(st_dim, ZK_POWER_DIMMED);
+    TEQ_I(st_off, ZK_POWER_OFF);
+    TEQ_I(act, ZK_POWER_SWALLOW);
+    TEQ_I((int)zk_power_state(&p), ZK_POWER_ACTIVE);
+    TEQ_I(file_int("brightness"), 200);
+    TEQ_I(g_blank_n, 2);
+    TEQ_I(g_blank_last, 0);
+    TCHECK(count_power_lines() >= 1, "chmod write should log, got: %s", g_err);
+}
+
+static int dir_count(const char *dir)
+{
+    DIR *d;
+    struct dirent *de;
+    int n = 0;
+
+    d = opendir(dir);
+    if (!d) {
+        return -1;
+    }
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+            continue;
+        }
+        n++;
+    }
+    closedir(d);
+    return n;
+}
+
+static void expect_times(const struct stat *a, const struct stat *b, const char *what)
+{
+    TCHECK(a->st_mtim.tv_sec == b->st_mtim.tv_sec && a->st_mtim.tv_nsec == b->st_mtim.tv_nsec,
+           "%s mtime changed", what);
+    TCHECK(a->st_atim.tv_sec == b->st_atim.tv_sec && a->st_atim.tv_nsec == b->st_atim.tv_nsec,
+           "%s atime changed", what);
+}
+
+static void test_disabled_does_not_touch(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+    char sub[160];
+    char file[180];
+    char missing[160];
+    char dark[160];
+    char buf[64];
+    struct stat file_before;
+    struct stat file_after;
+    struct stat dir_before;
+    struct stat dir_after;
+    struct stat st;
+    struct timespec ts[2];
+    int fd;
+    ssize_t n;
+
+    snprintf(sub, sizeof sub, "%s/untouched", g_dir);
+    snprintf(file, sizeof file, "%s/sentinel", sub);
+    snprintf(missing, sizeof missing, "%s/no-such-backlight", g_dir);
+    TCHECK(mkdir(sub, 0755) == 0, "mkdir sentinel dir: %s", strerror(errno));
+    fd = open(file, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    TCHECK(fd >= 0, "create sentinel: %s", strerror(errno));
+    if (fd >= 0) {
+        n = write(fd, "stay\n", 5);
+        TCHECK(n == 5, "write sentinel");
+        close(fd);
+    }
+    ts[0].tv_sec = 100000;
+    ts[0].tv_nsec = 0;
+    ts[1] = ts[0];
+    TCHECK(utimensat(AT_FDCWD, file, ts, 0) == 0, "stamp sentinel");
+    TCHECK(utimensat(AT_FDCWD, sub, ts, 0) == 0, "stamp sentinel dir");
+    TCHECK(stat(file, &file_before) == 0, "stat sentinel before");
+    TCHECK(stat(sub, &dir_before) == 0, "stat dir before");
+
+    g_blank_n = 0;
+    cap_on();
+    boot_dir(&p, 0, 10, 51, sub, 1);
+    zk_power_tick(&p, 5000, &in);
+    TEQ_I(zk_power_touch_event(&p, 5000, 1, 1), ZK_POWER_PASS);
+    zk_power_shutdown(&p);
+    cap_off();
+    TCHECK(stat(file, &file_after) == 0, "stat sentinel after");
+    TCHECK(stat(sub, &dir_after) == 0, "stat dir after");
+    expect_times(&file_before, &file_after, "sentinel");
+    expect_times(&dir_before, &dir_after, "sentinel dir");
+    TEQ_I(dir_count(sub), 1);
+    fd = open(file, O_RDONLY | O_CLOEXEC);
+    TCHECK(fd >= 0, "reopen sentinel");
+    buf[0] = '\0';
+    if (fd >= 0) {
+        n = read(fd, buf, sizeof buf - 1);
+        if (n < 0) {
+            n = 0;
+        }
+        buf[n] = '\0';
+        close(fd);
+    }
+    TEQ_S(buf, "stay\n");
+    TEQ_I(zk_power_enabled(&p), 0);
+    TEQ_I(zk_power_trace_len(&p), 0);
+    TEQ_I(g_blank_n, 0);
+    TEQ_I(count_power_lines(), 0);
+
+    g_blank_n = 0;
+    cap_on();
+    boot_dir(&p, 0, 10, 51, missing, 1);
+    zk_power_tick(&p, 5000, &in);
+    TEQ_I(zk_power_touch_event(&p, 1, 1, 0), ZK_POWER_PASS);
+    zk_power_shutdown(&p);
+    cap_off();
+    TCHECK(stat(missing, &st) != 0, "disabled init created %s", missing);
+    TEQ_I(zk_power_enabled(&p), 0);
+    TEQ_I(zk_power_trace_len(&p), 0);
+    TEQ_I(count_power_lines(), 0);
+    TEQ_I(g_blank_n, 0);
+
+    if (geteuid() == 0) {
+        return;
+    }
+    snprintf(dark, sizeof dark, "%s/dark", g_dir);
+    if (mkdir(dark, 0) != 0) {
+        TCHECK(0, "mkdir dark: %s", strerror(errno));
+        return;
+    }
+    g_blank_n = 0;
+    cap_on();
+    boot_dir(&p, 0, 10, 51, dark, 1);
+    zk_power_tick(&p, 8000, &in);
+    TEQ_I(zk_power_touch_event(&p, 8000, 1, 0), ZK_POWER_PASS);
+    zk_power_shutdown(&p);
+    cap_off();
+    chmod(dark, 0755);
+    TEQ_I(zk_power_enabled(&p), 0);
+    TEQ_I(zk_power_trace_len(&p), 0);
+    TEQ_I(count_power_lines(), 0);
+    TEQ_I(g_blank_n, 0);
+}
+
 int main(void)
 {
     char tmpl[] = "/tmp/zkpowXXXXXX";
@@ -695,6 +1063,12 @@ int main(void)
     test_missing_and_unwritable();
     test_clamp_and_disable();
     unlink_bl();
+    test_never_brighten();
+    test_bad_max();
+    test_unknown_original();
+    test_init_saves_original();
+    test_chmod_unwritable();
+    test_disabled_does_not_touch();
     zk_power_init(NULL, NULL);
     zk_power_tick(NULL, 0, NULL);
     TEQ_I(zk_power_touch_event(NULL, 0, 1, 1), ZK_POWER_PASS);

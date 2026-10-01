@@ -23,17 +23,19 @@ ZAN_API=http://CONTROLLER_HOST:8080
 ZAN_DIM_AFTER_SEC=120
 ZAN_OFF_AFTER_SEC=600
 
-# Dim brightness, 0-255. Optional. The client default is 51 (about 20% of
-# a 255 panel). 0 does not turn the feature off; a dim is never written
-# below 1. Leave this commented to keep the client default.
-# ZAN_DIM_LEVEL=50
+# Dim brightness, 0-255. Optional. The commented value matches the client
+# default, 51 (about 20% of a 255 panel). 0 does not turn the feature off.
+# A dim never raises brightness, and it is never written below 1 when the
+# panel was already on. Leave this commented to keep the client default.
+# ZAN_DIM_LEVEL=51
 
 # Backlight sysfs directory. Optional. The default is rpi_backlight.
 # ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight
 
-# Fixed level, 0-255, written once at start when set. That value is what
-# the client later restores. When unset, prepare writes max_brightness
-# instead. This is not the idle-dim level.
+# Fixed level, 0-255, written once at start to the configured backlight
+# directory only (ZAN_BACKLIGHT, or rpi_backlight). Not every device.
+# That value is what the client later restores. When unset, prepare writes
+# max_brightness there instead. This is not the idle-dim level.
 # BACKLIGHT=255
 
 # Extra client arguments, split on spaces. No embedded spaces.

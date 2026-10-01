@@ -86,7 +86,7 @@ static void usage(FILE *fp, const char *argv0)
             "  --duration SEC       exit after SEC seconds from process start\n"
             "  --dim-after SEC      idle seconds before dim (default 120; 0 disables dim and off)\n"
             "  --off-after SEC      idle seconds from last touch before off (default 600; 0 disables off)\n"
-            "  --dim-level N        dim brightness 0-255 (default 51; written value is at least 1)\n"
+            "  --dim-level N        dim brightness 0-255 (default 51; never brighter than startup)\n"
             "  --backlight DIR      sysfs backlight directory\n"
             "  --stats              print one JSON stats line on stderr\n"
             "  --help               show this help\n"

@@ -65,9 +65,9 @@ Optional:
 | `ZAN_EXTRA_ARGS` | Extra client arguments, split on spaces. |
 | `ZAN_DIM_AFTER_SEC` | Seconds with no touch before dim. Example ships `120`. `0` disables dim and off. |
 | `ZAN_OFF_AFTER_SEC` | Seconds from the last touch before the backlight goes off. Example ships `600`. `0` disables off only. Must be greater than dim, or off stays off. |
-| `ZAN_DIM_LEVEL` | Dim brightness 0–255. Optional. Client default is 51. `0` does not disable the feature. |
+| `ZAN_DIM_LEVEL` | Dim brightness 0–255. Optional. The commented example matches the client default, 51. `0` does not disable the feature. |
 | `ZAN_BACKLIGHT` | Sysfs backlight directory. Optional. Default `/sys/class/backlight/rpi_backlight`. |
-| `BACKLIGHT` | Optional fixed level 0–255 written once at start. See below. |
+| `BACKLIGHT` | Optional fixed level 0–255 written once at start to that directory only. See below. |
 
 ## 3. Switch on next boot
 
@@ -194,10 +194,12 @@ Setting the tty to `KD_GRAPHICS` so printk cannot draw there is a future client 
 The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
 
 - `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT`, or `/sys/class/backlight/rpi_backlight` when that is unset. `ZAN_ROOT` prefixes the directory in tests only.
-- If `BACKLIGHT` is unset, write `max_brightness` into `brightness` (the raw panel max, not capped at 255). The client saves that value and restores it on exit.
-- If `BACKLIGHT` is set to 0–255, write that fixed level to `/sys/class/backlight/*/brightness` instead. That level is what the client later restores. It is not the idle-dim level.
+- If `BACKLIGHT` is unset, write `max_brightness` into `brightness` (the raw panel max, not capped at 255). The client reads that value at startup and restores it on exit.
+- If `BACKLIGHT` is set to 0–255, write that fixed level only to `<dir>/brightness` (the same directory as above, not every backlight device). That level is what the client later restores. It is not the idle-dim level.
 
-The example file ships `ZAN_DIM_AFTER_SEC=120` and `ZAN_OFF_AFTER_SEC=600`. The client dims after 120 seconds with no touch, and turns the backlight off 600 seconds after the last touch. `ZAN_DIM_LEVEL` and `ZAN_BACKLIGHT` are commented. Flags on the client win over these variables. Invalid numbers are skipped with a stderr line; the unit still starts.
+The example file ships `ZAN_DIM_AFTER_SEC=120` and `ZAN_OFF_AFTER_SEC=600`. The client dims after 120 seconds with no touch, and turns the backlight off 600 seconds after the last touch. `ZAN_DIM_LEVEL` is commented at 51, matching the client default. `ZAN_BACKLIGHT` is commented. Flags on the client win over these variables. Invalid numbers are skipped with a stderr line; the unit still starts.
+
+The client reads `brightness` and `max_brightness` at startup, not on the first dim. A dim writes the minimum of the dim level (never below 1 when the saved brightness was at least 1), that saved brightness, and the panel max, so a dim never raises the panel. If the saved brightness is 0, dimming does not write; wake and exit restore `max_brightness`. If the original could not be read, the dim write is min(dim level, max) and restore writes max.
 
 `ZAN_DIM_AFTER_SEC=0` disables dimming and off. The client does not open the backlight directory. `ZAN_OFF_AFTER_SEC=0` disables off only. If off is not strictly greater than dim, off is disabled rather than raised.
 

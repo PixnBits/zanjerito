@@ -19,9 +19,11 @@ Group=pi
 SupplementaryGroups=video input
 EnvironmentFile=-/etc/default/zan-kiosk
 # prepare is root (+): fbcon cursor, tty cursor, console blank, and the
-# backlight nodes. It chgrp's them to video and chmod g+w, best effort.
-# When BACKLIGHT is unset it also writes max_brightness. A missing sysfs
-# file must not fail the unit. Copying this unit does not apply it.
+# configured backlight directory (ZAN_BACKLIGHT, else rpi_backlight).
+# It chgrp's those nodes to video and chmod g+w, best effort.
+# BACKLIGHT unset writes max_brightness there. BACKLIGHT set writes that
+# level to the same directory only. A missing sysfs file must not fail the
+# unit. Copying this unit does not apply it.
 ExecStartPre=+/opt/zanjerito/zan-kiosk-run.sh prepare
 # run execs the client. No shell is left around. There is no ExecStop=.
 # The kiosk is only a client. Valve safety lives in zanjerito.service

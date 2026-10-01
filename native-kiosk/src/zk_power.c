@@ -84,7 +84,8 @@ static int write_int_file(const char *path, int value)
         errno = EINVAL;
         return -1;
     }
-    fd = open(path, O_WRONLY | O_CLOEXEC | O_TRUNC);
+    /* O_CREAT lets a missing node in a test tree be written. Real sysfs rejects it. */
+    fd = open(path, O_WRONLY | O_CLOEXEC | O_TRUNC | O_CREAT, 0644);
     if (fd < 0) {
         return -1;
     }
@@ -133,15 +134,29 @@ static void probe_backlight(zk_power_t *p)
     if (stat(p->dir, &st) != 0 || !S_ISDIR(st.st_mode)) {
         return;
     }
-    if (join_path(path, sizeof path, p->dir, "brightness") != 0 || stat(path, &st) != 0 ||
-        !S_ISREG(st.st_mode)) {
+    if (join_path(path, sizeof path, p->dir, "brightness") != 0) {
+        p->bl_bad = 1;
+        return;
+    }
+    if (stat(path, &st) != 0) {
+        /* Missing file: original is unknown. A later write may create it. */
+        if (errno == ENOENT) {
+            p->bl_ok = 1;
+            return;
+        }
+        p->bl_bad = 1;
+        return;
+    }
+    if (!S_ISREG(st.st_mode)) {
         p->bl_bad = 1;
         return;
     }
     p->bl_ok = 1;
 }
 
-static void ensure_limits(zk_power_t *p)
+/* Called from init only, and only when the directory is usable. A second call
+ * keeps the first sample so a later rewrite of the file cannot change it. */
+static void load_limits(zk_power_t *p)
 {
     char path[ZK_POWER_DIR_MAX + 32];
     int v;
@@ -155,27 +170,38 @@ static void ensure_limits(zk_power_t *p)
         v >= 1 && v <= ZK_POWER_MAX_BR_CAP) {
         p->max_brightness = v;
     }
-    if (!p->have_saved && join_path(path, sizeof path, p->dir, "brightness") == 0 &&
-        read_int_file(path, &v) == 0) {
+    if (join_path(path, sizeof path, p->dir, "brightness") == 0 && read_int_file(path, &v) == 0) {
         p->saved_brightness = v;
         p->have_saved = 1;
     }
 }
 
-static int dim_write_level(const zk_power_t *p)
+/* 0: do not write (already dark). Otherwise *out is never brighter than the
+ * saved original, and never below 1 when that original was at least 1. */
+static int dim_brightness(const zk_power_t *p, int *out)
 {
-    int level = p->dim_level;
+    int level;
 
+    if (p->have_saved && p->saved_brightness < 1) {
+        return 0;
+    }
+    level = p->dim_level;
     if (level < 1) {
         level = 1;
     }
     if (p->max_brightness >= 1 && level > p->max_brightness) {
         level = p->max_brightness;
     }
+    if (p->have_saved && level > p->saved_brightness) {
+        level = p->saved_brightness;
+    }
     if (level < 1) {
         level = 1;
     }
-    return level;
+    if (out) {
+        *out = level;
+    }
+    return 1;
 }
 
 static int active_write_level(const zk_power_t *p)
@@ -293,7 +319,6 @@ static void apply(zk_power_t *p, zk_power_state_t next)
         }
         return;
     }
-    ensure_limits(p);
     if (next == ZK_POWER_OFF) {
         if (write_brightness(p, 0) != 0) {
             blank_down(p);
@@ -303,10 +328,14 @@ static void apply(zk_power_t *p, zk_power_state_t next)
         return;
     }
     if (next == ZK_POWER_DIMMED) {
+        int level = 0;
+
         if (p->state == ZK_POWER_OFF) {
             write_bl_power(p, 0);
         }
-        write_brightness(p, dim_write_level(p));
+        if (dim_brightness(p, &level)) {
+            write_brightness(p, level);
+        }
         return;
     }
     if (p->state != ZK_POWER_ACTIVE) {
@@ -350,6 +379,7 @@ void zk_power_init(zk_power_t *p, const zk_power_config_t *cfg)
         dir = cfg->backlight_dir;
     }
     copy_dir(p, dir);
+    /* Disabled dimming must not stat or read the backlight directory. */
     if (!cfg || dim <= 0) {
         p->enabled = 0;
         return;
@@ -385,6 +415,9 @@ void zk_power_init(zk_power_t *p, const zk_power_config_t *cfg)
     p->blank_ctx = cfg->blank_ctx;
     p->enabled = 1;
     probe_backlight(p);
+    if (p->bl_ok) {
+        load_limits(p);
+    }
 }
 
 void zk_power_tick(zk_power_t *p, int64_t now_ms, const zk_power_inputs_t *in)
@@ -485,7 +518,6 @@ void zk_power_shutdown(zk_power_t *p)
         set_state(p, ZK_POWER_ACTIVE);
     } else if (p->bl_ok && p->hw_touched) {
         write_bl_power(p, 0);
-        ensure_limits(p);
         write_brightness(p, active_write_level(p));
     }
     if (p->blanked) {

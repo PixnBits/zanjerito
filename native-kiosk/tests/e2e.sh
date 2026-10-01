@@ -20,6 +20,7 @@
 #   q  a running fixture never dims or blanks
 #   r  a fault fixture never dims; a paused fixture dims and never blanks
 #   s  SIGTERM restores the saved brightness
+#   t  SIGINT restores the saved brightness
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -923,10 +924,12 @@ PY
     [[ "$(trim_file "$BLDIR/bl_power")" == 0 ]]
 }
 
-# SIGTERM while off puts the saved brightness back and clears bl_power.
-case_s() {
+# SIGTERM or SIGINT while off puts the saved brightness back and clears bl_power.
+signal_restore() {
+    local sig=$1
+    local label=$2
     local i saw=0
-    BLDIR=$TMP/bl-s
+    BLDIR=$TMP/bl-$label
     make_backlight "$BLDIR"
     start_power_kiosk 20 "wait:18000" \
         --fixture "$FIX/home-rain" \
@@ -949,7 +952,7 @@ case_s() {
         trace_fail
         return 1
     fi
-    kill -TERM "$KIOSK_PID"
+    kill -s "$sig" "$KIOSK_PID"
     for ((i = 0; i < 30; i++)); do
         if ! kill -0 "$KIOSK_PID" 2>/dev/null; then
             break
@@ -957,7 +960,7 @@ case_s() {
         sleep 0.1
     done
     if kill -0 "$KIOSK_PID" 2>/dev/null; then
-        echo "SIGTERM did not stop the kiosk" >&2
+        echo "SIG$sig did not stop the kiosk" >&2
         kill -KILL "$KIOSK_PID" 2>/dev/null || true
         stop_sampler
         return 1
@@ -969,6 +972,14 @@ case_s() {
     stop_sampler
     [[ "$(trim_file "$BLDIR/brightness")" == 200 ]]
     [[ "$(trim_file "$BLDIR/bl_power")" == 0 ]]
+}
+
+case_s() {
+    signal_restore TERM s
+}
+
+case_t() {
+    signal_restore INT t
 }
 
 run_case a case_a
@@ -990,6 +1001,7 @@ run_case p case_p
 run_case q case_q
 run_case r case_r
 run_case s case_s
+run_case t case_t
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

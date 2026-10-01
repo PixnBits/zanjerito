@@ -137,8 +137,8 @@ if ! grep -E '^ZAN_OFF_AFTER_SEC=600$' "$EXAMPLE" >/dev/null; then
     echo "example env missing active ZAN_OFF_AFTER_SEC=600" >&2
     exit 1
 fi
-if ! grep -E '^# ZAN_DIM_LEVEL=50$' "$EXAMPLE" >/dev/null; then
-    echo "example env should comment ZAN_DIM_LEVEL=50" >&2
+if ! grep -E '^# ZAN_DIM_LEVEL=51$' "$EXAMPLE" >/dev/null; then
+    echo "example env should comment ZAN_DIM_LEVEL=51 (client default)" >&2
     exit 1
 fi
 if ! grep -E '^# ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight$' "$EXAMPLE" >/dev/null; then
@@ -641,7 +641,7 @@ grep -F "chmod g+w $acc/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >
 grep -F "chmod g+w $acc/sys/class/backlight/rpi_backlight/bl_power" "$CHLOG" >/dev/null
 pass
 
-# BACKLIGHT set still writes the fixed level on the glob, and still fixes access.
+# BACKLIGHT set writes the fixed level on the configured directory only.
 printf '11\n' >"$acc/sys/class/backlight/rpi_backlight/brightness"
 : >"$CHLOG"
 PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$acc BACKLIGHT=128 \
@@ -649,6 +649,72 @@ PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$acc BACKLIGHT=128 \
     "$RUN" prepare >/dev/null 2>&1
 [ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/brightness")" = 128 ]
 grep -F "chmod g+w $acc/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+pass
+
+# Two backlight devices: BACKLIGHT touches only the configured directory.
+two=$TMP/fake-two
+mkdir -p "$two/sys/class/backlight/rpi_backlight" \
+    "$two/sys/class/backlight/other_backlight" "$two/dev"
+printf '11\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '22\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+printf '300\n' >"$two/sys/class/backlight/rpi_backlight/max_brightness"
+printf '111\n' >"$two/sys/class/backlight/other_backlight/max_brightness"
+: >"$CHLOG"
+env -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two BACKLIGHT=128 \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 128 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 22 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
+grep -F "chgrp video $two/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chmod g+w $two/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chmod g+w $two/sys/class/backlight/rpi_backlight/bl_power" "$CHLOG" >/dev/null
+if grep -F other_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched other_backlight" >&2
+    exit 1
+fi
+pass
+
+printf '11\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '22\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+: >"$CHLOG"
+PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two BACKLIGHT=64 \
+    ZAN_BACKLIGHT=/sys/class/backlight/other_backlight \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 64 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 11 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
+grep -F "chmod g+w $two/sys/class/backlight/other_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chgrp video $two/sys/class/backlight/other_backlight/bl_power" "$CHLOG" >/dev/null
+if grep -F rpi_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched rpi_backlight while ZAN_BACKLIGHT is the other device" >&2
+    exit 1
+fi
+pass
+
+# reset-backlight uses that same directory, not every device.
+printf '3\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '9\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+env -u ZAN_BACKLIGHT -u BACKLIGHT ZAN_ROOT=$two "$RUN" reset-backlight >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 9 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
+printf '44\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '9\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+env -u BACKLIGHT ZAN_ROOT=$two ZAN_BACKLIGHT=/sys/class/backlight/other_backlight \
+    "$RUN" reset-backlight >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 111 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 44 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
 pass
 
 # A missing backlight directory is a quiet skip.
@@ -671,14 +737,14 @@ pass
 # 0 is a real value and must be passed through (it disables dim and off in the client).
 out=$(run_wrap ZAN_BIN=$ARGV ZAN_API=http://127.0.0.1:8080 \
     ZAN_TOUCH=/dev/input/event3 \
-    ZAN_DIM_AFTER_SEC=2 ZAN_OFF_AFTER_SEC=9 ZAN_DIM_LEVEL=50 \
+    ZAN_DIM_AFTER_SEC=2 ZAN_OFF_AFTER_SEC=9 ZAN_DIM_LEVEL=17 \
     ZAN_BACKLIGHT=/sys/class/backlight/panel \
     ZAN_EXTRA_ARGS='--duration 1')
 printf '%s\n' "$out" >"$TMP/argv.out"
 {
     printf '%s\n' --fb /dev/fb0 --api http://127.0.0.1:8080 \
         --touch /dev/input/event3 \
-        --dim-after 2 --off-after 9 --dim-level 50 \
+        --dim-after 2 --off-after 9 --dim-level 17 \
         --backlight /sys/class/backlight/panel \
         --duration 1
 } >"$TMP/argv.expect"

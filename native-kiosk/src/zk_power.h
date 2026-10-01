@@ -10,12 +10,20 @@
  * directory is missing or brightness is not writable, and only if fb_real is
  * set. There is no process-global power state. Not thread-safe: one UI thread.
  *
- * dim_after_sec 0 disables dim and off and does not open the directory.
+ * dim_after_sec 0 disables dim and off and does not open, stat, or read
+ * the directory.
  * off_after_sec 0 disables OFF only. If off_after_sec is positive and not
  * strictly greater than dim_after_sec, OFF is disabled (treated as 0).
  * Off is measured from the last touch, not from the dim transition.
- * A dim write is never below 1, and never below the configured dim level
- * unless the panel max is lower (then the max is used).
+ * When dimming is enabled and the backlight directory is usable, init reads
+ * brightness and max_brightness once. Dim and restore keep those values.
+ * A dim write is min(dim level floored at 1, saved brightness, max). It never
+ * raises the panel. Saved brightness below 1 (0 means already dark; a negative
+ * read is treated the same) does not write on dim; the state still becomes
+ * DIMMED. Wake and exit then restore max (saved below 1 becomes max). If
+ * brightness could not be read, the dim write is min(dim level floored at 1,
+ * max) and restore writes max. A readable original of at least 1 is never
+ * dimmed below 1. Shutdown that never dimmed or blanked writes nothing.
  *
  * Wake taps:
  *   ACTIVE  any touch     PASS, idle clock resets
@@ -66,7 +74,7 @@ typedef int (*zk_power_blank_fn)(void *ctx, int powerdown);
 typedef struct {
     int dim_after_sec;
     int off_after_sec;
-    int dim_level; /* 0..255; values outside that are clamped. 0 writes as 1. */
+    int dim_level; /* 0..255; clamped. 0 is written as 1 unless that would brighten. */
     const char *backlight_dir; /* NULL or empty: default rpi_backlight path */
     int fb_real; /* non-zero: blank fn may be used for OFF */
     zk_power_blank_fn blank;
