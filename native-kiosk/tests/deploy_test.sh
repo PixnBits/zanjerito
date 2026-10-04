@@ -88,6 +88,7 @@ for needle in \
     'EnvironmentFile=-/etc/default/zan-kiosk' \
     'ExecStartPre=+/opt/zanjerito/zan-kiosk-run.sh prepare' \
     'ExecStart=/opt/zanjerito/zan-kiosk-run.sh run' \
+    'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor' \
     'Restart=always' \
     'RestartSec=2' \
@@ -102,6 +103,12 @@ do
 done
 if grep -E '^ExecStop=' "$UNIT" >/dev/null; then
     echo "unit must not have ExecStop=" >&2
+    exit 1
+fi
+reset_line=$(grep -n 'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight' "$UNIT" | head -1 | cut -d: -f1)
+restore_line=$(grep -n 'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor' "$UNIT" | head -1 | cut -d: -f1)
+if [ -z "$reset_line" ] || [ -z "$restore_line" ] || [ "$reset_line" -ge "$restore_line" ]; then
+    echo "reset-backlight ExecStopPost must come before restore-cursor" >&2
     exit 1
 fi
 if grep -E '^Requires=' "$UNIT" >/dev/null; then
@@ -120,6 +127,38 @@ if grep -E '^[[:space:]]*(export[[:space:]]+)?ZAN_ALLOW_WRITES=' "$EXAMPLE" >/de
 fi
 if ! grep -F "An existing install may already have writes on" "$EXAMPLE" >/dev/null; then
     echo "example env should say writes are on for existing installs and off here" >&2
+    exit 1
+fi
+if ! grep -E '^ZAN_DIM_AFTER_SEC=120$' "$EXAMPLE" >/dev/null; then
+    echo "example env missing active ZAN_DIM_AFTER_SEC=120" >&2
+    exit 1
+fi
+if ! grep -E '^ZAN_OFF_AFTER_SEC=600$' "$EXAMPLE" >/dev/null; then
+    echo "example env missing active ZAN_OFF_AFTER_SEC=600" >&2
+    exit 1
+fi
+if ! grep -E '^# ZAN_DIM_LEVEL=51$' "$EXAMPLE" >/dev/null; then
+    echo "example env should comment ZAN_DIM_LEVEL=51 (client default)" >&2
+    exit 1
+fi
+if ! grep -E '^# ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight$' "$EXAMPLE" >/dev/null; then
+    echo "example env should comment the default backlight path" >&2
+    exit 1
+fi
+if ! grep -F '0 disables' "$EXAMPLE" >/dev/null; then
+    echo "example env should say 0 disables dim and off" >&2
+    exit 1
+fi
+if grep -F 'There is no idle dim' "$EXAMPLE" >/dev/null; then
+    echo "example env still says there is no idle dim" >&2
+    exit 1
+fi
+if grep -E '^[[:space:]]*(export[[:space:]]+)?ZAN_DIM_LEVEL=' "$EXAMPLE" >/dev/null; then
+    echo "example env must not set ZAN_DIM_LEVEL (client default)" >&2
+    exit 1
+fi
+if grep -E '^[[:space:]]*(export[[:space:]]+)?ZAN_BACKLIGHT=' "$EXAMPLE" >/dev/null; then
+    echo "example env must not set ZAN_BACKLIGHT" >&2
     exit 1
 fi
 pass
@@ -282,6 +321,7 @@ fi
 expect=$TMP/rollback-dry.expect
 {
     printf 'DRY-RUN: %s disable --now zan-kiosk\n' "$STUB"
+    printf 'DRY-RUN: %s/opt/zanjerito/zan-kiosk-run.sh reset-backlight\n' "$TMP"
     printf 'DRY-RUN: %s enable lightdm\n' "$STUB"
     printf 'DRY-RUN: %s set-default graphical.target\n' "$STUB"
     printf 'DRY-RUN: %s start lightdm\n' "$STUB"
@@ -385,7 +425,7 @@ pass
 
 # --- rollback: exactly four calls, in order ---
 reset_log
-DESTDIR=$TMP SYSTEMCTL=$STUB LOG=$LOG "$ROLLBACK"
+DESTDIR=$TMP SYSTEMCTL=$STUB LOG=$LOG "$ROLLBACK" >/dev/null 2>&1
 {
     printf 'disable --now zan-kiosk\n'
     printf 'enable lightdm\n'
@@ -398,7 +438,7 @@ if grep -F 'zanjerito' "$LOG" >/dev/null; then
     exit 1
 fi
 # idempotent: a second run appends the same four calls
-DESTDIR=$TMP SYSTEMCTL=$STUB LOG=$LOG "$ROLLBACK"
+DESTDIR=$TMP SYSTEMCTL=$STUB LOG=$LOG "$ROLLBACK" >/dev/null 2>&1
 {
     cat "$TMP/rb.expect"
     cat "$TMP/rb.expect"
@@ -431,6 +471,7 @@ chmod 755 "$ARGV"
 run_wrap() {
     # -u first, then the caller's NAME=VALUE assignments (GNU env applies those after -u).
     env -u ZAN_API -u ZAN_ALLOW_WRITES -u ZAN_TOUCH -u ZAN_EXTRA_ARGS -u ZAN_FB -u ZAN_ROOT -u ZAN_BIN \
+        -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT -u BACKLIGHT \
         "$@" "$RUN" run
 }
 
@@ -499,7 +540,9 @@ rootbin=$TMP/rootbin
 mkdir -p "$rootbin/opt/zanjerito"
 cp "$ARGV" "$rootbin/opt/zanjerito/zan-kiosk"
 chmod 755 "$rootbin/opt/zanjerito/zan-kiosk"
-out=$(env -u ZAN_BIN -u ZAN_ALLOW_WRITES ZAN_ROOT=$rootbin ZAN_API=http://127.0.0.1:8080 "$RUN" run)
+out=$(env -u ZAN_BIN -u ZAN_ALLOW_WRITES -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC \
+    -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT -u BACKLIGHT \
+    ZAN_ROOT=$rootbin ZAN_API=http://127.0.0.1:8080 "$RUN" run)
 printf '%s\n' "$out" >"$TMP/argv.out"
 {
     printf '%s\n' --fb /dev/fb0 --api http://127.0.0.1:8080
@@ -565,6 +608,240 @@ if "$RUN" nosuch >/dev/null 2>&1; then
     echo "unknown subcommand should fail" >&2
     exit 1
 fi
+pass
+
+# prepare: chgrp/chmod on the configured nodes, and max brightness when BACKLIGHT is unset.
+# Stubs stand in for chgrp and chmod so this does not need root and does not touch real sysfs.
+CHLOG=$TMP/chgrp-chmod.log
+cat >"$TMP/bin/chgrp" <<'EOF'
+#!/bin/sh
+printf '%s\n' "chgrp $*" >>"${CHLOG:?}"
+exit 0
+EOF
+cat >"$TMP/bin/chmod" <<'EOF'
+#!/bin/sh
+printf '%s\n' "chmod $*" >>"${CHLOG:?}"
+exit 0
+EOF
+chmod 755 "$TMP/bin/chgrp" "$TMP/bin/chmod"
+
+acc=$TMP/fake-access
+mkdir -p "$acc/sys/class/backlight/rpi_backlight" "$acc/dev"
+printf '11\n' >"$acc/sys/class/backlight/rpi_backlight/brightness"
+printf '300\n' >"$acc/sys/class/backlight/rpi_backlight/max_brightness"
+printf '1\n' >"$acc/sys/class/backlight/rpi_backlight/bl_power"
+: >"$CHLOG"
+env -u BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$acc \
+    ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+grep -F "chgrp video $acc/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chgrp video $acc/sys/class/backlight/rpi_backlight/bl_power" "$CHLOG" >/dev/null
+grep -F "chmod g+w $acc/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chmod g+w $acc/sys/class/backlight/rpi_backlight/bl_power" "$CHLOG" >/dev/null
+pass
+
+# BACKLIGHT set writes the fixed level on the configured directory only.
+printf '11\n' >"$acc/sys/class/backlight/rpi_backlight/brightness"
+: >"$CHLOG"
+PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$acc BACKLIGHT=128 \
+    ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/brightness")" = 128 ]
+grep -F "chmod g+w $acc/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+pass
+
+# Two backlight devices: BACKLIGHT touches only the configured directory.
+two=$TMP/fake-two
+mkdir -p "$two/sys/class/backlight/rpi_backlight" \
+    "$two/sys/class/backlight/other_backlight" "$two/dev"
+printf '11\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '22\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+printf '300\n' >"$two/sys/class/backlight/rpi_backlight/max_brightness"
+printf '111\n' >"$two/sys/class/backlight/other_backlight/max_brightness"
+: >"$CHLOG"
+env -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two BACKLIGHT=128 \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 128 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 22 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
+grep -F "chgrp video $two/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chmod g+w $two/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chmod g+w $two/sys/class/backlight/rpi_backlight/bl_power" "$CHLOG" >/dev/null
+if grep -F other_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched other_backlight" >&2
+    exit 1
+fi
+pass
+
+# BACKLIGHT unset: still bl_power 0 on the default device only.
+printf '11\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '22\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+: >"$CHLOG"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 22 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
+if grep -F other_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched other_backlight with BACKLIGHT unset" >&2
+    exit 1
+fi
+pass
+
+printf '11\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '22\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+: >"$CHLOG"
+PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two BACKLIGHT=64 \
+    ZAN_BACKLIGHT=/sys/class/backlight/other_backlight \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 64 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 11 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
+grep -F "chmod g+w $two/sys/class/backlight/other_backlight/brightness" "$CHLOG" >/dev/null
+grep -F "chgrp video $two/sys/class/backlight/other_backlight/bl_power" "$CHLOG" >/dev/null
+if grep -F rpi_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched rpi_backlight while ZAN_BACKLIGHT is the other device" >&2
+    exit 1
+fi
+pass
+
+# Missing bl_power is a quiet skip; prepare still exits 0.
+nopow=$TMP/fake-nopow
+mkdir -p "$nopow/sys/class/backlight/rpi_backlight" "$nopow/dev"
+printf '11\n' >"$nopow/sys/class/backlight/rpi_backlight/brightness"
+printf '255\n' >"$nopow/sys/class/backlight/rpi_backlight/max_brightness"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$nopow \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$nopow/sys/class/backlight/rpi_backlight/brightness")" = 255 ]
+[ ! -e "$nopow/sys/class/backlight/rpi_backlight/bl_power" ]
+pass
+
+# bl_power as a directory, or an unwritable file, is non-fatal.
+badbl=$TMP/fake-badbl
+mkdir -p "$badbl/sys/class/backlight/rpi_backlight/bl_power" "$badbl/dev"
+printf '11\n' >"$badbl/sys/class/backlight/rpi_backlight/brightness"
+printf '255\n' >"$badbl/sys/class/backlight/rpi_backlight/max_brightness"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$badbl \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$badbl/sys/class/backlight/rpi_backlight/brightness")" = 255 ]
+[ -d "$badbl/sys/class/backlight/rpi_backlight/bl_power" ]
+if [ "$(id -u)" != 0 ]; then
+    rmdir "$badbl/sys/class/backlight/rpi_backlight/bl_power"
+    printf '1\n' >"$badbl/sys/class/backlight/rpi_backlight/bl_power"
+    chmod a-w "$badbl/sys/class/backlight/rpi_backlight/bl_power"
+    printf '11\n' >"$badbl/sys/class/backlight/rpi_backlight/brightness"
+    env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$badbl \
+        "$RUN" prepare >/dev/null 2>&1
+    [ "$(tr -d '[:space:]' <"$badbl/sys/class/backlight/rpi_backlight/brightness")" = 255 ]
+    [ "$(tr -d '[:space:]' <"$badbl/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
+    chmod u+w "$badbl/sys/class/backlight/rpi_backlight/bl_power"
+fi
+pass
+
+# reset-backlight uses that same directory, not every device.
+printf '3\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '9\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+env -u ZAN_BACKLIGHT -u BACKLIGHT ZAN_ROOT=$two "$RUN" reset-backlight >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 9 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
+printf '44\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '9\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+env -u BACKLIGHT ZAN_ROOT=$two ZAN_BACKLIGHT=/sys/class/backlight/other_backlight \
+    "$RUN" reset-backlight >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 111 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 44 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
+pass
+
+# A missing backlight directory is a quiet skip.
+miss=$TMP/fake-miss
+mkdir -p "$miss"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" ZAN_ROOT=$miss "$RUN" prepare >/dev/null 2>&1
+pass
+
+# reset-backlight writes the raw max (may be above 255) and bl_power 0. Missing files still exit 0.
+printf '3\n' >"$acc/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$acc/sys/class/backlight/rpi_backlight/bl_power"
+env -u BACKLIGHT ZAN_ROOT=$acc ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight \
+    "$RUN" reset-backlight >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$miss "$RUN" reset-backlight >/dev/null 2>&1
+pass
+
+# Invalid dim/off/level values are skipped. Valid siblings are still passed, in order.
+# 0 is a real value and must be passed through (it disables dim and off in the client).
+out=$(run_wrap ZAN_BIN=$ARGV ZAN_API=http://127.0.0.1:8080 \
+    ZAN_TOUCH=/dev/input/event3 \
+    ZAN_DIM_AFTER_SEC=2 ZAN_OFF_AFTER_SEC=9 ZAN_DIM_LEVEL=17 \
+    ZAN_BACKLIGHT=/sys/class/backlight/panel \
+    ZAN_EXTRA_ARGS='--duration 1')
+printf '%s\n' "$out" >"$TMP/argv.out"
+{
+    printf '%s\n' --fb /dev/fb0 --api http://127.0.0.1:8080 \
+        --touch /dev/input/event3 \
+        --dim-after 2 --off-after 9 --dim-level 17 \
+        --backlight /sys/class/backlight/panel \
+        --duration 1
+} >"$TMP/argv.expect"
+cmp "$TMP/argv.expect" "$TMP/argv.out"
+pass
+
+err=$(run_wrap ZAN_BIN=$ARGV ZAN_API=http://127.0.0.1:8080 \
+    ZAN_DIM_AFTER_SEC=nope ZAN_OFF_AFTER_SEC=12 ZAN_DIM_LEVEL=999 \
+    ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight 2>&1 >/dev/null || true)
+printf '%s\n' "$err" | grep -F 'skipped --dim-after' >/dev/null
+printf '%s\n' "$err" | grep -F 'skipped --dim-level' >/dev/null
+out=$(run_wrap ZAN_BIN=$ARGV ZAN_API=http://127.0.0.1:8080 \
+    ZAN_DIM_AFTER_SEC=nope ZAN_OFF_AFTER_SEC=12 ZAN_DIM_LEVEL=999 \
+    ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight 2>/dev/null)
+printf '%s\n' "$out" >"$TMP/argv.out"
+{
+    printf '%s\n' --fb /dev/fb0 --api http://127.0.0.1:8080 \
+        --off-after 12 \
+        --backlight /sys/class/backlight/rpi_backlight
+} >"$TMP/argv.expect"
+cmp "$TMP/argv.expect" "$TMP/argv.out"
+pass
+
+out=$(run_wrap ZAN_BIN=$ARGV ZAN_API=http://127.0.0.1:8080 ZAN_DIM_AFTER_SEC=0 ZAN_OFF_AFTER_SEC=0)
+printf '%s\n' "$out" >"$TMP/argv.out"
+{
+    printf '%s\n' --fb /dev/fb0 --api http://127.0.0.1:8080 --dim-after 0 --off-after 0
+} >"$TMP/argv.expect"
+cmp "$TMP/argv.expect" "$TMP/argv.out"
+pass
+
+# rollback runs reset-backlight against DESTDIR and still only calls systemctl four times.
+reset_log
+rb=$TMP/rollback-root
+mkdir -p "$rb/opt/zanjerito" "$rb/sys/class/backlight/rpi_backlight"
+cp "$RUN" "$rb/opt/zanjerito/zan-kiosk-run.sh"
+chmod 755 "$rb/opt/zanjerito/zan-kiosk-run.sh"
+printf '4\n' >"$rb/sys/class/backlight/rpi_backlight/brightness"
+printf '400\n' >"$rb/sys/class/backlight/rpi_backlight/max_brightness"
+printf '1\n' >"$rb/sys/class/backlight/rpi_backlight/bl_power"
+DESTDIR=$rb SYSTEMCTL=$STUB LOG=$LOG "$ROLLBACK" >/dev/null 2>&1
+cmp "$TMP/rb.expect" "$LOG"
+[ "$(tr -d '[:space:]' <"$rb/sys/class/backlight/rpi_backlight/brightness")" = 400 ]
+[ "$(tr -d '[:space:]' <"$rb/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
 pass
 
 # --- no real addresses or this machine's names in the shipped text ---

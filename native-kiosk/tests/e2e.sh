@@ -1,5 +1,26 @@
 #!/usr/bin/env bash
 # Headless taps against tools/stub_server.py. Needs build/zan-kiosk-host and python3.
+# Cases:
+#   a  read-only STOP+OK sends nothing
+#   b  STOP+OK posts cancel; a later Cancel does not
+#   c  pause for days, and pause until tomorrow morning
+#   d  resume posts only with --allow-writes
+#   e  confirm-STOP ignores a tap on the rail
+#   f  unreachable API shows the stale pill and exits 0
+#   g  no API exits 2
+#   h  one pause POST; stray taps after OK do not add another
+#   i  a second STOP while the first POST is held does not double-post
+#   j  cancel POST is not stuck behind a slow GET
+#   k  tile tap opens the station sheet and does not POST
+#   l  Schedules button, then Close
+#   m  STOP from the station sheet posts one cancel
+#   n  needs-update card; STOP still posts
+#   o  idle dim, then off; a tile tap while off wakes and does not open the sheet
+#   p  a dimmed tile tap is swallowed; dimmed STOP opens confirm on that first tap
+#   q  a running fixture never dims or blanks
+#   r  a fault fixture never dims; a paused fixture dims and never blanks
+#   s  SIGTERM restores the saved brightness
+#   t  SIGINT restores the saved brightness
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -42,6 +63,7 @@ CHIP_WEEK_Y=366
 FAILS=0
 STUB_PID=
 KIOSK_PID=
+SAMPLER_PID=
 PORT=
 LOG=
 TMP=
@@ -54,7 +76,16 @@ stop_kiosk() {
     fi
 }
 
+stop_sampler() {
+    if [[ -n "${SAMPLER_PID}" ]]; then
+        kill "$SAMPLER_PID" 2>/dev/null || true
+        wait "$SAMPLER_PID" 2>/dev/null || true
+        SAMPLER_PID=
+    fi
+}
+
 cleanup() {
+    stop_sampler
     stop_kiosk
     if [[ -n "${STUB_PID}" ]]; then
         kill "$STUB_PID" 2>/dev/null || true
@@ -196,6 +227,22 @@ def main():
                     n += 1
         print(n)
         return
+    # Count pixels near R G B inside [x0,x1) x [y0,y1).
+    # nearcount PATH X0 X1 Y0 Y1 R G B TOL
+    if cmd == "nearcount":
+        x0, x1, y0, y1 = (int(sys.argv[i]) for i in range(3, 7))
+        r, g, b, tol = (int(sys.argv[i]) for i in range(7, 11))
+        n = 0
+        y0 = max(0, y0)
+        x0 = max(0, x0)
+        y1 = min(h, y1)
+        x1 = min(w, x1)
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                if near(pix(rows, x, y), (r, g, b), tol):
+                    n += 1
+        print(n)
+        return
     raise SystemExit("unknown cmd")
 
 if __name__ == "__main__":
@@ -246,6 +293,8 @@ kiosk() {
     local limit=$3
     shift 3
     timeout "$limit" env -u ZAN_API -u ZK_POLL_MS_STATUS \
+        -u ZK_POWER_FORCE -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC \
+        -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
         "$BIN" \
         --api "http://127.0.0.1:${PORT}" \
         "$@" \
@@ -405,7 +454,9 @@ sys.exit(1)' "$closed" || { echo "port $closed is not closed" >&2; return 1; }
 case_g() {
     local rc
     set +e
-    env -u ZAN_API -u ZK_POLL_MS_STATUS "$BIN" >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    env -u ZAN_API -u ZK_POLL_MS_STATUS -u ZK_POWER_FORCE \
+        -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
+        "$BIN" >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
     rc=$?
     set -e
     if [[ "$rc" -ne 2 ]]; then
@@ -439,6 +490,8 @@ case_j() {
     local seen delta
     start_stub "$FIX/home-rain" --get-delay 8 || return 1
     timeout 22 env -u ZAN_API -u ZK_POLL_MS_STATUS \
+        -u ZK_POWER_FORCE -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC \
+        -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
         "$BIN" \
         --api "http://127.0.0.1:${PORT}" \
         --allow-writes \
@@ -549,6 +602,386 @@ case_n() {
     assert_posts "POST /api/run/cancel" || return 1
 }
 
+trim_file() {
+    tr -d '[:space:]' <"$1"
+}
+
+make_backlight() {
+    local dir=$1
+    mkdir -p "$dir"
+    printf '200\n' >"$dir/brightness"
+    printf '255\n' >"$dir/max_brightness"
+    printf '0\n' >"$dir/bl_power"
+    printf '200\n' >"$dir/actual_brightness"
+}
+
+sample_backlight() {
+    local dir=$1 out=$2 pid=$3
+    : >"$out"
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '%s %s\n' "$(trim_file "$dir/brightness")" "$(trim_file "$dir/bl_power")" >>"$out"
+        sleep 0.05
+    done
+}
+
+# Caller sets BLDIR. Extra args are client flags (api or fixture, timers, backlight).
+start_power_kiosk() {
+    local dur=$1
+    local script=$2
+    shift 2
+    stop_sampler
+    stop_kiosk
+    env -u ZAN_API -u ZK_POLL_MS_STATUS \
+        -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
+        ZK_POWER_FORCE=1 \
+        "$BIN" \
+        "$@" \
+        --script "$script" \
+        --duration "$dur" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err" &
+    KIOSK_PID=$!
+    sample_backlight "$BLDIR" "$TMP/bl.trace" "$KIOSK_PID" &
+    SAMPLER_PID=$!
+}
+
+wait_kiosk_done() {
+    local tenths=$1
+    local i
+    for ((i = 0; i < tenths; i++)); do
+        if ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            set +e
+            wait "$KIOSK_PID"
+            KIOSK_RC=$?
+            set -e
+            KIOSK_PID=
+            stop_sampler
+            return 0
+        fi
+        sleep 0.1
+    done
+    echo "kiosk still running" >&2
+    show_kiosk_err
+    stop_kiosk
+    stop_sampler
+    return 1
+}
+
+nearcount() {
+    python3 "$TMP/png.py" nearcount "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
+}
+
+# Home with the rain strip is #CFE6E1. The gap between tile rows is #EFDDBE.
+# The station sheet paints that gap cream, so a swallowed tile tap stays beige.
+home_rain_ok() {
+    local png=$1 rain gap
+    rain=$(nearcount "$png" 300 520 140 180 207 230 225 12)
+    gap=$(nearcount "$png" 30 200 325 334 239 221 190 12)
+    if [[ "$rain" -lt 400 || "$gap" -lt 400 ]]; then
+        echo "home layout not held (rain=$rain gap=$gap) $png" >&2
+        return 1
+    fi
+}
+
+# The stub records POST/PUT/DELETE only. An empty log is zero writes.
+no_writes() {
+    if [[ -s "$LOG" ]] && grep -q '[^[:space:]]' "$LOG"; then
+        echo "request log is not empty" >&2
+        cat "$LOG" >&2
+        return 1
+    fi
+}
+
+trace_fail() {
+    echo "brightness trace:" >&2
+    cat "$TMP/bl.trace" >&2 || true
+    show_kiosk_err
+    return 1
+}
+
+# Dim, then off. A tile tap while off restores brightness and does not open the sheet.
+case_o() {
+    local home=$TMP/o-home.png after=$TMP/o-after.png
+    BLDIR=$TMP/bl-o
+    make_backlight "$BLDIR"
+    start_stub "$FIX/home-rain" || return 1
+    start_power_kiosk 12 \
+        "wait:900;shot:${home};wait:7000;tap:${TILE0_X},${TILE0_Y};wait:500;shot:${after}" \
+        --api "http://127.0.0.1:${PORT}" \
+        --dim-after 1 --off-after 3 --dim-level 40 \
+        --backlight "$BLDIR"
+    wait_kiosk_done 160 || return 1
+    if [[ "$KIOSK_RC" -ne 0 ]]; then
+        echo "power o exit $KIOSK_RC" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! python3 - "$TMP/bl.trace" <<'PY'
+import sys
+phase = 0
+wake = 0
+for line in open(sys.argv[1]):
+    parts = line.split()
+    if len(parts) != 2:
+        continue
+    br, bl = parts
+    if phase == 0 and br == "40" and bl == "0":
+        phase = 1
+    elif phase == 1 and br == "0" and bl == "1":
+        phase = 2
+    elif phase == 2 and br == "200" and bl == "0":
+        wake += 1
+if phase != 2 or wake < 10:
+    sys.exit(1)
+PY
+    then
+        trace_fail
+        return 1
+    fi
+    home_rain_ok "$home" || return 1
+    home_rain_ok "$after" || return 1
+    no_writes || return 1
+    assert_posts "" || return 1
+    [[ "$(trim_file "$BLDIR/brightness")" == 200 ]]
+    [[ "$(trim_file "$BLDIR/bl_power")" == 0 ]]
+    [[ "$(trim_file "$BLDIR/actual_brightness")" == 200 ]]
+}
+
+# Dimmed tile tap is swallowed. After it dims again, STOP passes on the first tap.
+case_p() {
+    local home=$TMP/p-home.png conf=$TMP/p-conf.png
+    local ok
+    BLDIR=$TMP/bl-p
+    make_backlight "$BLDIR"
+    start_stub "$FIX/home-rain" || return 1
+    start_power_kiosk 10 \
+        "wait:3000;tap:${TILE0_X},${TILE0_Y};wait:450;shot:${home};wait:2200;tap:${STOP_X},${STOP_Y};wait:500;shot:${conf}" \
+        --api "http://127.0.0.1:${PORT}" \
+        --dim-after 1 --off-after 15 --dim-level 40 \
+        --backlight "$BLDIR"
+    wait_kiosk_done 140 || return 1
+    if [[ "$KIOSK_RC" -ne 0 ]]; then
+        echo "power p exit $KIOSK_RC" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! python3 - "$TMP/bl.trace" <<'PY'
+import sys
+phase = 0
+for line in open(sys.argv[1]):
+    parts = line.split()
+    if len(parts) != 2:
+        continue
+    br, bl = parts
+    if bl != "0":
+        sys.exit(1)
+    if phase == 0 and br == "40":
+        phase = 1
+    elif phase == 1 and br == "200":
+        phase = 2
+    elif phase == 2 and br == "40":
+        phase = 3
+    elif phase == 3 and br == "200":
+        phase = 4
+if phase != 4:
+    sys.exit(1)
+PY
+    then
+        trace_fail
+        return 1
+    fi
+    home_rain_ok "$home" || return 1
+    ok=$(python3 "$TMP/png.py" stopok "$conf")
+    if [[ "$ok" != "181 54 26" ]]; then
+        echo "dimmed STOP did not open confirm ($ok)" >&2
+        return 1
+    fi
+    no_writes || return 1
+    assert_posts "" || return 1
+}
+
+# Running (watering) stays at the original brightness past the off timer.
+case_q() {
+    local png=$TMP/q-run.png
+    local n
+    BLDIR=$TMP/bl-q
+    make_backlight "$BLDIR"
+    start_power_kiosk 5 \
+        "wait:4000;shot:${png}" \
+        --fixture "$FIX/running" \
+        --dim-after 1 --off-after 2 --dim-level 40 \
+        --backlight "$BLDIR"
+    wait_kiosk_done 80 || return 1
+    if [[ "$KIOSK_RC" -ne 0 ]]; then
+        echo "power q exit $KIOSK_RC" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! python3 - "$TMP/bl.trace" <<'PY'
+import sys
+n = 0
+for line in open(sys.argv[1]):
+    parts = line.split()
+    if len(parts) != 2:
+        continue
+    n += 1
+    if parts != ["200", "0"]:
+        sys.exit(1)
+if n < 20:
+    sys.exit(1)
+PY
+    then
+        trace_fail
+        return 1
+    fi
+    n=$(nearcount "$png" 300 520 200 320 15 94 92 16)
+    if [[ "$n" -lt 200 ]]; then
+        echo "running screen teal pixels $n" >&2
+        return 1
+    fi
+    [[ "$(trim_file "$BLDIR/brightness")" == 200 ]]
+    [[ "$(trim_file "$BLDIR/bl_power")" == 0 ]]
+}
+
+# Fault stays on. Pause dims and never blanks; exit restores the original level.
+case_r() {
+    local fault=$TMP/r-fault.png paused=$TMP/r-paused.png
+    local n
+    BLDIR=$TMP/bl-r
+    make_backlight "$BLDIR"
+    start_power_kiosk 5 \
+        "wait:4000;shot:${fault}" \
+        --fixture "$FIX/home-fault" \
+        --dim-after 1 --off-after 2 --dim-level 40 \
+        --backlight "$BLDIR"
+    wait_kiosk_done 80 || return 1
+    if [[ "$KIOSK_RC" -ne 0 ]]; then
+        echo "power r fault exit $KIOSK_RC" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! python3 - "$TMP/bl.trace" <<'PY'
+import sys
+n = 0
+for line in open(sys.argv[1]):
+    parts = line.split()
+    if len(parts) != 2:
+        continue
+    n += 1
+    if parts != ["200", "0"]:
+        sys.exit(1)
+if n < 20:
+    sys.exit(1)
+PY
+    then
+        trace_fail
+        return 1
+    fi
+    n=$(nearcount "$fault" 20 500 135 180 181 54 26 16)
+    if [[ "$n" -lt 400 ]]; then
+        echo "fault banner red pixels $n" >&2
+        return 1
+    fi
+
+    make_backlight "$BLDIR"
+    start_power_kiosk 6 \
+        "wait:5000;shot:${paused}" \
+        --fixture "$FIX/paused-rain" \
+        --dim-after 1 --off-after 2 --dim-level 40 \
+        --backlight "$BLDIR"
+    wait_kiosk_done 90 || return 1
+    if [[ "$KIOSK_RC" -ne 0 ]]; then
+        echo "power r pause exit $KIOSK_RC" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! python3 - "$TMP/bl.trace" <<'PY'
+import sys
+saw = False
+for line in open(sys.argv[1]):
+    parts = line.split()
+    if len(parts) != 2:
+        continue
+    br, bl = parts
+    if bl != "0" or br == "0":
+        sys.exit(1)
+    if br == "40":
+        saw = True
+    elif br != "200":
+        sys.exit(1)
+if not saw:
+    sys.exit(1)
+PY
+    then
+        trace_fail
+        return 1
+    fi
+    n=$(nearcount "$paused" 40 360 20 110 78 63 99 16)
+    if [[ "$n" -lt 400 ]]; then
+        echo "paused banner plum pixels $n" >&2
+        return 1
+    fi
+    [[ "$(trim_file "$BLDIR/brightness")" == 200 ]]
+    [[ "$(trim_file "$BLDIR/bl_power")" == 0 ]]
+}
+
+# SIGTERM or SIGINT while off puts the saved brightness back and clears bl_power.
+signal_restore() {
+    local sig=$1
+    local label=$2
+    local i saw=0
+    BLDIR=$TMP/bl-$label
+    make_backlight "$BLDIR"
+    start_power_kiosk 20 "wait:18000" \
+        --fixture "$FIX/home-rain" \
+        --dim-after 1 --off-after 2 --dim-level 40 \
+        --backlight "$BLDIR"
+    for ((i = 0; i < 80; i++)); do
+        if grep -q '^0 1$' "$TMP/bl.trace"; then
+            saw=1
+            break
+        fi
+        if ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            echo "kiosk exited before off" >&2
+            trace_fail
+            return 1
+        fi
+        sleep 0.1
+    done
+    if [[ "$saw" -ne 1 ]]; then
+        echo "never reached off" >&2
+        trace_fail
+        return 1
+    fi
+    kill -s "$sig" "$KIOSK_PID"
+    for ((i = 0; i < 30; i++)); do
+        if ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+    if kill -0 "$KIOSK_PID" 2>/dev/null; then
+        echo "SIG$sig did not stop the kiosk" >&2
+        kill -KILL "$KIOSK_PID" 2>/dev/null || true
+        stop_sampler
+        return 1
+    fi
+    set +e
+    wait "$KIOSK_PID"
+    set -e
+    KIOSK_PID=
+    stop_sampler
+    [[ "$(trim_file "$BLDIR/brightness")" == 200 ]]
+    [[ "$(trim_file "$BLDIR/bl_power")" == 0 ]]
+}
+
+case_s() {
+    signal_restore TERM s
+}
+
+case_t() {
+    signal_restore INT t
+}
+
 run_case a case_a
 run_case b case_b
 run_case c case_c
@@ -563,6 +996,12 @@ run_case k case_k
 run_case l case_l
 run_case m case_m
 run_case n case_n
+run_case o case_o
+run_case p case_p
+run_case q case_q
+run_case r case_r
+run_case s case_s
+run_case t case_t
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

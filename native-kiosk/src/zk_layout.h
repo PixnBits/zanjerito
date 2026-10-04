@@ -100,5 +100,7 @@ typedef struct {
 void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout_rects *out);
 int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target out[], int max);
 enum zk_target_id zk_hit_test(const zk_target *targets, int n, int x, int y);
+/* 1 when (x, y) is inside the STOP target on this screen. Same rule the kiosk uses. */
+int zk_layout_hit_is_stop(enum zk_screen screen, const zk_layout_in *in, int x, int y);
 
 #endif

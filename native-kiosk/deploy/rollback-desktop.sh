@@ -2,12 +2,14 @@
 # Put the desktop back. Does not stop, restart, or disable the irrigation daemon.
 #
 #   systemctl disable --now zan-kiosk
+#   zan-kiosk-run.sh reset-backlight   (best effort; does not fail rollback)
 #   systemctl enable lightdm
 #   systemctl set-default graphical.target
 #   systemctl start lightdm
 #
-# Each step runs even if an earlier one failed. The script exits non-zero
-# if any step failed. --dry-run prints the four commands and runs none.
+# Each systemctl step runs even if an earlier one failed. The script exits
+# non-zero if any systemctl step failed. --dry-run prints the four systemctl
+# commands and reset-backlight, and runs none.
 #
 # DESTDIR empty and not --dry-run: root required. DESTDIR is not a file
 # prefix here; it only marks a staged test so root is not required.
@@ -66,7 +68,32 @@ step() {
     return 0
 }
 
+# Best effort. A missing script or a failed write does not fail rollback.
+reset_backlight_step() {
+    if [ -n "$DESTDIR" ]; then
+        script=$DESTDIR/opt/zanjerito/zan-kiosk-run.sh
+        root=$DESTDIR
+    else
+        script=/opt/zanjerito/zan-kiosk-run.sh
+        root=
+    fi
+    if [ "$DRY" -eq 1 ]; then
+        printf 'DRY-RUN: %s reset-backlight\n' "$script"
+        return 0
+    fi
+    if [ ! -x "$script" ]; then
+        printf 'rollback-desktop: reset-backlight skipped (no %s)\n' "$script" >&2
+        return 0
+    fi
+    if ZAN_ROOT=$root "$script" reset-backlight >/dev/null; then
+        return 0
+    fi
+    printf 'rollback-desktop: reset-backlight failed (ignored)\n' >&2
+    return 0
+}
+
 step "$SYSTEMCTL" disable --now zan-kiosk
+reset_backlight_step
 step "$SYSTEMCTL" enable lightdm
 step "$SYSTEMCTL" set-default graphical.target
 step "$SYSTEMCTL" start lightdm

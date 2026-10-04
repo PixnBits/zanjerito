@@ -341,3 +341,14 @@ enum zk_target_id zk_hit_test(const zk_target *targets, int n, int x, int y)
     }
     return ZK_TARGET_NONE;
 }
+
+int zk_layout_hit_is_stop(enum zk_screen screen, const zk_layout_in *in, int x, int y)
+{
+    zk_target tg[32];
+    int n = zk_layout_targets(screen, in, tg, 32);
+
+    if (n > 32) {
+        n = 32;
+    }
+    return zk_hit_test(tg, n, x, y) == ZK_TARGET_STOP;
+}

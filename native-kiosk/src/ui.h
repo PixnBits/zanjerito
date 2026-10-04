@@ -3,9 +3,14 @@
 
 #include "app.h"
 #include "lvgl.h"
+#include "zk_power.h"
 
 void zk_ui_init(lv_display_t *disp, const zk_app_t *app);
 void zk_ui_tick(void);
+/* 1 when the current screen's STOP target contains this point. 0 until the first tick. */
+int zk_ui_hit_is_stop(int x, int y);
+/* Snapshot plus the open confirm modal. NULL out is ignored. */
+void zk_ui_power_inputs(zk_power_inputs_t *out);
 
 /* screen: zk_screen, or -1 to follow status. pressed_target: zk_target_id or 0.
  * pick_chip: -1, or 0..3 for the pause confirm copy. */

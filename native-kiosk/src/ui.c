@@ -116,6 +116,10 @@ static lv_display_t *g_disp;
 static widgets_t g_w;
 static view_key g_key;
 static int g_have_key;
+static zk_layout_in g_lin;
+static int g_lin_ready;
+static int g_hit_content;
+static int g_hit_modal;
 static int g_dirty;
 static int g_override = -1;
 static int g_nav = -1;
@@ -1877,6 +1881,10 @@ void zk_ui_tick(void)
     zk_data_get(&snap);
     resolve(&snap, &content, &modal);
     fill_key(&snap, content, modal, &key, &in);
+    g_lin = in;
+    g_lin_ready = 1;
+    g_hit_content = content;
+    g_hit_modal = modal;
     if (!g_have_key || g_dirty || memcmp(&key, &g_key, sizeof key) != 0) {
         g_key = key;
         g_have_key = 1;
@@ -1927,10 +1935,55 @@ void zk_ui_init(lv_display_t *disp, const zk_app_t *app)
     g_station_id[0] = 0;
     g_pressed = 0;
     g_have_key = 0;
+    g_lin_ready = 0;
+    g_hit_content = 0;
+    g_hit_modal = 0;
     g_dirty = 1;
     scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, hex(COL_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     zk_ui_refresh();
+}
+
+int zk_ui_hit_is_stop(int x, int y)
+{
+    enum zk_screen screen;
+
+    if (!g_have_key || !g_lin_ready) {
+        return 0;
+    }
+    if (g_hit_modal == ZK_SCREEN_CONFIRM_STOP || g_hit_modal == ZK_SCREEN_CONFIRM_PAUSE) {
+        screen = (enum zk_screen)g_hit_modal;
+    } else {
+        screen = (enum zk_screen)g_hit_content;
+    }
+    return zk_layout_hit_is_stop(screen, &g_lin, x, y);
+}
+
+void zk_ui_power_inputs(zk_power_inputs_t *out)
+{
+    zk_snapshot_t snap;
+
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof *out);
+    zk_data_get(&snap);
+    if (!snap.have_kiosk || snap.api_state != ZK_API_OK || snap.stale) {
+        out->unreachable = 1;
+    }
+    if (snap.have_kiosk) {
+        out->watering = (snap.kiosk.watering || snap.kiosk.has_run || snap.kiosk.current_station[0] ||
+                         snap.kiosk.n_on > 0)
+                            ? 1
+                            : 0;
+        out->lockout = snap.kiosk.lockout ? 1 : 0;
+        out->fault = (snap.kiosk.fault || snap.kiosk.last_error[0] || strcmp(snap.kiosk.phase, "Fault") == 0) ? 1
+                                                                                                              : 0;
+        out->paused = snap.kiosk.pause.paused ? 1 : 0;
+    }
+    if (g_hit_modal == ZK_SCREEN_CONFIRM_STOP || g_hit_modal == ZK_SCREEN_CONFIRM_PAUSE) {
+        out->modal_open = 1;
+    }
 }
