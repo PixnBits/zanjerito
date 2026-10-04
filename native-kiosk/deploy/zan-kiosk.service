@@ -18,8 +18,12 @@ User=pi
 Group=pi
 SupplementaryGroups=video input
 EnvironmentFile=-/etc/default/zan-kiosk
-# prepare is root (+): fbcon cursor, tty cursor, console blank, optional backlight.
-# Each step is best-effort. A missing sysfs file must not fail the unit.
+# prepare is root (+): fbcon cursor, tty cursor, console blank, and the
+# configured backlight directory (ZAN_BACKLIGHT, else rpi_backlight).
+# It chgrp's those nodes to video and chmod g+w, best effort.
+# BACKLIGHT unset writes max_brightness there. BACKLIGHT set writes that
+# level to the same directory only. A missing sysfs file must not fail the
+# unit. Copying this unit does not apply it.
 ExecStartPre=+/opt/zanjerito/zan-kiosk-run.sh prepare
 # run execs the client. No shell is left around. There is no ExecStop=.
 # The kiosk is only a client. Valve safety lives in zanjerito.service
@@ -29,6 +33,8 @@ ExecStartPre=+/opt/zanjerito/zan-kiosk-run.sh prepare
 # POST. An earlier Chromium-unit draft put all-off on the UI unit. That
 # belongs on the daemon unit, which already has it.
 ExecStart=/opt/zanjerito/zan-kiosk-run.sh run
+# Panel first, then the VT cursor. Both are root and best effort.
+ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight
 ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor
 Restart=always
 RestartSec=2

@@ -2,6 +2,7 @@
 
 #include "platform.h"
 
+#include "ui.h"
 #include "zk_layout.h"
 #include "zk_png.h"
 
@@ -15,6 +16,7 @@
 #include <unistd.h>
 #include <poll.h>
 
+#include <linux/fb.h>
 #include <linux/input.h>
 
 enum {
@@ -36,6 +38,13 @@ static lv_display_t *g_disp;
 static lv_indev_t *g_virt;
 static lv_point_t g_pt;
 static lv_indev_state_t g_ptr_state = LV_INDEV_STATE_RELEASED;
+static lv_indev_read_cb_t g_evdev_orig;
+static int g_evdev_down;
+static int g_virt_down;
+static zk_power_t *g_power;
+static char g_fb_path[384];
+static int g_fb_real;
+static int g_power_transitions;
 
 static int g_tfd = -1;
 static int g_wake_r = -1;
@@ -66,6 +75,50 @@ double zk_platform_mono(void)
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+
+int64_t zk_platform_mono_ms(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (int64_t)t.tv_sec * 1000 + (int64_t)t.tv_nsec / 1000000;
+}
+
+static int fb_path_real(const char *path)
+{
+    size_t i;
+
+    if (!path || strncmp(path, "/dev/fb", 7) != 0 || path[7] == '\0') {
+        return 0;
+    }
+    for (i = 7; path[i] != '\0'; i++) {
+        if (path[i] < '0' || path[i] > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void gate_pointer(lv_indev_data_t *data, int *down)
+{
+    int pressed;
+    int hit;
+
+    if (!g_power || !zk_power_enabled(g_power)) {
+        return;
+    }
+    pressed = data->state == LV_INDEV_STATE_PRESSED ? 1 : 0;
+    if (!pressed && !*down) {
+        return;
+    }
+    hit = 0;
+    if (pressed && !*down) {
+        hit = zk_ui_hit_is_stop(data->point.x, data->point.y);
+    }
+    if (zk_power_touch_event(g_power, zk_platform_mono_ms(), pressed, hit) == ZK_POWER_SWALLOW) {
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+    *down = pressed;
 }
 
 static uint32_t tick_cb(void)
@@ -346,6 +399,15 @@ static void virt_read(lv_indev_t *indev, lv_indev_data_t *data)
     (void)indev;
     data->point = g_pt;
     data->state = g_ptr_state;
+    gate_pointer(data, &g_virt_down);
+}
+
+static void evdev_read(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    if (g_evdev_orig) {
+        g_evdev_orig(indev, data);
+    }
+    gate_pointer(data, &g_evdev_down);
 }
 
 static int bit_is_set(int bit, const unsigned long *bits)
@@ -554,6 +616,11 @@ static void open_touch(const char *path, int swap, int flip_x, int flip_y)
     if ((flip_x || flip_y || have_x || have_y) && have_x && have_y) {
         lv_evdev_set_calibration(indev, min_x, min_y, max_x, max_y);
     }
+    g_evdev_orig = lv_indev_get_read_cb(indev);
+    g_evdev_down = 0;
+    if (g_evdev_orig) {
+        lv_indev_set_read_cb(indev, evdev_read);
+    }
 }
 
 static int open_memory(void)
@@ -572,7 +639,10 @@ static int open_memory(void)
 static int open_fb(const char *path)
 {
     int fd;
+    size_t n;
 
+    g_fb_real = 0;
+    g_fb_path[0] = '\0';
     /* Only the path the caller passed is opened. There is no default device. */
     fd = open(path, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
@@ -586,6 +656,11 @@ static int open_fb(const char *path)
         return -1;
     }
     lv_linux_fbdev_set_file(g_disp, path);
+    n = strlen(path);
+    if (n > 0 && n < sizeof g_fb_path) {
+        memcpy(g_fb_path, path, n + 1);
+        g_fb_real = fb_path_real(path);
+    }
     return 0;
 }
 
@@ -610,6 +685,10 @@ int zk_platform_init(const zk_platform_opts_t *opts)
     if (!opts) {
         return -1;
     }
+    g_fb_real = 0;
+    g_fb_path[0] = '\0';
+    g_virt_down = 0;
+    g_evdev_down = 0;
     lv_init();
     if (make_wake_pipe() != 0) {
         return -1;
@@ -846,9 +925,46 @@ void zk_platform_print_stats(int enabled)
             "\"touch_events\":%llu,"
             "\"touch_to_frame_avg_ms\":%.3f,\"touch_to_frame_p95_ms\":%.3f,\"touch_to_frame_max_ms\":%.3f,"
             "\"vm_rss_kb\":%ld,\"vm_hwm_kb\":%ld,"
-            "\"cpu_user_s\":%.4f,\"cpu_sys_s\":%.4f,\"cpu_pct\":%.2f}\n",
+            "\"cpu_user_s\":%.4f,\"cpu_sys_s\":%.4f,\"cpu_pct\":%.2f,\"power_transitions\":%d}\n",
             g_got_first ? g_first_ms : 0.0, g_got_first ? g_first_main_ms : 0.0,
             (unsigned long long)g_frames, r_avg, r_p95, (unsigned long long)g_touch_events, t_avg, t_p95,
-            t_max, rss, hwm, user_s, sys_s, cpu);
+            t_max, rss, hwm, user_s, sys_s, cpu, g_power_transitions);
     fflush(stderr);
+}
+
+void zk_platform_bind_power(zk_power_t *power)
+{
+    g_power = power;
+    g_virt_down = 0;
+    g_evdev_down = 0;
+}
+
+int zk_platform_fb_is_real(void)
+{
+    return g_fb_real;
+}
+
+int zk_platform_fbio_blank(void *ctx, int powerdown)
+{
+    int fd;
+    int arg;
+    int rc;
+
+    (void)ctx;
+    if (!g_fb_real || !g_fb_path[0]) {
+        return -1;
+    }
+    fd = open(g_fb_path, O_RDWR | O_CLOEXEC);
+    if (fd < 0) {
+        return -1;
+    }
+    arg = powerdown ? FB_BLANK_POWERDOWN : FB_BLANK_UNBLANK;
+    rc = ioctl(fd, FBIOBLANK, arg);
+    close(fd);
+    return rc == 0 ? 0 : -1;
+}
+
+void zk_platform_set_power_transitions(int n)
+{
+    g_power_transitions = n;
 }

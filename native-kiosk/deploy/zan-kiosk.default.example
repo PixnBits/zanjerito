@@ -9,15 +9,33 @@ ZAN_API=http://CONTROLLER_HOST:8080
 # Set to 1 to permit STOP, pause, and resume (the three POSTs).
 # ZAN_ALLOW_WRITES=1
 
-# Framebuffer. Default /dev/fb0 (Osoyoo 800x480 on this board).
+# Framebuffer. Default /dev/fb0 (800x480 on this board).
 # ZAN_FB=/dev/fb0
 
 # evdev device. Omit to let the client autodetect.
 # ZAN_TOUCH=/dev/input/event0
 
-# Fixed backlight, 0-255. The Pi panel is rpi_backlight (max 255).
-# Applied once at start. There is no idle dim. A screen timeout needs
-# client support; this unit cannot do it.
+# Idle display power. Dim after this many seconds with no touch, then turn
+# the backlight off after ZAN_OFF_AFTER_SEC (counted from the last touch,
+# not from the dim). 0 disables dimming and off entirely. Off must be
+# greater than dim, or off stays disabled. The client defaults are the
+# same numbers when these are unset.
+ZAN_DIM_AFTER_SEC=120
+ZAN_OFF_AFTER_SEC=600
+
+# Dim brightness, 0-255. Optional. The commented value matches the client
+# default, 51 (about 20% of a 255 panel). 0 does not turn the feature off.
+# A dim never raises brightness, and it is never written below 1 when the
+# panel was already on. Leave this commented to keep the client default.
+# ZAN_DIM_LEVEL=51
+
+# Backlight sysfs directory. Optional. The default is rpi_backlight.
+# ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight
+
+# Fixed level, 0-255, written once at start to the configured backlight
+# directory only (ZAN_BACKLIGHT, or rpi_backlight). Not every device.
+# That value is what the client later restores. When unset, prepare writes
+# max_brightness there instead. This is not the idle-dim level.
 # BACKLIGHT=255
 
 # Extra client arguments, split on spaces. No embedded spaces.
