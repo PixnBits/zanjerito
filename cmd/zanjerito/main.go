@@ -106,24 +106,27 @@ func main() {
 		log.Printf("soil: disabled: %v", err)
 	}
 
+	gate := &shutdownGate{}
 	var (
 		httpSrv *http.Server
 		apiDone <-chan struct{}
 	)
 	if *listen != "" {
-		srv := api.New(eng, *configPath)
-		srv.History = hist
-		srv.NoteRain(rainPoller, rainErr)
-		srv.NoteSoil(soilPoller, err)
-		httpSrv = newAPIServer(*listen, srv)
+		apiSrv := api.New(eng, *configPath)
+		apiSrv.History = hist
+		apiSrv.NoteRain(rainPoller, rainErr)
+		apiSrv.NoteSoil(soilPoller, err)
+		httpSrv = newAPIServer(*listen, gate.Wrap(apiSrv))
 		apiDone = startAPI(ctx, httpSrv, listenTCP, retryOpts{}, log.Printf)
 		defer func() { _ = httpSrv.Close() }()
 	}
 
 	<-ctx.Done()
 	log.Printf("shutdown: Stop + Close")
-	// Stop relays before HTTP. Shutdown waits on SSE and half-read headers.
-	shutdownSequence(eng.Stop, func() {
+	// Gate, then relays, then history, then the HTTP drain. Shutdown waits on
+	// SSE and half-read headers; the gate must already be down so a body that
+	// finishes during that wait cannot start a run.
+	gracefulShutdown(gate, eng.Stop, func() {
 		if hist != nil {
 			hist.Close()
 		}

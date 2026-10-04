@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"github.com/PixnBits/zanjerito/internal/api"
 	"github.com/PixnBits/zanjerito/internal/engine"
 	"github.com/PixnBits/zanjerito/internal/gpio"
+	"github.com/PixnBits/zanjerito/internal/store"
 )
 
 func bindErr(errno syscall.Errno) error {
@@ -350,7 +353,7 @@ func (l *acceptFailListener) Accept() (net.Conn, error) {
 var errAcceptFailed = errors.New("accept failed")
 
 func TestShutdownSequenceRelaysOffBeforeHTTP(t *testing.T) {
-	const httpTimeout = 2 * time.Second
+	const httpTimeout = 500 * time.Millisecond
 
 	cfg := frontCfg()
 	drv := gpio.NewFake()
@@ -1021,13 +1024,15 @@ func TestServeAPIRebindsAfterServeError(t *testing.T) {
 	mu.Lock()
 	got := append([]time.Duration(nil), sleeps...)
 	mu.Unlock()
-	want := []time.Duration{time.Second, time.Second, time.Second}
+	// Listen fail sleeps Initial and doubles. The immediate Serve error is not
+	// a healthy bind, so it sleeps the current backoff and doubles again.
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 	if len(got) != len(want) {
-		t.Fatalf("sleeps=%v want %v (backoff must reset to Initial after Serve error)", got, want)
+		t.Fatalf("sleeps=%v want %v (unhealthy Serve must keep doubling)", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("sleeps=%v want %v (backoff must reset to Initial after Serve error)", got, want)
+			t.Fatalf("sleeps=%v want %v (unhealthy Serve must keep doubling)", got, want)
 		}
 	}
 }
@@ -1068,4 +1073,630 @@ func TestStartAPIReturnsWhileListenBlocked(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("cancel did not stop startAPI promptly")
 	}
+}
+
+func frontEngine(t *testing.T) (*engine.Engine, gpio.Driver, string) {
+	t.Helper()
+	cfg := frontCfg()
+	drv := gpio.NewFake()
+	eng, err := engine.New(cfg, drv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = eng.Close() })
+	path := filepath.Join(t.TempDir(), "cfg.json")
+	if err := store.Save(path, store.File{Config: cfg}); err != nil {
+		t.Fatal(err)
+	}
+	return eng, drv, path
+}
+
+func lineOn(drv gpio.Driver) (string, bool) {
+	for id, lvl := range gpio.StateForTest(drv) {
+		if lvl == gpio.On {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// bodyBlockListener closes blocked when a Read starts after want bytes have
+// already been taken from the conn. That Read is the handler waiting for the
+// rest of a partial body, even if TCP split the first write.
+type bodyBlockListener struct {
+	net.Listener
+	want    int
+	blocked chan struct{}
+	once    sync.Once
+}
+
+func (l *bodyBlockListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &bodyBlockConn{Conn: c, want: l.want, blocked: l.blocked, once: &l.once}, nil
+}
+
+type bodyBlockConn struct {
+	net.Conn
+	want    int
+	blocked chan struct{}
+	once    *sync.Once
+	mu      sync.Mutex
+	got     int
+}
+
+func (c *bodyBlockConn) Read(p []byte) (int, error) {
+	c.mu.Lock()
+	got := c.got
+	c.mu.Unlock()
+	if c.want > 0 && got >= c.want {
+		c.once.Do(func() { close(c.blocked) })
+	}
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.mu.Lock()
+		c.got += n
+		c.mu.Unlock()
+	}
+	return n, err
+}
+
+func readHTTPStatus(c net.Conn, d time.Duration) (int, string, error) {
+	_ = c.SetDeadline(time.Now().Add(d))
+	buf := make([]byte, 0, 512)
+	tmp := make([]byte, 256)
+	var readErr error
+	for len(buf) < 4096 {
+		n, err := c.Read(tmp)
+		buf = append(buf, tmp[:n]...)
+		if err != nil {
+			readErr = err
+			break
+		}
+	}
+	raw := string(buf)
+	nl := strings.IndexByte(raw, '\n')
+	if nl < 0 {
+		if readErr == nil {
+			readErr = io.ErrUnexpectedEOF
+		}
+		return 0, raw, readErr
+	}
+	var code int
+	if _, err := fmt.Sscanf(raw[:nl], "%s %d", new(string), &code); err != nil {
+		return 0, raw, err
+	}
+	return code, raw, nil
+}
+
+func TestSlowPOSTFinishedAfterStopCannotStartRun(t *testing.T) {
+	eng, drv, path := frontEngine(t)
+	gate := &shutdownGate{}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"durationSec":60}`)
+	head := fmt.Sprintf("POST /api/stations/front-north/run HTTP/1.1\r\nHost: %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", ln.Addr().String(), len(body))
+	partial := append([]byte(head), body[:5]...)
+	blocked := make(chan struct{})
+	wln := &bodyBlockListener{Listener: ln, want: len(partial), blocked: blocked}
+	srv := newAPIServer(ln.Addr().String(), gate.Wrap(api.New(eng, path)))
+	apiDone := make(chan struct{})
+	go func() {
+		defer close(apiDone)
+		_ = srv.Serve(wln)
+	}()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write(partial); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not block reading the partial POST body")
+	}
+
+	stopped := make(chan struct{})
+	shutDone := make(chan struct{})
+	go func() {
+		defer close(shutDone)
+		gracefulShutdown(gate, func() error {
+			err := eng.Stop()
+			close(stopped)
+			return err
+		}, nil, srv, apiDone, 3*time.Second)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not run")
+	}
+	if _, ok := gpioAllOff(drv); !ok {
+		t.Fatalf("lines not off after Stop: %v", gpio.StateForTest(drv))
+	}
+
+	sendAt := time.Now().Add(300 * time.Millisecond)
+	end := sendAt.Add(500 * time.Millisecond)
+	resCh := make(chan struct {
+		code int
+		raw  string
+		err  error
+	}, 1)
+	sent := false
+	badID := ""
+	for time.Now().Before(end) || !sent {
+		if id, on := lineOn(drv); on && badID == "" {
+			badID = id
+		}
+		if !sent && !time.Now().Before(sendAt) {
+			if _, err := conn.Write(body[5:]); err != nil {
+				t.Fatalf("write rest of body: %v", err)
+			}
+			sent = true
+			go func() {
+				code, raw, err := readHTTPStatus(conn, 2*time.Second)
+				resCh <- struct {
+					code int
+					raw  string
+					err  error
+				}{code, raw, err}
+			}()
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	var res struct {
+		code int
+		raw  string
+		err  error
+	}
+	select {
+	case res = <-resCh:
+	case <-time.After(3 * time.Second):
+		t.Fatal("no response after the POST body finished")
+	}
+	select {
+	case <-shutDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("gracefulShutdown did not return")
+	}
+	if id, on := lineOn(drv); on && badID == "" {
+		badID = id
+	}
+	if badID != "" {
+		t.Fatalf("line %s went ON after shutdown began", badID)
+	}
+	switch {
+	case res.code == http.StatusServiceUnavailable:
+		if !strings.Contains(res.raw, "shutting down") {
+			t.Fatalf("503 body = %q, want shutting down", res.raw)
+		}
+	case res.code == 0 && res.err != nil:
+		// connection reset: still a refusal, as long as no relay came on
+	default:
+		t.Fatalf("status %d err %v raw %q, want 503 or reset", res.code, res.err, res.raw)
+	}
+	if ph := eng.Status().Phase; ph != engine.PhaseIdle {
+		t.Fatalf("phase %s, want Idle", ph)
+	}
+}
+
+func TestNormalPOSTWorksBeforeShutdown(t *testing.T) {
+	eng, drv, path := frontEngine(t)
+	gate := &shutdownGate{}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accepts atomic.Int32
+	srv := newAPIServer(ln.Addr().String(), gate.Wrap(api.New(eng, path)))
+	srv.ConnState = func(_ net.Conn, cs http.ConnState) {
+		if cs == http.StateNew {
+			accepts.Add(1)
+		}
+	}
+	apiDone := make(chan struct{})
+	go func() {
+		defer close(apiDone)
+		_ = srv.Serve(ln)
+	}()
+	t.Cleanup(func() { _ = srv.Close() })
+	addr := ln.Addr().String()
+	waitFor(t, 2*time.Second, "server did not accept", func() bool {
+		c, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err != nil {
+			return false
+		}
+		c.Close()
+		return true
+	})
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, "http://"+addr+"/api/stations/front-north/run", strings.NewReader(`{"durationSec":60}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST status %d body %s, want 202", resp.StatusCode, body)
+	}
+	waitFor(t, 2*time.Second, "front-north did not turn on", func() bool {
+		st := gpio.StateForTest(drv)
+		return st["front-north"] == gpio.On && st["psu"] == gpio.On
+	})
+
+	before := accepts.Load()
+	held, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	waitFor(t, 2*time.Second, "held connection was not accepted", func() bool {
+		return accepts.Load() > before
+	})
+
+	const httpTimeout = 500 * time.Millisecond
+	pastStop := make(chan struct{})
+	release := make(chan struct{})
+	shutDone := make(chan struct{})
+	go func() {
+		defer close(shutDone)
+		gracefulShutdown(gate, eng.Stop, func() {
+			close(pastStop)
+			<-release
+		}, srv, apiDone, httpTimeout)
+	}()
+	select {
+	case <-pastStop:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown did not pass Stop")
+	}
+	if _, ok := gpioAllOff(drv); !ok {
+		t.Fatalf("lines still on after Stop: %v", gpio.StateForTest(drv))
+	}
+	if ph := eng.Status().Phase; ph != engine.PhaseIdle {
+		t.Fatalf("phase %s after Stop, want Idle", ph)
+	}
+
+	stResp, err := client.Get("http://" + addr + "/api/status")
+	if err != nil {
+		t.Fatalf("GET /api/status after Begin: %v", err)
+	}
+	stBody, _ := io.ReadAll(stResp.Body)
+	stResp.Body.Close()
+	if stResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/status = %d body %s, want 200 during shutdown", stResp.StatusCode, stBody)
+	}
+
+	t0 := time.Now()
+	close(release)
+	select {
+	case <-shutDone:
+	case <-time.After(httpTimeout + 2*time.Second):
+		t.Fatal("gracefulShutdown did not return")
+	}
+	elapsed := time.Since(t0)
+	if elapsed < httpTimeout*8/10 {
+		t.Fatalf("HTTP drain finished in %v; held connection did not keep shutdown open (timeout %v)", elapsed, httpTimeout)
+	}
+	if _, ok := gpioAllOff(drv); !ok {
+		t.Fatalf("lines on after shutdown: %v", gpio.StateForTest(drv))
+	}
+}
+
+func TestShutdownGateBeginFast(t *testing.T) {
+	gate := &shutdownGate{}
+	start := time.Now()
+	gate.Begin()
+	if elapsed := time.Since(start); elapsed >= 50*time.Millisecond {
+		t.Fatalf("Begin took %v with no in-flight handler, want <50ms", elapsed)
+	}
+}
+
+func TestShutdownGateBeginWaitsForHandler(t *testing.T) {
+	gate := &shutdownGate{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var hits atomic.Int32
+	h := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	go h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("hi")))
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not start")
+	}
+	beginDone := make(chan time.Duration, 1)
+	go func() {
+		t0 := time.Now()
+		gate.Begin()
+		beginDone <- time.Since(t0)
+	}()
+	select {
+	case d := <-beginDone:
+		t.Fatalf("Begin returned in %v before the handler finished", d)
+	case <-time.After(40 * time.Millisecond):
+	}
+	released := time.Now()
+	close(release)
+	select {
+	case d := <-beginDone:
+		if since := time.Since(released); since > 100*time.Millisecond {
+			t.Fatalf("Begin returned %v after the handler, want promptly", since)
+		}
+		if d > 250*time.Millisecond {
+			t.Fatalf("Begin took %v, want <=250ms", d)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Begin did not return after the handler")
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("handler calls=%d want 1", hits.Load())
+	}
+}
+
+func TestShutdownGatePOST503AfterBegin(t *testing.T) {
+	gate := &shutdownGate{}
+	var hits atomic.Int32
+	h := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		b, _ := io.ReadAll(r.Body)
+		if string(b) != "abcdef" && r.Method == http.MethodPost {
+			t.Errorf("buffered body %q", b)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/stations/front-north/run", strings.NewReader("abcdef")))
+	if rr.Code != http.StatusNoContent || hits.Load() != 1 {
+		t.Fatalf("before Begin: status %d hits %d", rr.Code, hits.Load())
+	}
+
+	gate.Begin()
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/stations/front-north/run", strings.NewReader(`{"durationSec":1}`)))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST status %d body %s, want 503", rr.Code, rr.Body)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("handler calls=%d want 1 (POST after Begin must not run)", hits.Load())
+	}
+	if got := rr.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After %q want 5", got)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type %q", ct)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["error"] != "shutting down" {
+		t.Fatalf("body %#v", payload)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
+		rr = httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(method, "/api/status", nil))
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("%s status %d, want the handler", method, rr.Code)
+		}
+	}
+	if hits.Load() != 4 {
+		t.Fatalf("handler calls=%d want 4 (pre-POST + GET/HEAD/OPTIONS)", hits.Load())
+	}
+}
+
+func TestShutdownGateBadBody(t *testing.T) {
+	gate := &shutdownGate{}
+	var hits atomic.Int32
+	h := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Body = io.NopCloser(errReader{})
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s, want 400", rr.Code, rr.Body)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type %q", ct)
+	}
+	if hits.Load() != 0 {
+		t.Fatalf("handler calls=%d want 0", hits.Load())
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, errors.New("boom") }
+
+func TestGracefulShutdownOrder(t *testing.T) {
+	gate := &shutdownGate{}
+	var mu sync.Mutex
+	var order []string
+	rec := func(s string) {
+		mu.Lock()
+		order = append(order, s)
+		mu.Unlock()
+	}
+	srv := &http.Server{}
+	httpDone := make(chan struct{})
+	srv.RegisterOnShutdown(func() {
+		rec("http")
+		close(httpDone)
+	})
+	var histN atomic.Int32
+	gracefulShutdown(gate, func() error {
+		if !gate.down.Load() {
+			t.Errorf("stopRelays ran before gate.Begin")
+		}
+		rec("stop")
+		return nil
+	}, func() {
+		histN.Add(1)
+		rec("hist")
+	}, srv, nil, 200*time.Millisecond)
+	select {
+	case <-httpDone:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP shutdown did not start")
+	}
+	if histN.Load() != 1 {
+		t.Fatalf("closeHist calls=%d want 1", histN.Load())
+	}
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	want := []string{"stop", "hist", "http"}
+	if len(got) != len(want) {
+		t.Fatalf("order %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order %v want %v", got, want)
+		}
+	}
+}
+
+func TestGracefulShutdownNilFuncs(t *testing.T) {
+	var g *shutdownGate
+	g.Begin()
+
+	t.Run("nil closeHist", func(t *testing.T) {
+		var n atomic.Int32
+		gracefulShutdown(nil, func() error {
+			n.Add(1)
+			return nil
+		}, nil, nil, nil, time.Millisecond)
+		if n.Load() != 1 {
+			t.Fatalf("stopRelays=%d want 1", n.Load())
+		}
+	})
+	t.Run("nil stopRelays", func(t *testing.T) {
+		var n atomic.Int32
+		gracefulShutdown(nil, nil, func() { n.Add(1) }, nil, nil, time.Millisecond)
+		if n.Load() != 1 {
+			t.Fatalf("closeHist=%d want 1", n.Load())
+		}
+	})
+}
+
+func TestServeAPIServeErrorBackoff(t *testing.T) {
+	t.Run("immediate failures keep doubling", func(t *testing.T) {
+		sleep, snap := scriptedSleeps(4)
+		listen := func(network, addr string) (net.Listener, error) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			return &acceptFailListener{Listener: ln}, nil
+		}
+		opt := retryOpts{
+			Initial: time.Second,
+			Max:     30 * time.Second,
+			sleep:   sleep,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := startAPI(ctx, testHTTPServer(), listen, opt, func(string, ...any) {})
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("serveAPI did not stop after 4 immediate Serve failures")
+		}
+		want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
+		got := snap()
+		if len(got) != len(want) {
+			t.Fatalf("sleeps=%v want %v", got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("sleeps=%v want %v", got, want)
+			}
+		}
+	})
+
+	t.Run("healthy serve resets to initial", func(t *testing.T) {
+		base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		var ticks atomic.Int32
+		sleep, snap := scriptedSleeps(3)
+		listen := func(network, addr string) (net.Listener, error) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				return nil, err
+			}
+			return &acceptFailListener{Listener: ln}, nil
+		}
+		opt := retryOpts{
+			Initial: time.Second,
+			Max:     30 * time.Second,
+			Now: func() time.Time {
+				// Two Now calls per Serve. The third Serve's end call is the
+				// 6th and reports a 30s run, which is healthyAfter.
+				if ticks.Add(1) >= 6 {
+					return base.Add(30 * time.Second)
+				}
+				return base
+			},
+			sleep: sleep,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := startAPI(ctx, testHTTPServer(), listen, opt, func(string, ...any) {})
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("serveAPI did not stop after the healthy Serve error")
+		}
+		want := []time.Duration{time.Second, 2 * time.Second, time.Second}
+		got := snap()
+		if len(got) != len(want) {
+			t.Fatalf("sleeps=%v want %v (Now calls=%d)", got, want, ticks.Load())
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("sleeps=%v want %v (Now calls=%d)", got, want, ticks.Load())
+			}
+		}
+	})
+}
+
+func scriptedSleeps(stopAfter int) (func(context.Context, time.Duration) bool, func() []time.Duration) {
+	var mu sync.Mutex
+	var sleeps []time.Duration
+	sleep := func(ctx context.Context, d time.Duration) bool {
+		mu.Lock()
+		sleeps = append(sleeps, d)
+		n := len(sleeps)
+		mu.Unlock()
+		if n >= stopAfter {
+			return false
+		}
+		return ctx.Err() == nil
+	}
+	snap := func() []time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]time.Duration(nil), sleeps...)
+	}
+	return sleep, snap
 }
