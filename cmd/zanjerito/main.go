@@ -106,23 +106,29 @@ func main() {
 		log.Printf("soil: disabled: %v", err)
 	}
 
+	var (
+		httpSrv *http.Server
+		apiDone <-chan struct{}
+	)
 	if *listen != "" {
 		srv := api.New(eng, *configPath)
 		srv.History = hist
 		srv.NoteRain(rainPoller, rainErr)
 		srv.NoteSoil(soilPoller, err)
-		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
+		httpSrv = &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
+		done := make(chan struct{})
+		apiDone = done
 		go func() {
-			log.Printf("api listening on %s (LAN trust, D7)", *listen)
-			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("api: %v", err)
-			}
+			defer close(done)
+			serveAPI(ctx, httpSrv, listenTCP, retryOpts{}, log.Printf)
 		}()
-		defer func() { _ = httpSrv.Close() }()
 	}
 
 	<-ctx.Done()
 	log.Printf("shutdown: Stop + Close")
+	if httpSrv != nil {
+		shutdownHTTP(httpSrv, apiDone, apiShutdownTimeout)
+	}
 	_ = eng.Stop()
 	if hist != nil {
 		hist.Close()
