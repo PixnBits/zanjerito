@@ -20,11 +20,13 @@ const (
 
 // retryOpts controls listen backoff and failure-log rate. Zero value uses
 // 1s initial, 30s max, one identical log per minute.
+// sleep, when set, replaces the real timer. Tests use it to record delays.
 type retryOpts struct {
 	Initial     time.Duration
 	Max         time.Duration
 	LogInterval time.Duration
 	Now         func() time.Time
+	sleep       func(ctx context.Context, d time.Duration) bool
 }
 
 func (o retryOpts) withDefaults() retryOpts {
@@ -40,6 +42,9 @@ func (o retryOpts) withDefaults() retryOpts {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.sleep == nil {
+		o.sleep = sleepCtx
+	}
 	if o.Initial > o.Max {
 		o.Initial = o.Max
 	}
@@ -52,7 +57,9 @@ func listenTCP(network, addr string) (net.Listener, error) {
 }
 
 // serveAPI binds srv.Addr, retrying every listen error with capped exponential
-// backoff. It returns when ctx is cancelled during retry, or after Serve ends.
+// backoff. A non-ErrServerClosed Serve error while ctx is still active is
+// logged, backoff resets to Initial, and the loop rebinds. It returns when
+// ctx is cancelled, Serve returns ErrServerClosed, or Serve returns nil.
 // A successful listen after ctx is done closes the listener and does not Serve.
 func serveAPI(ctx context.Context, srv *http.Server, listen func(network, addr string) (net.Listener, error), opt retryOpts, logf func(string, ...any)) {
 	opt = opt.withDefaults()
@@ -86,7 +93,7 @@ func serveAPI(ctx context.Context, srv *http.Server, listen func(network, addr s
 				lastLog = now
 				lastKey = key
 			}
-			if !sleepCtx(ctx, backoff) {
+			if !opt.sleep(ctx, backoff) {
 				return
 			}
 			if backoff < opt.Max {
@@ -106,11 +113,43 @@ func serveAPI(ctx context.Context, srv *http.Server, listen func(network, addr s
 			logf("api: bound %s after %d attempts", ln.Addr().String(), attempts)
 		}
 		logf("api listening on %s (LAN trust, D7)", ln.Addr())
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logf("api: %v", err)
+		err = srv.Serve(ln)
+		if err == nil || errors.Is(err, http.ErrServerClosed) || ctx.Err() != nil {
+			return
 		}
-		return
+		logf("api: %v", err)
+		hadFail = true
+		backoff = opt.Initial
+		if !opt.sleep(ctx, backoff) {
+			return
+		}
 	}
+}
+
+// startAPI runs serveAPI in the background and returns its done signal
+// immediately. The caller must not block on listen before this returns.
+func startAPI(ctx context.Context, srv *http.Server, listen func(network, addr string) (net.Listener, error), opt retryOpts, logf func(string, ...any)) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveAPI(ctx, srv, listen, opt, logf)
+	}()
+	return done
+}
+
+// newAPIServer is the LAN HTTP server. Shutdown cancels the base context so
+// handlers that select on r.Context() (SSE) return without waiting out the
+// shutdown deadline. ReadHeaderTimeout stays 10s.
+func newAPIServer(addr string, handler http.Handler) *http.Server {
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	srv.RegisterOnShutdown(cancel)
+	return srv
 }
 
 func listenFailMsg(err error) string {
@@ -152,6 +191,19 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
+}
+
+// shutdownSequence turns relays off before any HTTP wait, then runs afterStop
+// (history flush), then a bounded HTTP shutdown. A client on /api/events or a
+// half-read header must not delay all-off.
+func shutdownSequence(stopRelays func() error, afterStop func(), srv *http.Server, apiDone <-chan struct{}, httpTimeout time.Duration) {
+	if stopRelays != nil {
+		_ = stopRelays()
+	}
+	if afterStop != nil {
+		afterStop()
+	}
+	shutdownHTTP(srv, apiDone, httpTimeout)
 }
 
 // shutdownHTTP stops srv with a bounded Shutdown, Close fallback, then waits

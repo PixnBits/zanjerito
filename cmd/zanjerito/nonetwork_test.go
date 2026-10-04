@@ -99,11 +99,7 @@ func TestSchedulesRunWithoutNetwork(t *testing.T) {
 		return nil, bindErr(syscall.EADDRNOTAVAIL)
 	}
 	httpSrv := &http.Server{Addr: "192.0.2.10:8080", Handler: okHandler(), ReadHeaderTimeout: 10 * time.Second}
-	apiDone := make(chan struct{})
-	go func() {
-		defer close(apiDone)
-		serveAPI(ctx, httpSrv, listen, frozenRetry(5*time.Millisecond), func(string, ...any) {})
-	}()
+	apiDone := startAPI(ctx, httpSrv, listen, frozenRetry(5*time.Millisecond), func(string, ...any) {})
 
 	go p.Loop(ctx)
 

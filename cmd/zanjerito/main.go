@@ -115,23 +115,18 @@ func main() {
 		srv.History = hist
 		srv.NoteRain(rainPoller, rainErr)
 		srv.NoteSoil(soilPoller, err)
-		httpSrv = &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
-		done := make(chan struct{})
-		apiDone = done
-		go func() {
-			defer close(done)
-			serveAPI(ctx, httpSrv, listenTCP, retryOpts{}, log.Printf)
-		}()
+		httpSrv = newAPIServer(*listen, srv)
+		apiDone = startAPI(ctx, httpSrv, listenTCP, retryOpts{}, log.Printf)
+		defer func() { _ = httpSrv.Close() }()
 	}
 
 	<-ctx.Done()
 	log.Printf("shutdown: Stop + Close")
-	if httpSrv != nil {
-		shutdownHTTP(httpSrv, apiDone, apiShutdownTimeout)
-	}
-	_ = eng.Stop()
-	if hist != nil {
-		hist.Close()
-	}
+	// Stop relays before HTTP. Shutdown waits on SSE and half-read headers.
+	shutdownSequence(eng.Stop, func() {
+		if hist != nil {
+			hist.Close()
+		}
+	}, httpSrv, apiDone, apiShutdownTimeout)
 	fmt.Fprintln(os.Stderr, "zanjerito stopped")
 }
