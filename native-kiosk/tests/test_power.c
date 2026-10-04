@@ -1042,6 +1042,166 @@ static void test_disabled_does_not_touch(void)
     TEQ_I(g_blank_n, 0);
 }
 
+/* Press-edge latch: the first sample of a contact decides swallow vs pass. */
+typedef struct {
+    int64_t ms;
+    int pressed;
+    int hit_is_stop;
+    zk_power_touch_action_t want;
+} touch_row_t;
+
+static void run_touch_rows(zk_power_t *p, const touch_row_t *rows, int n, zk_power_state_t want_state)
+{
+    int i;
+
+    for (i = 0; i < n; i++) {
+        TEQ_I(zk_power_touch_event(p, rows[i].ms, rows[i].pressed, rows[i].hit_is_stop), rows[i].want);
+        TEQ_I(zk_power_state(p), want_state);
+    }
+}
+
+static void test_contact_latch(void)
+{
+    zk_power_t p;
+    zk_power_inputs_t in = {0};
+
+    /* DIMMED: press off STOP, slide onto STOP, release. Whole contact swallowed. */
+    {
+        static const touch_row_t rows[] = {
+            {2000, 1, 0, ZK_POWER_SWALLOW},
+            {2100, 1, 1, ZK_POWER_SWALLOW},
+            {2200, 0, 1, ZK_POWER_SWALLOW},
+            {2499, 1, 0, ZK_POWER_SWALLOW},
+            {2499, 0, 0, ZK_POWER_SWALLOW},
+            {2500, 1, 0, ZK_POWER_PASS},
+        };
+        reset_tree();
+        boot(&p, 2, 5, 40);
+        zk_power_tick(&p, 0, &in);
+        zk_power_tick(&p, 2000, &in);
+        TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+        run_touch_rows(&p, rows, (int)(sizeof rows / sizeof rows[0]), ZK_POWER_ACTIVE);
+        TEQ_I(file_int("brightness"), 200);
+        TEQ_I(file_int("bl_power"), 0);
+    }
+
+    /* OFF: press anywhere, slide onto STOP, release. Whole contact swallowed. */
+    {
+        static const touch_row_t rows[] = {
+            {5000, 1, 0, ZK_POWER_SWALLOW},
+            {5100, 1, 1, ZK_POWER_SWALLOW},
+            {5200, 0, 1, ZK_POWER_SWALLOW},
+            {5499, 1, 0, ZK_POWER_SWALLOW},
+            {5499, 0, 0, ZK_POWER_SWALLOW},
+            {5500, 1, 0, ZK_POWER_PASS},
+        };
+        reset_tree();
+        boot(&p, 2, 5, 40);
+        zk_power_tick(&p, 0, &in);
+        zk_power_tick(&p, 2000, &in);
+        zk_power_tick(&p, 5000, &in);
+        TEQ_I(zk_power_state(&p), ZK_POWER_OFF);
+        run_touch_rows(&p, rows, (int)(sizeof rows / sizeof rows[0]), ZK_POWER_ACTIVE);
+        TEQ_I(file_int("brightness"), 200);
+        TEQ_I(file_int("bl_power"), 0);
+    }
+
+    /* DIMMED: press on STOP, slide off STOP, release. Latched pass, no guard. */
+    {
+        static const touch_row_t rows[] = {
+            {2000, 1, 1, ZK_POWER_PASS},
+            {2100, 1, 0, ZK_POWER_PASS},
+            {2200, 0, 0, ZK_POWER_PASS},
+            {2201, 1, 0, ZK_POWER_PASS},
+        };
+        reset_tree();
+        boot(&p, 2, 5, 40);
+        zk_power_tick(&p, 0, &in);
+        zk_power_tick(&p, 2000, &in);
+        TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+        run_touch_rows(&p, rows, (int)(sizeof rows / sizeof rows[0]), ZK_POWER_ACTIVE);
+        TEQ_I(file_int("brightness"), 200);
+        TEQ_I(file_int("bl_power"), 0);
+    }
+
+    /* ACTIVE: slides pass throughout. */
+    {
+        static const touch_row_t rows[] = {
+            {10, 1, 0, ZK_POWER_PASS},
+            {20, 1, 1, ZK_POWER_PASS},
+            {30, 0, 1, ZK_POWER_PASS},
+            {40, 1, 1, ZK_POWER_PASS},
+            {50, 1, 0, ZK_POWER_PASS},
+            {60, 0, 0, ZK_POWER_PASS},
+        };
+        reset_tree();
+        boot(&p, 2, 5, 40);
+        zk_power_tick(&p, 0, &in);
+        TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+        run_touch_rows(&p, rows, (int)(sizeof rows / sizeof rows[0]), ZK_POWER_ACTIVE);
+        TEQ_I(file_int("brightness"), 200);
+        TEQ_I(zk_power_trace_len(&p), 0);
+    }
+}
+
+static void test_paused_with_blockers(void)
+{
+    static const char *names[] = {"watering", "lockout", "fault", "unreachable", "modal"};
+    zk_power_t p;
+    zk_power_inputs_t paused = flagged("paused");
+    int i;
+
+    reset_tree();
+    boot(&p, 2, 5, 40);
+    zk_power_tick(&p, 0, &paused);
+    TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+    zk_power_tick(&p, 1999, &paused);
+    TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+    zk_power_tick(&p, 2000, &paused);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("brightness"), 40);
+    zk_power_tick(&p, 100000, &paused);
+    TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+    TEQ_I(file_int("bl_power"), 0);
+
+    for (i = 0; i < 5; i++) {
+        zk_power_inputs_t both = flagged(names[i]);
+        zk_power_inputs_t only_paused = flagged("paused");
+
+        both.paused = 1;
+
+        reset_tree();
+        boot(&p, 2, 5, 40);
+        zk_power_tick(&p, 0, &both);
+        zk_power_tick(&p, 100000, &both);
+        TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+        TEQ_I(file_int("brightness"), 200);
+        TEQ_I(file_int("bl_power"), 0);
+        TEQ_I(zk_power_trace_len(&p), 0);
+
+        zk_power_tick(&p, 100000, &only_paused);
+        TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+        zk_power_tick(&p, 100000 + 1999, &only_paused);
+        TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+        zk_power_tick(&p, 100000 + 2000, &only_paused);
+        TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+        TEQ_I(file_int("brightness"), 40);
+        zk_power_tick(&p, 100000 + 100000, &only_paused);
+        TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+        TEQ_I(file_int("bl_power"), 0);
+
+        reset_tree();
+        boot(&p, 2, 5, 40);
+        zk_power_tick(&p, 0, &only_paused);
+        zk_power_tick(&p, 2000, &only_paused);
+        TEQ_I(zk_power_state(&p), ZK_POWER_DIMMED);
+        zk_power_tick(&p, 2500, &both);
+        TEQ_I(zk_power_state(&p), ZK_POWER_ACTIVE);
+        TEQ_I(file_int("brightness"), 200);
+        TEQ_I(file_int("bl_power"), 0);
+    }
+}
+
 int main(void)
 {
     char tmpl[] = "/tmp/zkpowXXXXXX";
@@ -1069,6 +1229,8 @@ int main(void)
     test_init_saves_original();
     test_chmod_unwritable();
     test_disabled_does_not_touch();
+    test_contact_latch();
+    test_paused_with_blockers();
     zk_power_init(NULL, NULL);
     zk_power_tick(NULL, 0, NULL);
     TEQ_I(zk_power_touch_event(NULL, 0, 1, 1), ZK_POWER_PASS);

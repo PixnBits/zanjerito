@@ -194,6 +194,7 @@ Setting the tty to `KD_GRAPHICS` so printk cannot draw there is a future client 
 The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
 
 - `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT`, or `/sys/class/backlight/rpi_backlight` when that is unset. `ZAN_ROOT` prefixes the directory in tests only.
+- Write `0` to `<dir>/bl_power` when that file exists (panel on). Configured path only, not every backlight device. Absence or a failed write is logged and ignored.
 - If `BACKLIGHT` is unset, write `max_brightness` into `brightness` (the raw panel max, not capped at 255). The client reads that value at startup and restores it on exit.
 - If `BACKLIGHT` is set to 0–255, write that fixed level only to `<dir>/brightness` (the same directory as above, not every backlight device). That level is what the client later restores. It is not the idle-dim level.
 

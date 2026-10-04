@@ -665,6 +665,7 @@ printf '111\n' >"$two/sys/class/backlight/other_backlight/max_brightness"
 env -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two BACKLIGHT=128 \
     "$RUN" prepare >/dev/null 2>&1
 [ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 128 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
 [ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 22 ]
 [ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
 grep -F "chgrp video $two/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >/dev/null
@@ -672,6 +673,24 @@ grep -F "chmod g+w $two/sys/class/backlight/rpi_backlight/brightness" "$CHLOG" >
 grep -F "chmod g+w $two/sys/class/backlight/rpi_backlight/bl_power" "$CHLOG" >/dev/null
 if grep -F other_backlight "$CHLOG" >/dev/null; then
     echo "prepare touched other_backlight" >&2
+    exit 1
+fi
+pass
+
+# BACKLIGHT unset: still bl_power 0 on the default device only.
+printf '11\n' >"$two/sys/class/backlight/rpi_backlight/brightness"
+printf '22\n' >"$two/sys/class/backlight/other_backlight/brightness"
+printf '1\n' >"$two/sys/class/backlight/rpi_backlight/bl_power"
+printf '1\n' >"$two/sys/class/backlight/other_backlight/bl_power"
+: >"$CHLOG"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 22 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 1 ]
+if grep -F other_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched other_backlight with BACKLIGHT unset" >&2
     exit 1
 fi
 pass
@@ -685,6 +704,7 @@ PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$two BACKLIGHT=64 \
     ZAN_BACKLIGHT=/sys/class/backlight/other_backlight \
     "$RUN" prepare >/dev/null 2>&1
 [ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/brightness")" = 64 ]
+[ "$(tr -d '[:space:]' <"$two/sys/class/backlight/other_backlight/bl_power")" = 0 ]
 [ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/brightness")" = 11 ]
 [ "$(tr -d '[:space:]' <"$two/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
 grep -F "chmod g+w $two/sys/class/backlight/other_backlight/brightness" "$CHLOG" >/dev/null
@@ -692,6 +712,39 @@ grep -F "chgrp video $two/sys/class/backlight/other_backlight/bl_power" "$CHLOG"
 if grep -F rpi_backlight "$CHLOG" >/dev/null; then
     echo "prepare touched rpi_backlight while ZAN_BACKLIGHT is the other device" >&2
     exit 1
+fi
+pass
+
+# Missing bl_power is a quiet skip; prepare still exits 0.
+nopow=$TMP/fake-nopow
+mkdir -p "$nopow/sys/class/backlight/rpi_backlight" "$nopow/dev"
+printf '11\n' >"$nopow/sys/class/backlight/rpi_backlight/brightness"
+printf '255\n' >"$nopow/sys/class/backlight/rpi_backlight/max_brightness"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$nopow \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$nopow/sys/class/backlight/rpi_backlight/brightness")" = 255 ]
+[ ! -e "$nopow/sys/class/backlight/rpi_backlight/bl_power" ]
+pass
+
+# bl_power as a directory, or an unwritable file, is non-fatal.
+badbl=$TMP/fake-badbl
+mkdir -p "$badbl/sys/class/backlight/rpi_backlight/bl_power" "$badbl/dev"
+printf '11\n' >"$badbl/sys/class/backlight/rpi_backlight/brightness"
+printf '255\n' >"$badbl/sys/class/backlight/rpi_backlight/max_brightness"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$badbl \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$badbl/sys/class/backlight/rpi_backlight/brightness")" = 255 ]
+[ -d "$badbl/sys/class/backlight/rpi_backlight/bl_power" ]
+if [ "$(id -u)" != 0 ]; then
+    rmdir "$badbl/sys/class/backlight/rpi_backlight/bl_power"
+    printf '1\n' >"$badbl/sys/class/backlight/rpi_backlight/bl_power"
+    chmod a-w "$badbl/sys/class/backlight/rpi_backlight/bl_power"
+    printf '11\n' >"$badbl/sys/class/backlight/rpi_backlight/brightness"
+    env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$badbl \
+        "$RUN" prepare >/dev/null 2>&1
+    [ "$(tr -d '[:space:]' <"$badbl/sys/class/backlight/rpi_backlight/brightness")" = 255 ]
+    [ "$(tr -d '[:space:]' <"$badbl/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
+    chmod u+w "$badbl/sys/class/backlight/rpi_backlight/bl_power"
 fi
 pass
 

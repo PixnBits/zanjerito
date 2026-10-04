@@ -128,6 +128,21 @@ prepare_backlight_access() {
     done
 }
 
+# Panel on. Configured directory only. Missing or unwritable is not fatal.
+prepare_backlight_power() {
+    dir=$(backlight_sysdir)
+    bl=$dir/bl_power
+    if [ ! -e "$bl" ]; then
+        printf 'prepare: skipped bl_power (absent)\n' >&2
+        return 0
+    fi
+    if printf '0\n' >"$bl"; then
+        printf 'prepare: wrote 0 to %s\n' "$bl" >&2
+    else
+        printf 'prepare: could not write %s (ignored)\n' "$bl" >&2
+    fi
+}
+
 # BACKLIGHT unset: start from the panel max. The client saves that and restores it.
 prepare_backlight_max() {
     dir=$(backlight_sysdir)
@@ -156,6 +171,7 @@ prepare_backlight() {
     level=${BACKLIGHT-}
     dir=$(backlight_sysdir)
     prepare_backlight_access
+    prepare_backlight_power
     if [ -z "$level" ]; then
         prepare_backlight_max
         return 0

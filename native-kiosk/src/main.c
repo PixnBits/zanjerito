@@ -730,10 +730,12 @@ int main(int argc, char **argv)
 
     rc = g_script_fail ? 1 : 0;
 out:
+    /* Restore the panel first. zk_data_stop() joins threads and can wait on an
+     * in-flight request, which must not delay the brightness restore. */
+    power_shutdown_now();
     if (data_on) {
         zk_data_stop();
     }
-    power_shutdown_now();
     if (fb) {
         zk_console_cursor(0);
     }
