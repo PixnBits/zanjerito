@@ -65,7 +65,7 @@ The controller POSTs the form body (`ID1={gauge}&ST=rain&NM=200` by default; `{g
 
 | Field | Default | Meaning |
 |---|---|---|
-| `poll_minutes` | 30 | How often to fetch. Set `poll_seconds` to override (for example `2`). |
+| `poll_minutes` | 30 | How often to fetch after a successful fetch. A failed fetch (network not up yet, DNS, timeout) retries at 1, 2, 4, … minutes, never longer than this interval; the normal interval resumes after the first success. Stale or implausible data is not a fetch failure. Set `poll_seconds` to override (for example `2`). |
 | `trigger_inches` | 0.25 | Pause when the last `window_hours` add up to at least this. |
 | `window_hours` | 24 | Rolling total of incremental rainfall. |
 | `dry_days` | 2 | Hold until this many days after the newest rain in the window. Values above 14 are capped to 14. |

@@ -29,6 +29,12 @@ const (
 	badImplausible = "implausible"
 	badEmpty       = "empty"
 	badOther       = "other"
+
+	// Fetch errors retry at 1 minute, then 2, 4, 8, 16, … never longer
+	// than min(PollInterval, fetchRetryMax). A successful fetch restores
+	// the normal interval. Feed-quality unavailability is not a fetch error.
+	fetchRetryMin = time.Minute
+	fetchRetryMax = 30 * time.Minute
 )
 
 // negRowKey is one negative increment the poller has already logged.
@@ -39,6 +45,7 @@ type negRowKey struct {
 }
 
 // Poller fetches on an interval and applies Decide to the engine.
+// Fetch errors retry with capped exponential backoff; see Loop.
 // It does not call engine.Stop. A cancelled ctx ends Loop.
 //
 // mu guards engine edits, status, negLogged, and the snapshot version. Disk
@@ -51,6 +58,11 @@ type Poller struct {
 	Cfg    Config
 	Now    func() time.Time
 	Log    *log.Logger
+
+	// after, if set, is Loop's wait. It must match time.NewTimer: the
+	// returned stop is like Timer.Stop (true if the wait was stopped
+	// before it fired). Nil uses a real timer. Tests inject a fake.
+	after func(d time.Duration) (<-chan time.Time, func() bool)
 
 	// save persists one snapshot. Nil means store.SavePause.
 	// Called outside mu. Tests replace it via SetSaveFuncForTest.
@@ -103,23 +115,83 @@ func Start(ctx context.Context, eng *engine.Engine, configPath string) (*Poller,
 	return p, nil
 }
 
-// Loop polls immediately, then on each interval, until ctx is cancelled.
+// Loop polls immediately, then waits on a single timer, until ctx is cancelled.
+// A fetch error (not ctx cancellation, not stale/implausible/empty data) uses
+// capped exponential backoff: 1, 2, 4, … minutes, never longer than
+// min(PollInterval, 30 minutes). Any successful fetch resets the streak and
+// restores PollInterval. Cancel ends the loop during a wait or a fetch.
 func (p *Poller) Loop(ctx context.Context) {
 	if p == nil {
 		return
 	}
-	p.Poll(ctx)
-	iv := p.Cfg.PollInterval()
-	t := time.NewTicker(iv)
-	defer t.Stop()
+	failures := 0
 	for {
+		failed := p.poll(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if failed {
+			failures++
+		} else {
+			failures = 0
+		}
+		ch, stop := p.waitAfter(fetchRetryDelay(failures, p.Cfg.PollInterval()))
 		select {
 		case <-ctx.Done():
+			stopWait(ch, stop)
 			return
-		case <-t.C:
-			p.Poll(ctx)
+		case <-ch:
+			if ctx.Err() != nil {
+				return
+			}
 		}
 	}
+}
+
+func (p *Poller) waitAfter(d time.Duration) (<-chan time.Time, func() bool) {
+	if p.after != nil {
+		return p.after(d)
+	}
+	t := time.NewTimer(d)
+	return t.C, t.Stop
+}
+
+func stopWait(ch <-chan time.Time, stop func() bool) {
+	if stop == nil {
+		return
+	}
+	if !stop() {
+		select {
+		case <-ch:
+		default:
+		}
+	}
+}
+
+// fetchRetryDelay is the wait after consecutiveFails fetch errors.
+// consecutiveFails 0 (last fetch succeeded) is the normal interval.
+func fetchRetryDelay(consecutiveFails int, interval time.Duration) time.Duration {
+	if consecutiveFails <= 0 {
+		return interval
+	}
+	capAt := interval
+	if capAt > fetchRetryMax {
+		capAt = fetchRetryMax
+	}
+	if capAt < fetchRetryMin {
+		return capAt
+	}
+	d := fetchRetryMin
+	for i := 1; i < consecutiveFails; i++ {
+		if d > capAt/2 {
+			return capAt
+		}
+		d *= 2
+	}
+	if d > capAt {
+		return capAt
+	}
+	return d
 }
 
 // Do runs fn while holding the poller lock.
@@ -265,16 +337,24 @@ func (p *Poller) SyncExpiredPause(now time.Time) {
 // samples do not pause, extend, or clear. A cancelled ctx does not mark
 // the feed unavailable. pause.json is written after mu is released.
 func (p *Poller) Poll(ctx context.Context) {
+	_ = p.poll(ctx)
+}
+
+// poll is Poll plus whether the fetch failed (fetchErr != nil and ctx is
+// still active). Loop uses that for backoff. Feed-quality outcomes are
+// not fetch failures.
+func (p *Poller) poll(ctx context.Context) (failed bool) {
 	if p == nil || p.Source == nil || p.Eng == nil {
-		return
+		return false
 	}
 	if ctx.Err() != nil {
-		return
+		return false
 	}
 	samples, fetchErr := p.Source.Fetch(ctx)
 	if ctx.Err() != nil {
-		return
+		return false
 	}
+	failed = fetchErr != nil
 
 	var (
 		ps       store.PauseState
@@ -316,11 +396,12 @@ func (p *Poller) Poll(ctx context.Context) {
 		if err := p.persist(path, ps, ver, save); err != nil {
 			p.logf("rain: save pause: %v", err)
 		}
-		return
+		return failed
 	}
 	if loadFile && path != "" {
 		p.readPauseFile(path, now)
 	}
+	return failed
 }
 
 func (p *Poller) now() time.Time {
