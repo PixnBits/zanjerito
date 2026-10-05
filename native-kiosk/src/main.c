@@ -5,6 +5,7 @@
 #include "platform.h"
 #include "shots.h"
 #include "ui.h"
+#include "zk_boot.h"
 #include "zk_console.h"
 #include "zk_power.h"
 
@@ -54,6 +55,7 @@ static int g_script_fail;
 static volatile sig_atomic_t g_stop;
 static zk_power_t g_power;
 static int g_power_on;
+static zk_boot_repaint_t g_boot_repaint;
 
 static void power_shutdown_now(void)
 {
@@ -696,6 +698,28 @@ int main(int argc, char **argv)
             break;
         }
         wait = zk_platform_handle_timers();
+        /* At most two one-shot full-screen redraws (2 s then 5 s after the
+         * first frame) so a late Plymouth clear of fb0 cannot leave Home blank.
+         * Skip the paint when dimmed or off; do not wake or brighten. */
+        {
+            int64_t first_ms;
+
+            if (zk_platform_first_frame_ms(&first_ms)
+                && zk_boot_repaint_due(zk_platform_mono_ms(), first_ms, &g_boot_repaint)) {
+                int paint = 1;
+
+                if (g_power_on) {
+                    zk_power_state_t pst = zk_power_state(&g_power);
+
+                    if (pst == ZK_POWER_DIMMED || pst == ZK_POWER_OFF) {
+                        paint = 0;
+                    }
+                }
+                if (paint) {
+                    zk_platform_force_refresh();
+                }
+            }
+        }
         busy = zk_platform_busy();
         cap = busy ? 16u : 100u;
         if (wait == LV_NO_TIMER_READY) {

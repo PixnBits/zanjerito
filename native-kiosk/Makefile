@@ -1,5 +1,5 @@
 # Core sources (reused by later UI / cross-compile targets).
-SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c src/zk_console.c src/zk_power.c
+SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c src/zk_console.c src/zk_power.c src/zk_boot.c
 SRC_DATA = src/data.c
 CJSON = third_party/cJSON/cJSON.c
 
@@ -10,7 +10,7 @@ BUILD = build
 
 SANITIZE := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c -o /dev/null - >/dev/null 2>&1 && echo -fsanitize=address,undefined)
 
-TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text $(BUILD)/test_power
+TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text $(BUILD)/test_power $(BUILD)/test_boot
 
 HOST_CC := gcc
 ARM_CC ?= arm-linux-gnueabihf-gcc
@@ -63,6 +63,7 @@ test: $(TEST_BINS)
 	$(BUILD)/test_text
 	$(BUILD)/test_ui_text
 	$(BUILD)/test_power
+	$(BUILD)/test_boot
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -90,6 +91,9 @@ $(BUILD)/test_text: tests/test_text.c src/zk_text.c | $(BUILD)
 
 $(BUILD)/test_power: tests/test_power.c src/zk_power.c | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_power.c src/zk_power.c
+
+$(BUILD)/test_boot: tests/test_boot.c src/zk_boot.c | $(BUILD)
+	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_boot.c src/zk_boot.c
 
 TESTUI_DIR := $(BUILD)/testui
 TESTUI_SRCS := tests/test_ui_text.c $(SRC_CORE) $(SRC_DATA) src/platform.c src/ui.c src/zk_png.c $(GEN_SRCS) $(CJSON) $(LVGL_SRCS)

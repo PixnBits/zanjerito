@@ -43,6 +43,10 @@ const uint8_t *zk_platform_frame(int *w, int *h, int *stride);
 void zk_platform_print_stats(int enabled);
 
 int64_t zk_platform_mono_ms(void);
+/* 1 and writes monotonic ms of the first flush. 0 if none yet. */
+int zk_platform_first_frame_ms(int64_t *out_ms);
+/* Invalidate the active screen and flush now. No-op with no display. */
+void zk_platform_force_refresh(void);
 /* NULL clears the gate. The pointer must outlive the indev reads. */
 void zk_platform_bind_power(zk_power_t *power);
 int zk_platform_fb_is_real(void);

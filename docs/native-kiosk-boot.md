@@ -152,7 +152,20 @@ PY
 - `lightdm` is disabled.
 - `zan-kiosk.service` is enabled (`WantedBy=multi-user.target`).
 - The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`, so the display manager and a login prompt on tty1 do not fight for `/dev/fb0`.
+- The unit is `After=plymouth-quit.service` (and still `After=` `network-online.target` and `zanjerito.service`). It does not `Wants=` or `Requires=` Plymouth. See [Plymouth splash](#plymouth-splash).
 - On each start, `prepare` hides the console cursor, turns console blank off, and prepares the backlight. The client then dims and blanks from the timers below. Copying these files does not change a running panel. Applying them on the board is a separate step.
+
+## Plymouth splash
+
+Without ordering, the kiosk can paint Home and then lose it. On a Pi boot journal (kernel-relative seconds), `zan-kiosk` started at 12.38 s while "Terminate Plymouth Boot Screen" (`plymouth-quit.service` / `plymouth-quit-wait.service`) ran 12.72–12.83 s, and `plymouthd` received quit signals at about 12.77 / 12.81 s. Splash teardown can clear `/dev/fb0` after the kiosk's first frame. Home is static, so nothing repaints. Observed sequence: rainbow, Pi OS boot screen, then a blank panel.
+
+`After=plymouth-quit.service` waits for the unit that sends `plymouth quit`. `After=` on a missing unit is ignored, so a board without Plymouth still starts. There is no `Wants=` or `Requires=` on Plymouth.
+
+Do not `After=plymouth-quit-wait.service`. Its `multi-user.target` ordering differs between images, and this kiosk is `WantedBy=multi-user.target`, so leaving it out rules out any ordering loop. On Raspberry Pi OS Buster (systemd 241), `plymouth-quit.service` is `After=basic.target` and `Before=multi-user.target`, so the chosen `After=` cannot form a cycle. `plymouth-quit-wait` only waits for the quit to finish; ordering after `plymouth-quit.service` is enough.
+
+The client also forces a full-screen redraw once at about 2 s after the first rendered frame, and once more at about 5 s (monotonic clock, two one-shots, never periodic). That covers a quit that still clears `fb0` after the kiosk has started. The paint is skipped while display power is dimmed or off; it does not wake or brighten the panel and does not touch the API.
+
+After a reboot, the panel should show Home. `zanjerito.service` must stay active; this unit does not restart the daemon. Check with `systemctl is-active zan-kiosk`, `systemctl is-active zanjerito`, and `journalctl -u zan-kiosk -b`.
 
 The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
 

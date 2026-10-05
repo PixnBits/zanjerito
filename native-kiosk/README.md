@@ -44,7 +44,7 @@ From `native-kiosk/`:
 | `make fetch-lvgl` | Clone the pinned LVGL tree if `.cache/lvgl` is missing |
 | `make host` | `build/zan-kiosk-host` for this machine |
 | `make arm` | Static 32-bit ARM hard-float binary `build/zan-kiosk-arm` via Docker (`debian:bookworm-slim`, `gcc-arm-linux-gnueabihf`, `-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard -static`) |
-| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`) |
+| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`, `test_boot`) |
 | `make e2e` | Build the host binary, then `tests/e2e.sh` |
 | `make check` | `test`, then `e2e`, then `deploy-check` |
 | `make deploy-check` | `tests/deploy_test.sh` (unit, installer, wrapper). No LVGL build |
@@ -136,6 +136,7 @@ Example against a daemon already listening on localhost (nothing in this tree st
 | `test_http` | GET and POST to a localhost stub; read-only stop does not connect; cancel, pause, and resume paths; timeout; oversized body; non-`http` URL rejected |
 | `test_data` | `/api/kiosk` poll and `/api/schedules` slow poll; 404 => NEEDS_UPDATE and no `/api/status`; stale after the stub stops; fixture load opens no socket; writes POST and repoll kiosk |
 | `test_stop_latency` | STOP is posted while a GET is in flight; a repeated STOP or resume is one POST; identical pause bodies collapse; a different pause is still sent; the queue still overflows; read-only sends no POST |
+| `test_boot` | Forced redraw after first frame is not due before 2 s, due once at 2 s, due once more at 5 s, never again; unsigned elapsed still works across a clock wrap |
 
 `ZK_POLL_MS_STATUS` overrides the 2 second `/api/kiosk` poll inside those data tests. It is not a user-facing flag.
 
@@ -247,7 +248,7 @@ sudo reboot
 # or, without a reboot: sudo native-kiosk/deploy/install-kiosk.sh --switch --now
 ```
 
-`--switch` sets the default target to `multi-user.target`, disables `lightdm`, and enables `zan-kiosk`. `--now` also stops `lightdm` and starts the kiosk. The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`.
+`--switch` sets the default target to `multi-user.target`, disables `lightdm`, and enables `zan-kiosk`. `--now` also stops `lightdm` and starts the kiosk. The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`. It is `After=plymouth-quit.service` (and still `network-online.target` and `zanjerito.service`) so splash teardown cannot clear `/dev/fb0` under the first frame. It does not `Wants=` or `Requires=` Plymouth, and it does not `After=plymouth-quit-wait.service` (that wait unit can be `After=multi-user.target`, which would loop with `WantedBy=multi-user.target`). The client also redraws the screen once at about 2 s after the first frame and once more at about 5 s; those paints are skipped while dimmed or off.
 
 It does not change the daemon, `config.json`, `zanjerito.env`, cron, or boot `config.txt` / `cmdline.txt`. It does not stop or restart `zanjerito.service`.
 

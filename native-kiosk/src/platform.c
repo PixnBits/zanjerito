@@ -56,6 +56,7 @@ static double g_proc_mono;
 static int g_got_first;
 static double g_first_ms;
 static double g_first_main_ms;
+static int64_t g_first_mono_ms;
 static uint64_t g_frames;
 
 static double *g_render;
@@ -374,6 +375,7 @@ static void on_flush(lv_event_t *e)
     if (!g_got_first) {
         double now = zk_platform_mono();
         g_got_first = 1;
+        g_first_mono_ms = zk_platform_mono_ms();
         g_first_ms = (now - g_proc_mono) * 1000.0;
         if (g_first_ms < 0) {
             g_first_ms = 0;
@@ -840,18 +842,37 @@ const uint8_t *zk_platform_frame(int *w, int *h, int *stride)
     return g_snap;
 }
 
-int zk_snapshot_png(const char *file)
+int zk_platform_first_frame_ms(int64_t *out_ms)
+{
+    if (!g_got_first) {
+        return 0;
+    }
+    if (out_ms) {
+        *out_ms = g_first_mono_ms;
+    }
+    return 1;
+}
+
+void zk_platform_force_refresh(void)
 {
     lv_obj_t *scr;
 
-    if (!g_disp || !file || !file[0]) {
-        return -1;
+    if (!g_disp) {
+        return;
     }
     scr = lv_screen_active();
     if (scr) {
         lv_obj_invalidate(scr);
     }
     lv_refr_now(g_disp);
+}
+
+int zk_snapshot_png(const char *file)
+{
+    if (!g_disp || !file || !file[0]) {
+        return -1;
+    }
+    zk_platform_force_refresh();
     if (!g_have_frame) {
         fprintf(stderr, "shot: %s: no frame\n", file);
         return -1;

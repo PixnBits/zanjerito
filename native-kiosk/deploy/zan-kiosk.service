@@ -2,7 +2,14 @@
 Description=Zanjerito native framebuffer kiosk
 # Soft dependency only. The client already shows "Can't reach the controller"
 # when the API is down, so this unit does not Requires= zanjerito.service.
-After=network-online.target zanjerito.service
+# After=plymouth-quit.service so splash teardown cannot clear fb0 under the
+# first kiosk frame. After= on a missing unit is ignored; no Wants=/Requires=.
+# Not After=plymouth-quit-wait.service: it only waits for the quit to finish,
+# and its multi-user.target ordering differs between images, so leaving it out
+# rules out any loop with WantedBy=multi-user.target. On Raspberry Pi OS Buster
+# (systemd 241) plymouth-quit.service is After=basic.target and
+# Before=multi-user.target, so this After= cannot form a cycle.
+After=plymouth-quit.service network-online.target zanjerito.service
 Wants=network-online.target
 # The display manager and the tty1 login prompt both take the framebuffer.
 Conflicts=lightdm.service getty@tty1.service
