@@ -347,3 +347,111 @@ func TestLoopIdenticalFetchFailuresLogOnce(t *testing.T) {
 		t.Fatalf("leak %s", logs)
 	}
 }
+
+func TestFetchRetryDelay(t *testing.T) {
+	min := time.Minute
+	cap30 := 30 * time.Minute
+	cases := []struct {
+		name     string
+		fails    int
+		interval time.Duration
+		want     time.Duration
+	}{
+		{"30m/0", 0, 30 * min, 30 * min},
+		{"30m/1", 1, 30 * min, min},
+		{"30m/2", 2, 30 * min, 2 * min},
+		{"30m/3", 3, 30 * min, 4 * min},
+		{"30m/4", 4, 30 * min, 8 * min},
+		{"30m/5", 5, 30 * min, 16 * min},
+		{"30m/6", 6, 30 * min, cap30},
+		{"30m/7", 7, 30 * min, cap30},
+
+		{"2h/0", 0, 2 * time.Hour, 2 * time.Hour},
+		{"2h/1", 1, 2 * time.Hour, min},
+		{"2h/2", 2, 2 * time.Hour, 2 * min},
+		{"2h/3", 3, 2 * time.Hour, 4 * min},
+		{"2h/4", 4, 2 * time.Hour, 8 * min},
+		{"2h/5", 5, 2 * time.Hour, 16 * min},
+		{"2h/6", 6, 2 * time.Hour, cap30},
+		{"2h/7", 7, 2 * time.Hour, cap30},
+
+		{"5m/0", 0, 5 * min, 5 * min},
+		{"5m/1", 1, 5 * min, min},
+		{"5m/2", 2, 5 * min, 2 * min},
+		{"5m/3", 3, 5 * min, 4 * min},
+		{"5m/4", 4, 5 * min, 5 * min},
+
+		{"20s/0", 0, 20 * time.Second, 20 * time.Second},
+		{"20s/1", 1, 20 * time.Second, 20 * time.Second},
+		{"20s/2", 2, 20 * time.Second, 20 * time.Second},
+		{"20s/3", 3, 20 * time.Second, 20 * time.Second},
+
+		{"1m/0", 0, min, min},
+		{"1m/1", 1, min, min},
+		{"1m/2", 2, min, min},
+		{"1m/3", 3, min, min},
+
+		{"30m/40", 40, 30 * min, cap30},
+		{"30m/1000", 1000, 30 * min, cap30},
+		{"2h/40", 40, 2 * time.Hour, cap30},
+		{"2h/1000", 1000, 2 * time.Hour, cap30},
+		{"5m/40", 40, 5 * min, 5 * min},
+		{"5m/1000", 1000, 5 * min, 5 * min},
+		{"20s/1000", 1000, 20 * time.Second, 20 * time.Second},
+
+		{"neg/30m", -1, 30 * min, 30 * min},
+		{"neg/2h", -1, 2 * time.Hour, 2 * time.Hour},
+		{"neg/5m", -1, 5 * min, 5 * min},
+		{"neg/20s", -1, 20 * time.Second, 20 * time.Second},
+		{"neg/1m", -1, min, min},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fetchRetryDelay(tc.fails, tc.interval)
+			if got != tc.want {
+				t.Fatalf("fetchRetryDelay(%d, %s)=%s want %s", tc.fails, tc.interval, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoopPollTwoHoursCapsRetryAt30Minutes(t *testing.T) {
+	testLoopRetryCadence(t, 120, 2*time.Hour, []time.Duration{
+		time.Minute,
+		2 * time.Minute,
+		4 * time.Minute,
+		8 * time.Minute,
+		16 * time.Minute,
+		30 * time.Minute,
+		30 * time.Minute,
+	})
+}
+
+func TestLoopPollSecondsUnderOneMinuteRetriesAtInterval(t *testing.T) {
+	p, fake, _, _ := newTestPoller(t)
+	p.Cfg.PollSeconds = 20
+	if got := p.Cfg.PollInterval(); got != 20*time.Second {
+		t.Fatalf("PollInterval %s want 20s", got)
+	}
+	fake.Set(nil, errString("network is unreachable"))
+	ft := newFakeAfter()
+	p.after = ft.After
+	startLoop(t, p)
+
+	const n = 3
+	waits := ft.waitN(t, 1)
+	for i := 1; i < n; i++ {
+		ft.fire(t)
+		waits = ft.waitN(t, i+1)
+	}
+	assertWaitPrefix(t, waits, []time.Duration{
+		20 * time.Second,
+		20 * time.Second,
+		20 * time.Second,
+	})
+	for i, got := range waits {
+		if got == time.Minute {
+			t.Fatalf("wait[%d]=1m, short interval must not retry at fetchRetryMin (all %v)", i, waits)
+		}
+	}
+}
