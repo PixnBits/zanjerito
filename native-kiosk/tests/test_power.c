@@ -1202,6 +1202,197 @@ static void test_paused_with_blockers(void)
     }
 }
 
+static void bl_mkdirp(const char *path)
+{
+    TCHECK(mkdir(path, 0755) == 0, "mkdir %s: %s", path, strerror(errno));
+}
+
+static void bl_put_at(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "w");
+
+    TCHECK(f != NULL, "open %s: %s", path, strerror(errno));
+    if (f) {
+        fputs(text, f);
+        fclose(f);
+    }
+}
+
+static void bl_dev(const char *root, const char *name, int with_br, int with_bl)
+{
+    char path[256];
+
+    snprintf(path, sizeof path, "%s/%s", root, name);
+    bl_mkdirp(path);
+    if (with_br) {
+        snprintf(path, sizeof path, "%s/%s/brightness", root, name);
+        bl_put_at(path, "10\n");
+    }
+    if (with_bl) {
+        snprintf(path, sizeof path, "%s/%s/bl_power", root, name);
+        bl_put_at(path, "0\n");
+    }
+}
+
+static void test_resolve_backlight(void)
+{
+    char root[160];
+    char out[ZK_POWER_DIR_MAX];
+    char expect[256];
+    char full[256];
+    char longn[400];
+    int src;
+
+    snprintf(root, sizeof root, "%s/blroot", g_dir);
+    bl_mkdirp(root);
+
+    /* Override by name wins over rpi_backlight preference. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/ovname", root);
+        bl_mkdirp(r);
+        bl_dev(r, "rpi_backlight", 1, 1);
+        bl_dev(r, "10-0045", 1, 1);
+        src = zk_power_resolve_backlight(r, "10-0045", out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_OVERRIDE);
+        snprintf(expect, sizeof expect, "%s/10-0045", r);
+        TEQ_S(out, expect);
+    }
+
+    /* Override by full path wins. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/ovpath", root);
+        bl_mkdirp(r);
+        bl_dev(r, "rpi_backlight", 1, 1);
+        bl_dev(r, "10-0045", 1, 1);
+        snprintf(full, sizeof full, "%s/10-0045", r);
+        src = zk_power_resolve_backlight(r, full, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_OVERRIDE);
+        TEQ_S(out, full);
+    }
+
+    /* Invalid override (missing, ".", "..", too long) falls back to auto. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/ovbad", root);
+        bl_mkdirp(r);
+        bl_dev(r, "10-0045", 1, 1);
+        snprintf(expect, sizeof expect, "%s/10-0045", r);
+
+        cap_on();
+        src = zk_power_resolve_backlight(r, "no-such", out, sizeof out);
+        cap_off();
+        TEQ_I(src, ZK_POWER_BL_10_0045);
+        TEQ_S(out, expect);
+        TCHECK(strstr(g_err, "no-such") != NULL, "invalid override names the value");
+
+        cap_on();
+        src = zk_power_resolve_backlight(r, ".", out, sizeof out);
+        cap_off();
+        TEQ_I(src, ZK_POWER_BL_10_0045);
+        TCHECK(strstr(g_err, "ZAN_BACKLIGHT: invalid") != NULL, "dot name is invalid");
+
+        cap_on();
+        src = zk_power_resolve_backlight(r, "..", out, sizeof out);
+        cap_off();
+        TEQ_I(src, ZK_POWER_BL_10_0045);
+
+        memset(longn, 'a', sizeof longn - 1);
+        longn[sizeof longn - 1] = '\0';
+        cap_on();
+        src = zk_power_resolve_backlight(r, longn, out, sizeof out);
+        cap_off();
+        TEQ_I(src, ZK_POWER_BL_10_0045);
+        TCHECK(strstr(g_err, "falling back") != NULL, "too-long override falls back");
+    }
+
+    /* rpi_backlight preferred when both rpi_backlight and 10-0045 exist. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/prefer", root);
+        bl_mkdirp(r);
+        bl_dev(r, "10-0045", 1, 1);
+        bl_dev(r, "rpi_backlight", 1, 1);
+        src = zk_power_resolve_backlight(r, NULL, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_RPI);
+        snprintf(expect, sizeof expect, "%s/rpi_backlight", r);
+        TEQ_S(out, expect);
+    }
+
+    /* 10-0045 found when it is the only preferred device. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/dsi", root);
+        bl_mkdirp(r);
+        bl_dev(r, "10-0045", 0, 0);
+        bl_dev(r, "aaa", 1, 1);
+        src = zk_power_resolve_backlight(r, NULL, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_10_0045);
+        snprintf(expect, sizeof expect, "%s/10-0045", r);
+        TEQ_S(out, expect);
+    }
+
+    /* Sorted scan picks the first directory with writable brightness/bl_power. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/scan", root);
+        bl_mkdirp(r);
+        bl_dev(r, "aaa", 0, 0);
+        bl_dev(r, "mmm", 1, 0);
+        bl_dev(r, "zzz", 1, 1);
+        src = zk_power_resolve_backlight(r, NULL, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_SCAN);
+        snprintf(expect, sizeof expect, "%s/mmm", r);
+        TEQ_S(out, expect);
+    }
+
+    /* Scan skips a file that is not a directory. */
+    {
+        char r[180];
+        char file[200];
+        snprintf(r, sizeof r, "%s/scanfile", root);
+        bl_mkdirp(r);
+        snprintf(file, sizeof file, "%s/aaa", r);
+        bl_put_at(file, "not a dir\n");
+        bl_dev(r, "bbb", 0, 1);
+        src = zk_power_resolve_backlight(r, NULL, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_SCAN);
+        snprintf(expect, sizeof expect, "%s/bbb", r);
+        TEQ_S(out, expect);
+    }
+
+    /* Empty root: none. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/empty", root);
+        bl_mkdirp(r);
+        out[0] = 'x';
+        src = zk_power_resolve_backlight(r, NULL, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_NONE);
+        TEQ_S(out, "");
+    }
+
+    /* Missing root: none. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/missing-root", root);
+        src = zk_power_resolve_backlight(r, NULL, out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_NONE);
+        TEQ_S(out, "");
+    }
+
+    /* Empty override string is treated as unset. */
+    {
+        char r[180];
+        snprintf(r, sizeof r, "%s/emptyov", root);
+        bl_mkdirp(r);
+        bl_dev(r, "rpi_backlight", 1, 1);
+        src = zk_power_resolve_backlight(r, "", out, sizeof out);
+        TEQ_I(src, ZK_POWER_BL_RPI);
+    }
+}
+
 int main(void)
 {
     char tmpl[] = "/tmp/zkpowXXXXXX";
@@ -1231,6 +1422,7 @@ int main(void)
     test_disabled_does_not_touch();
     test_contact_latch();
     test_paused_with_blockers();
+    test_resolve_backlight();
     zk_power_init(NULL, NULL);
     zk_power_tick(NULL, 0, NULL);
     TEQ_I(zk_power_touch_event(NULL, 0, 1, 1), ZK_POWER_PASS);

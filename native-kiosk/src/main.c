@@ -87,7 +87,7 @@ static void usage(FILE *fp, const char *argv0)
             "  --dim-after SEC      idle seconds before dim (default 120; 0 disables dim and off)\n"
             "  --off-after SEC      idle seconds from last touch before off (default 600; 0 disables off)\n"
             "  --dim-level N        dim brightness 0-255 (default 51; never brighter than startup)\n"
-            "  --backlight DIR      sysfs backlight directory\n"
+            "  --backlight DIR      sysfs backlight directory (default: auto-detect)\n"
             "  --stats              print one JSON stats line on stderr\n"
             "  --help               show this help\n"
             "Display power runs only with --fb, unless ZK_POWER_FORCE=1 (test-only).\n"
@@ -137,21 +137,6 @@ static int take_env_level(const char *name, int *out)
         return -1;
     }
     return rc;
-}
-
-static int take_env_backlight(const char **out)
-{
-    const char *s = getenv("ZAN_BACKLIGHT");
-
-    if (!s || !s[0]) {
-        return 0;
-    }
-    if (strlen(s) >= ZK_POWER_DIR_MAX) {
-        fprintf(stderr, "ZAN_BACKLIGHT: invalid\n");
-        return -1;
-    }
-    *out = s;
-    return 1;
 }
 
 static int dir_ok(const char *path)
@@ -413,6 +398,7 @@ int main(int argc, char **argv)
     int want_power = 0;
     int env_rc;
     const char *backlight = NULL;
+    char resolved_bl[ZK_POWER_DIR_MAX];
     const char *force;
     int rc = 0;
     int data_on = 0;
@@ -543,11 +529,23 @@ int main(int argc, char **argv)
         }
     }
     if (!saw_bl) {
-        env_rc = take_env_backlight(&backlight);
-        if (env_rc < 0) {
-            usage(stderr, argv[0]);
-            return 2;
+        const char *sysroot;
+        const char *override;
+        int src;
+
+        /* ZAN_SYSFS_BACKLIGHT_ROOT is a TEST-ONLY hook replacing
+         * /sys/class/backlight. Production leaves it unset. */
+        sysroot = getenv("ZAN_SYSFS_BACKLIGHT_ROOT");
+        override = getenv("ZAN_BACKLIGHT");
+        src = zk_power_resolve_backlight(sysroot, override, resolved_bl, sizeof resolved_bl);
+        if (src == ZK_POWER_BL_NONE) {
+            fprintf(stderr, "no backlight device found\n");
+            backlight = ZK_POWER_DEFAULT_BACKLIGHT;
+        } else {
+            backlight = resolved_bl;
         }
+        fprintf(stderr, "backlight %s (%s)\n", backlight,
+                src == ZK_POWER_BL_OVERRIDE ? "ZAN_BACKLIGHT" : "auto");
     }
     if (!saw_dim) {
         dim_after = ZK_POWER_DEFAULT_DIM_AFTER_SEC;

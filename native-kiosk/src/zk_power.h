@@ -1,6 +1,7 @@
 #ifndef ZK_POWER_H
 #define ZK_POWER_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* Display power for the framebuffer kiosk.
@@ -43,9 +44,19 @@
 #define ZK_POWER_DEFAULT_OFF_AFTER_SEC 600
 #define ZK_POWER_DEFAULT_DIM_LEVEL 51
 #define ZK_POWER_DEFAULT_BACKLIGHT "/sys/class/backlight/rpi_backlight"
+#define ZK_POWER_SYSFS_BACKLIGHT_ROOT "/sys/class/backlight"
 #define ZK_POWER_WAKE_GUARD_MS 300
 #define ZK_POWER_DIR_MAX 384
 #define ZK_POWER_TRACE_CAP 32
+
+/* How zk_power_resolve_backlight chose the directory. */
+enum {
+    ZK_POWER_BL_NONE = 0,
+    ZK_POWER_BL_OVERRIDE,
+    ZK_POWER_BL_RPI,
+    ZK_POWER_BL_10_0045,
+    ZK_POWER_BL_SCAN
+};
 
 typedef enum {
     ZK_POWER_ACTIVE = 0,
@@ -120,6 +131,24 @@ typedef struct zk_power {
     zk_power_trace_t trace[ZK_POWER_TRACE_CAP];
     int trace_n;
 } zk_power_t;
+
+/* Pick a sysfs backlight directory. Does not read the environment.
+ * root NULL/empty means ZK_POWER_SYSFS_BACKLIGHT_ROOT.
+ * override is a device name under root, or a full directory path if it
+ * contains '/'. Names that are "." or contain ".." are rejected.
+ * A usable override (existing directory, fits in out) wins. Invalid,
+ * missing, or too-long override logs one stderr line naming the value
+ * and falls back to auto-detect.
+ * Auto-detect: rpi_backlight if it is a directory; else 10-0045 if it is
+ * a directory; else the first directory in strcmp order with a writable
+ * bl_power or brightness. NONE leaves out empty; the caller may use
+ * ZK_POWER_DEFAULT_BACKLIGHT so absent-device behaviour is unchanged.
+ *
+ * main.c passes getenv("ZAN_SYSFS_BACKLIGHT_ROOT") as root (TEST-ONLY;
+ * production leaves that unset) and getenv("ZAN_BACKLIGHT") as override.
+ */
+int zk_power_resolve_backlight(const char *root, const char *override,
+                               char *out, size_t outsz);
 
 void zk_power_init(zk_power_t *p, const zk_power_config_t *cfg);
 void zk_power_tick(zk_power_t *p, int64_t now_ms, const zk_power_inputs_t *in);
