@@ -106,26 +106,30 @@ func main() {
 		log.Printf("soil: disabled: %v", err)
 	}
 
+	gate := &shutdownGate{}
+	var (
+		httpSrv *http.Server
+		apiDone <-chan struct{}
+	)
 	if *listen != "" {
-		srv := api.New(eng, *configPath)
-		srv.History = hist
-		srv.NoteRain(rainPoller, rainErr)
-		srv.NoteSoil(soilPoller, err)
-		httpSrv := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second}
-		go func() {
-			log.Printf("api listening on %s (LAN trust, D7)", *listen)
-			if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Printf("api: %v", err)
-			}
-		}()
+		apiSrv := api.New(eng, *configPath)
+		apiSrv.History = hist
+		apiSrv.NoteRain(rainPoller, rainErr)
+		apiSrv.NoteSoil(soilPoller, err)
+		httpSrv = newAPIServer(*listen, gate.Wrap(apiSrv))
+		apiDone = startAPI(ctx, httpSrv, listenTCP, retryOpts{}, log.Printf)
 		defer func() { _ = httpSrv.Close() }()
 	}
 
 	<-ctx.Done()
 	log.Printf("shutdown: Stop + Close")
-	_ = eng.Stop()
-	if hist != nil {
-		hist.Close()
-	}
+	// Gate, then relays, then history, then the HTTP drain. Shutdown waits on
+	// SSE and half-read headers; the gate must already be down so a body that
+	// finishes during that wait cannot start a run.
+	gracefulShutdown(gate, eng.Stop, func() {
+		if hist != nil {
+			hist.Close()
+		}
+	}, httpSrv, apiDone, apiShutdownTimeout)
 	fmt.Fprintln(os.Stderr, "zanjerito stopped")
 }

@@ -31,6 +31,8 @@ sudo systemctl enable --now zanjerito
 # phone: http://<pi-lan>:8080/   (set LISTEN in /opt/zanjerito/zanjerito.env)
 ```
 
+If the LAN address is not assigned yet at boot (for example `LISTEN=192.0.2.10:8080` while wlan0 is still coming up), the API retries the bind in the background (backoff 1s, capped at 30s; logs `address not yet available`) while schedules and valves keep running. The kiosk/phone can connect once the address is up.
+
 `systemctl stop` sends SIGTERM; the binary `engine.Stop()`s (all-off) before exit. With `DRIVER=gpiocdev`, that de-energizes valves (inactive-on-release).
 
 ## Developing
