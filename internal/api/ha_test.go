@@ -266,6 +266,87 @@ func TestHAUnknownLastRun(t *testing.T) {
 	}
 }
 
+// TestHALastRunAllowlist stores every label haLastRun passes to haToken.
+// Dropping one from that allowlist reports "unknown" and fails the case.
+func TestHALastRunAllowlist(t *testing.T) {
+	kinds := []string{engine.KindSchedule, engine.KindManual}
+	outcomes := []string{
+		engine.OutcomeCompleted,
+		engine.OutcomeStopped,
+		engine.OutcomeSkipped,
+		engine.OutcomeRefused,
+		engine.OutcomeError,
+	}
+	for _, kind := range kinds {
+		for _, outcome := range outcomes {
+			t.Run(kind+"/"+outcome, func(t *testing.T) {
+				s := haServer(t)
+				haAppendLabel(t, s, kind, outcome)
+				assertHALastRun(t, getHA(t, s), kind, outcome)
+			})
+		}
+	}
+}
+
+func TestHAEmptyLastRunUnknown(t *testing.T) {
+	cases := []struct {
+		name, kind, outcome, wantKind, wantOutcome string
+	}{
+		{"empty kind", "", engine.OutcomeCompleted, "unknown", engine.OutcomeCompleted},
+		{"empty outcome", engine.KindManual, "", engine.KindManual, "unknown"},
+		{"both empty", "", "", "unknown", "unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := haServer(t)
+			haAppendLabel(t, s, tc.kind, tc.outcome)
+			assertHALastRun(t, getHA(t, s), tc.wantKind, tc.wantOutcome)
+		})
+	}
+	t.Run("no history", func(t *testing.T) {
+		body := getHA(t, haServer(t))
+		var p haBody
+		if err := json.Unmarshal(body, &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.LastRunKind != nil || p.LastRunOut != nil || p.LastRunStart != nil || p.LastRunEnd != nil {
+			t.Fatalf("no history should stay null %s", body)
+		}
+	})
+}
+
+func haAppendLabel(t *testing.T, s *Server, kind, outcome string) {
+	t.Helper()
+	fixed := haClock(t)
+	hl, err := history.Open(filepath.Join(filepath.Dir(s.Path), "history.json"), func() time.Time { return fixed })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(hl.Close)
+	start := time.Date(2000, 1, 2, 5, 0, 0, 0, fixed.Location())
+	hl.Append(engine.RunRecord{
+		Kind:    kind,
+		Outcome: outcome,
+		Start:   start,
+		End:     start.Add(time.Hour),
+	})
+	s.History = hl
+}
+
+func assertHALastRun(t *testing.T, body []byte, kind, outcome string) {
+	t.Helper()
+	var p haBody
+	if err := json.Unmarshal(body, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.LastRunKind == nil || *p.LastRunKind != kind || p.LastRunOut == nil || *p.LastRunOut != outcome {
+		t.Fatalf("kind/outcome %+v %+v want %q %q body %s", p.LastRunKind, p.LastRunOut, kind, outcome, body)
+	}
+	if p.LastRunStart == nil || p.LastRunEnd == nil {
+		t.Fatalf("history times nulled %s", body)
+	}
+}
+
 func TestHANoLeak(t *testing.T) {
 	forbidden := []string{
 		haTitle1, haTitle2, haID1, haID2, haSchedID, haSchedName, haPowerTitle,

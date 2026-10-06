@@ -21,7 +21,7 @@ endif
 .PHONY: build test install
 
 build:
-	CGO_ENABLED=$(CGO) GOOS=linux GOARCH=$(GOARCH) $(if $(GOARM),GOARM=$(GOARM),) $(GO) build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/zanjerito
+	CGO_ENABLED=$(CGO) GOOS=linux GOARCH=$(GOARCH) $(if $(GOARM),GOARM=$(GOARM),) $(GO) build -trimpath -buildvcs=false -ldflags='-s -w' -o $(BIN) ./cmd/zanjerito
 
 test:
 	$(GO) test ./... -race
