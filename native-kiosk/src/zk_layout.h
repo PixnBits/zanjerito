@@ -90,7 +90,6 @@ typedef struct {
     zk_rect modal;
     zk_rect modal_ok;
     zk_rect modal_cancel;
-    zk_rect step_strip;
     zk_rect sched_header;
     zk_rect sched_rows[5];
     int n_sched_rows;
