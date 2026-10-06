@@ -1,7 +1,11 @@
 #include "zk_fb.h"
 #include "zk_test.h"
 
+#include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
 static zk_fb_geom_t geom(unsigned w, unsigned h, unsigned bpp, unsigned line, unsigned ro,
@@ -206,11 +210,15 @@ static void test_probe(void)
     TEQ_I((int)g.smem_len, (int)n16);
     TEQ_I(zk_fb_pick_format(&g, err, sizeof err), ZK_FB_FMT_RGB565);
 
-    /* The string is a device path. The fd is still the temp file, so this
-     * does not open a real framebuffer. The fake must not apply. */
-    err[0] = '\0';
-    TCHECK(zk_fb_probe(fd, "/dev/fb0", &g, err, sizeof err) != 0, "dev path used fake");
-    TCHECK(err[0] != '\0', "empty dev err");
+    /* A real fbdev node never uses the fake. The fd stays the temp file;
+     * the path is only stat'd. Hosts without that node skip the guard. */
+    if (zk_fb_path_is_fbdev("/dev/fb0")) {
+        err[0] = '\0';
+        TCHECK(zk_fb_probe(fd, "/dev/fb0", &g, err, sizeof err) != 0, "fbdev path used fake");
+        TCHECK(strstr(err, "FBIOGET") != NULL, "err \"%s\"", err);
+    } else {
+        printf("SKIP: /dev/fb0 is not a char device with major 29; probe guard not exercised\n");
+    }
     close(fd);
     unlink(path);
     fd = -1;
@@ -260,11 +268,153 @@ static void test_probe(void)
     unsetenv("ZK_FB_FAKE");
 }
 
+static void test_stride(void)
+{
+    char path[64];
+    char err[256];
+    zk_fb_geom_t g;
+    int fd = -1;
+    size_t stride = 3328;
+    size_t full = stride * 480;
+    size_t tight = (size_t)3200 * 480;
+
+    TCHECK(make_file(path, sizeof path, full, &fd) == 0, "temp stride");
+    TCHECK(setenv("ZK_FB_FAKE", "800x480x32x3328", 1) == 0, "setenv stride");
+    err[0] = '\0';
+    TCHECK(zk_fb_probe(fd, path, &g, err, sizeof err) == 0, "probe stride: %s", err);
+    TEQ_I(g.xres, 800);
+    TEQ_I(g.yres, 480);
+    TEQ_I(g.bpp, 32);
+    TEQ_I(g.line_length, 3328);
+    TEQ_I(g.xoffset, 0);
+    TEQ_I(g.yoffset, 0);
+    TEQ_I((int)g.smem_len, (int)full);
+    TEQ_I(zk_fb_pick_format(&g, err, sizeof err), ZK_FB_FMT_XRGB8888);
+    close(fd);
+    unlink(path);
+    fd = -1;
+
+    TCHECK(make_file(path, sizeof path, full, &fd) == 0, "temp small stride");
+    TCHECK(setenv("ZK_FB_FAKE", "800x480x32x3199", 1) == 0, "setenv small stride");
+    err[0] = '\0';
+    TCHECK(zk_fb_probe(fd, path, &g, err, sizeof err) != 0, "small stride accepted");
+    TCHECK(strstr(err, "WxHxBPP[xSTRIDE]") != NULL, "err \"%s\"", err);
+    close(fd);
+    unlink(path);
+    fd = -1;
+
+    TCHECK(make_file(path, sizeof path, tight, &fd) == 0, "temp stride short");
+    TCHECK(setenv("ZK_FB_FAKE", "800x480x32x3328", 1) == 0, "setenv stride short");
+    err[0] = '\0';
+    TCHECK(zk_fb_probe(fd, path, &g, err, sizeof err) != 0, "short stride file accepted");
+    TCHECK(strstr(err, "short") != NULL, "err \"%s\"", err);
+    close(fd);
+    unlink(path);
+
+    unsetenv("ZK_FB_FAKE");
+}
+
+static void test_dev(void)
+{
+    char dir[] = "/tmp/zkfbdevXXXXXX";
+    char fb0[96];
+    char linkpath[96];
+    char tofb[96];
+    int fd;
+    struct stat st;
+
+    TCHECK(zk_fb_mode_is_fbdev((mode_t)(S_IFCHR | 0660), makedev(29, 0)), "fb0 mode");
+    TCHECK(zk_fb_mode_is_fbdev((mode_t)(S_IFCHR | 0660), makedev(29, 1)), "fb1 mode");
+    TCHECK(!zk_fb_mode_is_fbdev((mode_t)(S_IFCHR | 0660), makedev(1, 3)), "null mode");
+    TCHECK(!zk_fb_mode_is_fbdev((mode_t)(S_IFREG | 0644), makedev(29, 0)), "reg mode");
+    TCHECK(!zk_fb_mode_is_fbdev((mode_t)(S_IFBLK | 0660), makedev(29, 0)), "blk mode");
+
+    if (mkdtemp(dir) == NULL) {
+        TCHECK(0, "mkdtemp");
+        return;
+    }
+    snprintf(fb0, sizeof fb0, "%s/fb0", dir);
+    snprintf(linkpath, sizeof linkpath, "%s/link", dir);
+    snprintf(tofb, sizeof tofb, "%s/to-fb0", dir);
+    fd = open(fb0, O_CREAT | O_RDWR | O_CLOEXEC, 0644);
+    TCHECK(fd >= 0, "create named fb0");
+    if (fd >= 0) {
+        close(fd);
+    }
+    TCHECK(!zk_fb_path_is_fbdev(fb0), "regular file named fb0");
+    TCHECK(symlink(fb0, linkpath) == 0, "symlink to regular file");
+    TCHECK(!zk_fb_path_is_fbdev(linkpath), "symlink to regular file is not fbdev");
+    TCHECK(!zk_fb_path_is_fbdev("/dev/null"), "/dev/null");
+
+    if (symlink("/dev/fb0", tofb) != 0) {
+        printf("SKIP: could not symlink /dev/fb0\n");
+    } else if (stat("/dev/fb0", &st) != 0 || !zk_fb_mode_is_fbdev(st.st_mode, st.st_rdev)) {
+        printf("SKIP: /dev/fb0 is not a char device with major 29\n");
+    } else {
+        TCHECK(zk_fb_path_is_fbdev(tofb), "symlink to /dev/fb0");
+    }
+
+    unlink(tofb);
+    unlink(linkpath);
+    unlink(fb0);
+    rmdir(dir);
+}
+
+static void test_offset(void)
+{
+    zk_fb_geom_t g;
+    char err[320];
+    uint8_t src[64];
+    uint8_t rgb[4 * 2 * 3];
+    size_t nonblack = 99;
+    size_t origin;
+    size_t smem32 = (size_t)3200 * 480;
+
+    g = geom(4, 2, 16, 16, 11, 5, 5, 6, 0, 5, 32);
+    TEQ_I((int)zk_fb_pixel_offset(&g, 0, 0), 0);
+    TEQ_I((int)zk_fb_pixel_offset(&g, 1, 0), 2);
+    TEQ_I((int)zk_fb_pixel_offset(&g, 0, 1), 16);
+
+    g.xoffset = 3;
+    g.yoffset = 2;
+    g.smem_len = 64;
+    TEQ_I(zk_fb_pick_format(&g, err, sizeof err), ZK_FB_FMT_RGB565);
+    origin = zk_fb_pixel_offset(&g, 0, 0);
+    TEQ_I((int)origin, 2 * 16 + 3 * 2);
+    TEQ_I((int)zk_fb_pixel_offset(&g, 1, 1), 3 * 16 + 4 * 2);
+
+    memset(src, 0, sizeof src);
+    put565(src, 0xFFFF);
+    put565(src + origin, 0xF800);
+    nonblack = 99;
+    TEQ_I(zk_fb_to_rgb(ZK_FB_FMT_RGB565, &g, src, rgb, &nonblack), 0);
+    TEQ_I((int)nonblack, 1);
+    TEQ_I(rgb[0], 255);
+    TEQ_I(rgb[1], 0);
+    TEQ_I(rgb[2], 0);
+
+    g = geom(800, 480, 32, 3200, 16, 8, 8, 8, 0, 8, smem32);
+    g.xoffset = 1;
+    err[0] = '\0';
+    TEQ_I(zk_fb_pick_format(&g, err, sizeof err), ZK_FB_FMT_NONE);
+    TCHECK(strstr(err, "offset outside the buffer") != NULL, "err \"%s\"", err);
+
+    g = geom(800, 480, 32, 3200, 16, 8, 8, 8, 0, 8, smem32);
+    g.yoffset = 1;
+    err[0] = '\0';
+    TEQ_I(zk_fb_pick_format(&g, err, sizeof err), ZK_FB_FMT_NONE);
+    TCHECK(strstr(err, "offset outside the buffer") != NULL, "y err \"%s\"", err);
+    TEQ_I(zk_fb_to_rgb(ZK_FB_FMT_XRGB8888, &g, src, rgb, &nonblack), -1);
+}
+
 int main(void)
 {
     test_pick();
     test_px();
     test_to_rgb();
     test_probe();
+    test_stride();
+    test_dev();
+    test_offset();
     return zk_test_report("test_fb");
 }

@@ -111,7 +111,7 @@ sudo journalctl -u zan-kiosk -n 50 --no-pager
 
 The daemon's active state should be unchanged from before the switch. This install does not restart it.
 
-The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes it exit 1. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer.
+The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes the running client exit 78. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer. `--fbshot` still exits 1 for an unsupported format.
 
 `--script` `shot:`, `--shot`, and `--shot-all` render the in-app memory display. They do not prove what the panel shows. Deploy verification must use `--fbshot`, which reads the real framebuffer at whatever depth it is. The `pi` user is in group `video`:
 
@@ -129,7 +129,7 @@ Pass: exit 0, and `nonblack` well above zero (more than half the pixels for the 
 - The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`, so the display manager and a login prompt on tty1 do not fight for `/dev/fb0`.
 - On each start, `prepare` hides the console cursor, turns console blank off, and prepares the backlight. The client then dims and blanks from the timers below. Copying these files does not change a running panel. Applying them on the board is a separate step.
 
-The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
+The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `RestartPreventExitStatus=78` stops that loop only when the framebuffer format is unsupported. Exit 1 still restarts, including a framebuffer that is not there yet at boot. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
 
 ## What does not change
 
@@ -154,7 +154,7 @@ Stopping `zan-kiosk` kills the client. Water that is already on keeps running un
 - Write `ESC[9;0]` to `/dev/tty1` to set the console blank timeout to 0 minutes.
 - If `setterm` exists, run `setterm --blank 0 --powerdown 0 --cursor off` with stdin and stdout on `/dev/tty1`. A failure is ignored.
 
-`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
+`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). After exit 78 it writes brightness `0` and `bl_power` `4` instead, so a panel that cannot be drawn does not stay lit. `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
 
 Kernel messages can still land on tty1 and draw over the framebuffer. Optional, this boot only, and not done by the unit:
 

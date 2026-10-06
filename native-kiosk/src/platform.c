@@ -51,8 +51,8 @@ static uint8_t *g_fb_map;
 static size_t g_fb_map_len;
 static unsigned g_fb_xres;
 static unsigned g_fb_yres;
-static unsigned g_fb_line_length;
 static unsigned g_fb_px_bytes;
+static zk_fb_geom_t g_fb_geom;
 static uint32_t g_fb_src_stride;
 static uint8_t *g_fb_draw;
 static int g_power_transitions;
@@ -93,21 +93,6 @@ int64_t zk_platform_mono_ms(void)
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (int64_t)t.tv_sec * 1000 + (int64_t)t.tv_nsec / 1000000;
-}
-
-static int fb_path_real(const char *path)
-{
-    size_t i;
-
-    if (!path || strncmp(path, "/dev/fb", 7) != 0 || path[7] == '\0') {
-        return 0;
-    }
-    for (i = 7; path[i] != '\0'; i++) {
-        if (path[i] < '0' || path[i] > '9') {
-            return 0;
-        }
-    }
-    return 1;
 }
 
 static void gate_pointer(lv_indev_data_t *data, int *down)
@@ -420,7 +405,10 @@ static void fb_release(void)
     g_fb_draw = NULL;
 }
 
-/* Source rows use the draw-buffer stride. The framebuffer row is line_length. */
+/* Assumes LV_DISPLAY_RENDER_MODE_FULL: the draw buffer is a full frame, so
+ * source rows are addressed at the absolute y/x of the area with the
+ * draw-buffer stride. Switching to PARTIAL or DIRECT render mode requires
+ * changing the source offset math. */
 static void fb_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 {
     int32_t x1;
@@ -464,7 +452,7 @@ static void fb_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
     }
     for (y = y1; y <= y2; y++) {
         size_t row_bytes = (size_t)(x2 - x1 + 1) * bpp;
-        size_t dst_off = (size_t)y * g_fb_line_length + (size_t)x1 * bpp;
+        size_t dst_off = zk_fb_pixel_offset(&g_fb_geom, (unsigned)x1, (unsigned)y);
         size_t src_off = (size_t)y * stride + (size_t)x1 * bpp;
         if (dst_off + row_bytes > g_fb_map_len) {
             break;
@@ -728,6 +716,7 @@ static int open_fb(const char *path)
     size_t buf_bytes;
     const char *fmt_name;
     void *map;
+    int real;
 
     g_fb_real = 0;
     g_fb_path[0] = '\0';
@@ -746,7 +735,7 @@ static int open_fb(const char *path)
     if (fmt == ZK_FB_FMT_NONE) {
         fprintf(stderr, "fb: unsupported framebuffer format: %s\n", err);
         close(fd);
-        return -1;
+        return ZK_EXIT_FB_UNSUPPORTED;
     }
     if (geom.xres > 2147483647u || geom.yres > 2147483647u || geom.smem_len == 0) {
         fprintf(stderr, "fb: %s: frame is too large\n", path);
@@ -764,10 +753,11 @@ static int open_fb(const char *path)
     g_fb_map_len = geom.smem_len;
     g_fb_xres = geom.xres;
     g_fb_yres = geom.yres;
-    g_fb_line_length = geom.line_length;
+    g_fb_geom = geom;
     g_fb_px_bytes = fmt == ZK_FB_FMT_RGB565 ? 2u : 4u;
-    /* Best-effort, and only on a real device. A missing blank ioctl is not fatal. */
-    if (fb_path_real(path)) {
+    /* Best-effort, and only on a real fbdev device. A missing blank ioctl is not fatal. */
+    real = zk_fb_path_is_fbdev(path);
+    if (real) {
         (void)ioctl(fd, FBIOBLANK, FB_BLANK_UNBLANK);
     }
     g_disp = lv_display_create((int32_t)geom.xres, (int32_t)geom.yres);
@@ -809,11 +799,16 @@ static int open_fb(const char *path)
     n = strlen(path);
     if (n > 0 && n < sizeof g_fb_path) {
         memcpy(g_fb_path, path, n + 1);
-        g_fb_real = fb_path_real(path);
+        g_fb_real = real;
     }
     fmt_name = fmt == ZK_FB_FMT_RGB565 ? "RGB565" : "XRGB8888";
-    fprintf(stderr, "fb: %s %ux%u %ubpp %s stride %u\n", path, geom.xres, geom.yres, geom.bpp,
-            fmt_name, geom.line_length);
+    if (geom.xoffset != 0 || geom.yoffset != 0) {
+        fprintf(stderr, "fb: %s %ux%u %ubpp %s stride %u xoffset %u yoffset %u\n", path, geom.xres,
+                geom.yres, geom.bpp, fmt_name, geom.line_length, geom.xoffset, geom.yoffset);
+    } else {
+        fprintf(stderr, "fb: %s %ux%u %ubpp %s stride %u\n", path, geom.xres, geom.yres, geom.bpp,
+                fmt_name, geom.line_length);
+    }
     return 0;
 }
 
@@ -834,6 +829,7 @@ int zk_platform_init(const zk_platform_opts_t *opts)
 {
     char detected[64];
     const char *touch = NULL;
+    int fb_rc;
 
     if (!opts) {
         return -1;
@@ -847,8 +843,9 @@ int zk_platform_init(const zk_platform_opts_t *opts)
         return -1;
     }
     if (opts->fb_path) {
-        if (open_fb(opts->fb_path) != 0) {
-            return -1;
+        fb_rc = open_fb(opts->fb_path);
+        if (fb_rc != 0) {
+            return fb_rc;
         }
     } else if (open_memory() != 0) {
         fprintf(stderr, "display: create failed\n");
