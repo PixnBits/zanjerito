@@ -41,13 +41,17 @@ type Server struct {
 	// Empty when the file is missing, disabled, or the estimate is running.
 	// It must not contain a station id, URL, or filesystem path.
 	SoilConfigErr string
-	mux           *http.ServeMux
+	// haNow is the GET /api/ha clock. Nil means time.Now.
+	// Status, kiosk, history, and SSE do not read it.
+	haNow func() time.Time
+	mux   *http.ServeMux
 }
 
 func New(e *engine.Engine, path string) *Server {
 	s := &Server{Eng: e, Path: path, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/kiosk", s.handleKiosk)
+	s.mux.HandleFunc("GET /api/ha", s.handleHA)
 	s.mux.HandleFunc("GET /api/stations", s.handleStationsList)
 	s.mux.HandleFunc("GET /api/stations/{id}", s.handleStationGet)
 	s.mux.HandleFunc("PATCH /api/stations/{id}", s.handleStationPatch)

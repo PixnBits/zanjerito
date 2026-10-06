@@ -17,6 +17,7 @@ I had a name-brand commercial drip irrigation system controller, but first the W
 - [docs/decisions.md](docs/decisions.md) — prioritized decisions
 - [docs/architecture.md](docs/architecture.md) — runtime layers, state machine, API sketch
 - [docs/pin-map.md](docs/pin-map.md) — this hardware’s pin table + example config
+- [docs/home-assistant.md](docs/home-assistant.md) — read-only `GET /api/ha` for Home Assistant
 - [docs/ui-directions.md](docs/ui-directions.md) — UI directions (Direction D selected) + v1 explore
 - [docs/impl-plan.md](docs/impl-plan.md) — scoped PR implementation plan
 
