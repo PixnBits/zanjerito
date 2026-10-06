@@ -43,6 +43,10 @@ ExecStart=/opt/zanjerito/zan-kiosk-run.sh run
 # Panel first, then the VT cursor. Both are root and best effort.
 ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight
 ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor
+# 78 is an unsupported framebuffer (EX_CONFIG). Do not list exit status 1:
+# a missing framebuffer at boot also exits 1 and must keep restarting.
+# 78 stops the loop. reset-backlight turns the panel off for that status.
+RestartPreventExitStatus=78
 Restart=always
 RestartSec=2
 

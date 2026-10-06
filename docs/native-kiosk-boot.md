@@ -66,7 +66,7 @@ Optional:
 | `ZAN_DIM_AFTER_SEC` | Seconds with no touch before dim. Example ships `120`. `0` disables dim and off. |
 | `ZAN_OFF_AFTER_SEC` | Seconds from the last touch before the backlight goes off. Example ships `600`. `0` disables off only. Must be greater than dim, or off stays off. |
 | `ZAN_DIM_LEVEL` | Dim brightness 0–255. Optional. The commented example matches the client default, 51. `0` does not disable the feature. |
-| `ZAN_BACKLIGHT` | Sysfs backlight directory. Optional. Default `/sys/class/backlight/rpi_backlight`. |
+| `ZAN_BACKLIGHT` | Sysfs backlight device name or directory. Optional. Unset: auto-detect `rpi_backlight`, then `10-0045`, then the first writable device. Invalid values fall back to auto-detect. |
 | `BACKLIGHT` | Optional fixed level 0–255 written once at start to that directory only. See below. |
 
 ## 3. Switch on next boot
@@ -111,40 +111,15 @@ sudo journalctl -u zan-kiosk -n 50 --no-pager
 
 The daemon's active state should be unchanged from before the switch. This install does not restart it.
 
-Dump `/dev/fb0` (800×480, 32 bpp, BGRA, stride 3200 = 800×4):
+The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes the running client exit 78. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer. `--fbshot` still exits 1 for an unsupported format.
+
+`--script` `shot:`, `--shot`, and `--shot-all` render the in-app memory display. They do not prove what the panel shows. Deploy verification must use `--fbshot`, which reads the real framebuffer at whatever depth it is. The `pi` user is in group `video`:
 
 ```sh
-dd if=/dev/fb0 of=/tmp/fb0.raw bs=3200 count=480 status=none
-python3 - <<'PY'
-import struct, zlib, pathlib
-w, h, stride = 800, 480, 3200
-raw = pathlib.Path("/tmp/fb0.raw").read_bytes()
-need = h * stride
-if len(raw) < need:
-    raise SystemExit(f"short read: {len(raw)} bytes, want {need}")
-
-def chunk(tag, data):
-    crc = zlib.crc32(tag + data) & 0xFFFFFFFF
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
-
-rows = []
-for y in range(h):
-    row = raw[y * stride:y * stride + w * 4]
-    px = bytearray()
-    for i in range(0, w * 4, 4):
-        b, g, r, a = row[i:i + 4]
-        px += bytes((r, g, b, a))
-    rows.append(b"\x00" + bytes(px))
-ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
-png = b"\x89PNG\r\n\x1a\n"
-png += chunk(b"IHDR", ihdr)
-png += chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
-png += chunk(b"IEND", b"")
-pathlib.Path("/tmp/fb0.png").write_bytes(png)
-PY
+sudo -u pi /opt/zanjerito/zan-kiosk --fb /dev/fb0 --fbshot /tmp/fb0.png
 ```
 
-`/tmp/fb0.png` is the panel. The recipe only reads the framebuffer.
+Pass: exit 0, and `nonblack` well above zero (more than half the pixels for the normal dashboard). Then look at `/tmp/fb0.png`. Exit 3 means the frame was read and every pixel is black.
 
 ## What changes
 
@@ -167,7 +142,7 @@ The client also forces a full-screen redraw once at about 2 s after the first re
 
 After a reboot, the panel should show Home. `zanjerito.service` must stay active; this unit does not restart the daemon. Check with `systemctl is-active zan-kiosk`, `systemctl is-active zanjerito`, and `journalctl -u zan-kiosk -b`.
 
-The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
+The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `RestartPreventExitStatus=78` stops that loop only when the framebuffer format is unsupported. Exit 1 still restarts, including a framebuffer that is not there yet at boot. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
 
 ## What does not change
 
@@ -192,7 +167,7 @@ Stopping `zan-kiosk` kills the client. Water that is already on keeps running un
 - Write `ESC[9;0]` to `/dev/tty1` to set the console blank timeout to 0 minutes.
 - If `setterm` exists, run `setterm --blank 0 --powerdown 0 --cursor off` with stdin and stdout on `/dev/tty1`. A failure is ignored.
 
-`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
+`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). After exit 78 it writes brightness `0` and `bl_power` `4` instead, so a panel that cannot be drawn does not stay lit. `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
 
 Kernel messages can still land on tty1 and draw over the framebuffer. Optional, this boot only, and not done by the unit:
 
@@ -204,9 +179,9 @@ Setting the tty to `KD_GRAPHICS` so printk cannot draw there is a future client 
 
 ## Backlight and display power
 
-The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
+The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. On Bookworm with KMS, the official 7-inch DSI panel backlight appears as `10-0045` instead; `brightness` may already be group `video`, `bl_power` is root-only, and `prepare` handles it. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
 
-- `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT`, or `/sys/class/backlight/rpi_backlight` when that is unset. `ZAN_ROOT` prefixes the directory in tests only.
+- `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT` when that names an existing device, else auto-detect (`rpi_backlight`, then `10-0045`, then the first writable device). `ZAN_ROOT` prefixes the directory in tests only.
 - Write `0` to `<dir>/bl_power` when that file exists (panel on). Configured path only, not every backlight device. Absence or a failed write is logged and ignored.
 - If `BACKLIGHT` is unset, write `max_brightness` into `brightness` (the raw panel max, not capped at 255). The client reads that value at startup and restores it on exit.
 - If `BACKLIGHT` is set to 0–255, write that fixed level only to `<dir>/brightness` (the same directory as above, not every backlight device). That level is what the client later restores. It is not the idle-dim level.

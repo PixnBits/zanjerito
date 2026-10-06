@@ -1,6 +1,7 @@
 /**
  * LVGL v9.2 config for the 800x480 kiosk.
- * 32-bit XRGB8888, builtin heap, linux fbdev + evdev, no DRM.
+ * Software draw supports 16 bpp RGB565 and 32 bpp XRGB8888, plus RGB888 and ARGB8888.
+ * The framebuffer is driven by zk_fb, not LVGL linux fbdev. Builtin heap, evdev, no DRM.
  * Built-in font is only montserrat_14 (LV_FONT_DEFAULT). UI fonts are generated.
  */
 #ifndef LV_CONF_H
@@ -36,7 +37,7 @@
 
 /* Complex software draw: shadows, rounded corners, circles, arcs. */
 #define LV_USE_DRAW_SW 1
-#define LV_DRAW_SW_SUPPORT_RGB565       0
+#define LV_DRAW_SW_SUPPORT_RGB565       1
 #define LV_DRAW_SW_SUPPORT_RGB565A8     0
 #define LV_DRAW_SW_SUPPORT_RGB888       1
 #define LV_DRAW_SW_SUPPORT_XRGB8888     1
@@ -230,7 +231,7 @@
 #define LV_USE_SDL 0
 #define LV_USE_X11 0
 #define LV_USE_WAYLAND 0
-#define LV_USE_LINUX_FBDEV 1
+#define LV_USE_LINUX_FBDEV 0
 #define LV_LINUX_FBDEV_BSD 0
 #define LV_LINUX_FBDEV_RENDER_MODE LV_DISPLAY_RENDER_MODE_FULL
 #define LV_LINUX_FBDEV_BUFFER_COUNT 1

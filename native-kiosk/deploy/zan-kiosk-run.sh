@@ -2,10 +2,14 @@
 # prepare | run | restore-cursor | reset-backlight for zan-kiosk.service.
 # ZAN_ROOT prefixes paths this script opens (sysfs, tty, default binary).
 # It does not prefix --fb, --touch, or --api. Those are passed to the client.
-# ZAN_BACKLIGHT is prefixed. Default ZAN_ROOT is empty, so the paths are the real ones.
+# ZAN_BACKLIGHT is prefixed when it is a full path. A name is resolved under
+# $ZAN_ROOT/sys/class/backlight. Default ZAN_ROOT is empty, so the paths are the real ones.
 set -u
 
 ZAN_ROOT=${ZAN_ROOT-}
+BL_DIR_MAX=384
+_bl_dir=
+_bl_ready=0
 
 usage() {
     printf 'usage: zan-kiosk-run.sh prepare|run|restore-cursor|reset-backlight\n' >&2
@@ -55,8 +59,81 @@ normalize_seconds() {
     printf '%s' "$n"
 }
 
+backlight_root() {
+    printf '%s/sys/class/backlight' "$ZAN_ROOT"
+}
+
+# Pick the directory and log it. Does not remember the choice.
+backlight_resolve() {
+    bl_root=$(backlight_root)
+    src=auto
+    chosen=
+
+    if [ -n "${ZAN_BACKLIGHT-}" ]; then
+        ov=$ZAN_BACKLIGHT
+        cand=
+        case "$ov" in
+            */*)
+                cand=$ZAN_ROOT$ov
+                ;;
+            '.'|*..*)
+                cand=
+                ;;
+            *)
+                cand=$bl_root/$ov
+                ;;
+        esac
+        if [ -n "$cand" ] && [ "${#cand}" -lt "$BL_DIR_MAX" ] && [ -d "$cand" ]; then
+            chosen=$cand
+            src=ZAN_BACKLIGHT
+        else
+            printf '%s: ZAN_BACKLIGHT: invalid (%s); falling back to auto-detect\n' "${cmd-}" "$ov" >&2
+        fi
+    fi
+
+    if [ -z "$chosen" ]; then
+        if [ -d "$bl_root/rpi_backlight" ]; then
+            chosen=$bl_root/rpi_backlight
+        elif [ -d "$bl_root/10-0045" ]; then
+            chosen=$bl_root/10-0045
+        else
+            chosen=$(
+                LC_ALL=C
+                export LC_ALL
+                for p in "$bl_root"/*; do
+                    [ -d "$p" ] || continue
+                    if [ -w "$p/bl_power" ] || [ -w "$p/brightness" ]; then
+                        printf '%s' "$p"
+                        break
+                    fi
+                done
+            )
+        fi
+        if [ -n "$chosen" ] && [ "${#chosen}" -ge "$BL_DIR_MAX" ]; then
+            chosen=
+        fi
+        if [ -z "$chosen" ]; then
+            printf '%s: no backlight device found\n' "${cmd-}" >&2
+            chosen=$ZAN_ROOT/sys/class/backlight/rpi_backlight
+        fi
+        src=auto
+    fi
+
+    _bl_dir=$chosen
+    printf '%s: backlight %s (%s)\n' "${cmd-}" "$_bl_dir" "$src" >&2
+}
+
+# Run in this shell. A $(...) subshell would drop _bl_ready and _bl_dir.
+backlight_ensure() {
+    if [ "$_bl_ready" -eq 0 ]; then
+        _bl_ready=1
+        backlight_resolve
+    fi
+}
+
 backlight_sysdir() {
-    printf '%s%s' "$ZAN_ROOT" "${ZAN_BACKLIGHT:-/sys/class/backlight/rpi_backlight}"
+    backlight_ensure
+    printf '%s' "$_bl_dir"
 }
 
 prepare_cursor_blink() {
@@ -168,6 +245,7 @@ prepare_backlight_max() {
 
 # BACKLIGHT set: write that level to the configured directory only.
 prepare_backlight() {
+    backlight_ensure
     level=${BACKLIGHT-}
     dir=$(backlight_sysdir)
     prepare_backlight_access
@@ -295,11 +373,36 @@ restore_cursor() {
 
 # Root, best effort, always exits 0. Configured directory only.
 # Writes max_brightness into brightness and 0 into bl_power.
+# EXIT_STATUS=78 (unsupported framebuffer, set by systemd for ExecStopPost)
+# writes brightness 0 and bl_power 4 instead.
 reset_backlight() {
+    backlight_ensure
     dir=$(backlight_sysdir)
     br=$dir/brightness
     mx=$dir/max_brightness
     bl=$dir/bl_power
+    if [ "${EXIT_STATUS-}" = 78 ]; then
+        printf 'reset-backlight: unsupported framebuffer (exit 78); backlight off\n' >&2
+        if [ -e "$br" ]; then
+            if printf '0\n' >"$br"; then
+                printf 'reset-backlight: wrote 0 to %s\n' "$br" >&2
+            else
+                printf 'reset-backlight: could not write %s (ignored)\n' "$br" >&2
+            fi
+        else
+            printf 'reset-backlight: skipped brightness (absent)\n' >&2
+        fi
+        if [ -e "$bl" ]; then
+            if printf '4\n' >"$bl"; then
+                printf 'reset-backlight: wrote 4 to %s\n' "$bl" >&2
+            else
+                printf 'reset-backlight: could not write %s (ignored)\n' "$bl" >&2
+            fi
+        else
+            printf 'reset-backlight: skipped bl_power (absent)\n' >&2
+        fi
+        exit 0
+    fi
     if [ -f "$mx" ] && [ -e "$br" ]; then
         level=$(tr -d '[:space:]' <"$mx" 2>/dev/null || true)
         case $level in

@@ -21,6 +21,12 @@
 #   r  a fault fixture never dims; a paused fixture dims and never blanks
 #   s  SIGTERM restores the saved brightness
 #   t  SIGINT restores the saved brightness
+#   u  16 bpp RGB565 fake fb matches the memory display
+#   v  32 bpp XRGB8888 fake fb matches the memory display
+#   w  24 bpp is rejected (exit 78) and the fake fb stays zeros
+#   x  all-black --fbshot exits 3
+#   y  --fbshot without --fb exits 2
+#   z  padded stride keeps the sentinel and matches an unpadded fbshot
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -112,6 +118,10 @@ if ! command -v timeout >/dev/null 2>&1; then
 fi
 
 TMP=$(mktemp -d)
+mkdir -p "$TMP/empty-sysfs-backlight"
+: >"$TMP/zk-tty"
+# TEST-ONLY: never scan the machine's real /sys/class/backlight.
+export ZAN_SYSFS_BACKLIGHT_ROOT="$TMP/empty-sysfs-backlight"
 
 cat >"$TMP/png.py" <<'PY'
 import struct, sys, zlib
@@ -242,6 +252,30 @@ def main():
                 if near(pix(rows, x, y), (r, g, b), tol):
                     n += 1
         print(n)
+        return
+    if cmd == "pix":
+        x, y = int(sys.argv[3]), int(sys.argv[4])
+        if x < 0 or y < 0 or x >= w or y >= h:
+            raise SystemExit("pixel out of range")
+        print("%d %d %d" % pix(rows, x, y))
+        return
+    # close A B x y tol — exit 0 when that pixel matches within tol per channel.
+    if cmd == "close":
+        bpath = sys.argv[3]
+        x, y, tol = int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])
+        wb, hb, rowsb = load(bpath)
+        if (w, h) != (wb, hb):
+            raise SystemExit("size %dx%d vs %dx%d" % (w, h, wb, hb))
+        a = pix(rows, x, y)
+        b = pix(rowsb, x, y)
+        if any(abs(i - j) > tol for i, j in zip(a, b)):
+            raise SystemExit("pixel %d,%d %s vs %s tol %d" % (x, y, a, b, tol))
+        return
+    if cmd == "identical":
+        bpath = sys.argv[3]
+        wb, hb, rowsb = load(bpath)
+        if (w, h) != (wb, hb) or rows != rowsb:
+            raise SystemExit("png differs")
         return
     raise SystemExit("unknown cmd")
 
@@ -982,6 +1016,334 @@ case_t() {
     signal_restore INT t
 }
 
+# Framebuffer cases use a regular file plus ZK_FB_FAKE. They must not open a
+# real framebuffer, backlight, or tty. ZK_TTY is a temp file. Touch autodetect
+# is pointed at a path that does not exist. ZAN_API is unset.
+run_isolated() {
+    local limit=$1
+    shift
+    timeout "$limit" env -u ZAN_API -u ZK_POLL_MS_STATUS -u ZK_POWER_FORCE \
+        -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
+        ZAN_SYSFS_BACKLIGHT_ROOT="$TMP/empty-sysfs-backlight" \
+        ZK_TTY="$TMP/zk-tty" \
+        "$@"
+}
+
+# home-norain: background (2,2), STOP face (580,40), soil fill on tile 0 (34,248).
+panel_case() {
+    local bpp=$1
+    local fmt=$2
+    local tol=$3
+    local pp=$4
+    local fb=$TMP/fb$bpp
+    local shot=$TMP/panel$bpp.png
+    local mem=$TMP/mem$bpp.png
+    local bytes=$((800 * 480 * pp))
+    local stride=$((800 * pp))
+    local rc t0 t1
+    local p1 p2 p3
+    : >"$fb"
+    truncate -s "$bytes" "$fb"
+    set +e
+    run_isolated 20 ZK_FB_FAKE="800x480x${bpp}" \
+        "$BIN" \
+        --fb "$fb" \
+        --fixture "$FIX/home-norain" \
+        --duration 3 \
+        --dim-after 0 --off-after 0 \
+        --touch "$TMP/no-touch-device" \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "fb ${bpp} render exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -E "fb: .* 800x480 ${bpp}bpp ${fmt} stride ${stride}" "$TMP/kiosk.err" >/dev/null; then
+        echo "missing ${bpp}bpp ${fmt} line" >&2
+        show_kiosk_err
+        return 1
+    fi
+    set +e
+    run_isolated 10 ZK_FB_FAKE="800x480x${bpp}" \
+        "$BIN" --fb "$fb" --fbshot "$shot" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "fbshot ${bpp} exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    python3 - "$TMP/kiosk.out" "$bpp" "$fmt" <<'PY' || return 1
+import re, sys
+text = open(sys.argv[1]).read().splitlines()
+if len(text) != 1:
+    raise SystemExit("expected one stdout line, got %d: %s" % (len(text), text))
+m = re.fullmatch(
+    r"fbshot: \S+ (\d+)x(\d+) (\d+)bpp (RGB565|XRGB8888) nonblack=(\d+)/(\d+)",
+    text[0])
+if not m:
+    raise SystemExit("bad fbshot line: " + text[0])
+w, h, bpp, fmt, nb, total = m.groups()
+nb, total = int(nb), int(total)
+if (w, h, bpp, fmt) != ("800", "480", sys.argv[2], sys.argv[3]):
+    raise SystemExit("geometry %s" % (m.groups(),))
+if total != 800 * 480 or nb * 2 <= total:
+    raise SystemExit("nonblack %d/%d" % (nb, total))
+PY
+    set +e
+    run_isolated 15 \
+        "$BIN" \
+        --fixture "$FIX/home-norain" \
+        --script "wait:500;shot:${mem}" \
+        --duration 2 \
+        --dim-after 0 --off-after 0 \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "memory shot ${bpp} exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    [[ -f "$mem" && -f "$shot" ]] || { echo "missing png" >&2; return 1; }
+    python3 "$TMP/png.py" close "$mem" "$shot" 2 2 "$tol" || return 1
+    python3 "$TMP/png.py" close "$mem" "$shot" 580 40 "$tol" || return 1
+    python3 "$TMP/png.py" close "$mem" "$shot" 34 248 "$tol" || return 1
+    p1=$(python3 "$TMP/png.py" pix "$mem" 2 2)
+    p2=$(python3 "$TMP/png.py" pix "$mem" 580 40)
+    p3=$(python3 "$TMP/png.py" pix "$mem" 34 248)
+    python3 -c 'import sys
+ps = [tuple(int(x) for x in s.split()) for s in sys.argv[1:]]
+if len(set(ps)) != 3:
+    raise SystemExit("pixels not distinct: %s" % (ps,))
+r, g, b = ps[1]
+if not (r > 160 and r > g + 40 and r > b + 40):
+    raise SystemExit("stop pixel not red: %s" % (ps[1],))
+if ps[0] == (0, 0, 0):
+    raise SystemExit("background is black")
+' "$p1" "$p2" "$p3" || return 1
+}
+
+case_u() {
+    panel_case 16 RGB565 8 2
+}
+
+case_v() {
+    panel_case 32 XRGB8888 1 4
+}
+
+case_w() {
+    local fb=$TMP/fb24
+    local rc t0 t1
+    : >"$fb"
+    truncate -s $((800 * 480 * 3)) "$fb"
+    t0=$(date +%s)
+    set +e
+    run_isolated 5 ZK_FB_FAKE=800x480x24 \
+        "$BIN" \
+        --fb "$fb" \
+        --fixture "$FIX/home-norain" \
+        --duration 3 \
+        --dim-after 0 --off-after 0 \
+        --touch "$TMP/no-touch-device" \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    t1=$(date +%s)
+    if [[ "$rc" -ne 78 ]]; then
+        echo "24 bpp exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if [[ $((t1 - t0)) -ge 3 ]]; then
+        echo "24 bpp ran for the duration" >&2
+        return 1
+    fi
+    if ! grep -F 'unsupported framebuffer format' "$TMP/kiosk.err" >/dev/null; then
+        echo "24 bpp missing format error" >&2
+        show_kiosk_err
+        return 1
+    fi
+    python3 -c 'import sys
+b = open(sys.argv[1], "rb").read()
+if not b or any(x != 0 for x in b):
+    raise SystemExit("fb was written")
+' "$fb" || return 1
+    set +e
+    run_isolated 10 ZK_FB_FAKE=800x480x24 \
+        "$BIN" --fb "$fb" --fbshot "$TMP/fb24.png" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 1 ]]; then
+        echo "24 bpp fbshot exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -F 'unsupported framebuffer format' "$TMP/kiosk.err" >/dev/null; then
+        echo "24 bpp fbshot missing format error" >&2
+        show_kiosk_err
+        return 1
+    fi
+}
+
+case_x() {
+    local fb=$TMP/fbblack
+    local png=$TMP/fbblack.png
+    local rc
+    : >"$fb"
+    truncate -s $((800 * 480 * 2)) "$fb"
+    set +e
+    run_isolated 10 ZK_FB_FAKE=800x480x16 \
+        "$BIN" --fb "$fb" --fbshot "$png" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 3 ]]; then
+        echo "black fbshot exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -E '^fbshot: .+ 800x480 16bpp RGB565 nonblack=0/384000$' "$TMP/kiosk.out" >/dev/null; then
+        echo "black fbshot line:" >&2
+        cat "$TMP/kiosk.out" >&2 || true
+        return 1
+    fi
+    [[ "$(wc -l <"$TMP/kiosk.out")" -eq 1 ]] || { echo "extra stdout" >&2; return 1; }
+    [[ "$(png_size "$png")" == "800x480" ]] || return 1
+}
+
+case_y() {
+    local rc
+    set +e
+    run_isolated 5 \
+        "$BIN" --fbshot "$TMP/nofb.png" \
+        --fixture "$FIX/home-norain" --duration 1 \
+        --dim-after 0 --off-after 0 \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 2 ]]; then
+        echo "fbshot without --fb exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+}
+
+# Padded line_length. Padding bytes stay 0xA5. The visible frame matches
+# the same fixture drawn at the tight stride.
+stride_case() {
+    local bpp=$1
+    local fmt=$2
+    local pp=$3
+    local stride=$4
+    local fb=$TMP/fbpad$bpp
+    local plain=$TMP/fbplain$bpp
+    local shot_pad=$TMP/shotpad$bpp.png
+    local shot_plain=$TMP/shotplain$bpp.png
+    local bytes=$((stride * 480))
+    local plain_bytes=$((800 * 480 * pp))
+    local rc
+
+    python3 -c 'import sys; open(sys.argv[1], "wb").write(b"\xa5" * int(sys.argv[2]))' \
+        "$fb" "$bytes" || return 1
+    set +e
+    run_isolated 20 ZK_FB_FAKE="800x480x${bpp}x${stride}" \
+        "$BIN" \
+        --fb "$fb" \
+        --fixture "$FIX/home-norain" \
+        --duration 3 \
+        --dim-after 0 --off-after 0 \
+        --touch "$TMP/no-touch-device" \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "padded ${bpp} render exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -E "fb: .* 800x480 ${bpp}bpp ${fmt} stride ${stride}$" "$TMP/kiosk.err" >/dev/null; then
+        echo "missing padded ${bpp}bpp line" >&2
+        show_kiosk_err
+        return 1
+    fi
+    python3 - "$fb" "$bpp" "$stride" <<'PY' || return 1
+import sys
+path, bpp, stride = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+w, h = 800, 480
+pix = w * (bpp // 8)
+data = open(path, "rb").read()
+need = stride * h
+if len(data) != need:
+    raise SystemExit("len %d != %d" % (len(data), need))
+if pix >= stride:
+    raise SystemExit("no padding")
+sent = bytes([0xA5]) * (stride - pix)
+for y in range(h):
+    row = data[y * stride:(y + 1) * stride]
+    if row[pix:] != sent:
+        raise SystemExit("padding row %d" % y)
+PY
+    : >"$plain"
+    truncate -s "$plain_bytes" "$plain" || return 1
+    set +e
+    run_isolated 20 ZK_FB_FAKE="800x480x${bpp}" \
+        "$BIN" \
+        --fb "$plain" \
+        --fixture "$FIX/home-norain" \
+        --duration 3 \
+        --dim-after 0 --off-after 0 \
+        --touch "$TMP/no-touch-device" \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "plain ${bpp} render exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    set +e
+    run_isolated 10 ZK_FB_FAKE="800x480x${bpp}x${stride}" \
+        "$BIN" --fb "$fb" --fbshot "$shot_pad" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "padded fbshot ${bpp} exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    set +e
+    run_isolated 10 ZK_FB_FAKE="800x480x${bpp}" \
+        "$BIN" --fb "$plain" --fbshot "$shot_plain" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "plain fbshot ${bpp} exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    python3 "$TMP/png.py" identical "$shot_pad" "$shot_plain" || {
+        echo "padded ${bpp} png differs from unpadded" >&2
+        return 1
+    }
+}
+
+case_z() {
+    stride_case 32 XRGB8888 4 3328 || return 1
+    stride_case 16 RGB565 2 1664 || return 1
+}
+
 run_case a case_a
 run_case b case_b
 run_case c case_c
@@ -1002,6 +1364,12 @@ run_case q case_q
 run_case r case_r
 run_case s case_s
 run_case t case_t
+run_case u case_u
+run_case v case_v
+run_case w case_w
+run_case x case_x
+run_case y case_y
+run_case z case_z
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

@@ -20,6 +20,12 @@ void zk_platform_mark_start(void);
 double zk_platform_mono(void);
 double zk_platform_since_main(void);
 
+/* Unsupported framebuffer on the long-running --fb path. sysexits EX_CONFIG.
+ * --fbshot does not use this status. Other init failures stay exit status 1. */
+#define ZK_EXIT_FB_UNSUPPORTED 78
+
+/* 0 on success. ZK_EXIT_FB_UNSUPPORTED when the format cannot be drawn.
+ * -1 on any other failure. */
 int zk_platform_init(const zk_platform_opts_t *opts);
 lv_display_t *zk_platform_display(void);
 

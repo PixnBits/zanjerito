@@ -1,5 +1,6 @@
 #include "zk_power.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -36,6 +37,198 @@ static int join_path(char *out, size_t n, const char *dir, const char *name)
         return -1;
     }
     return 0;
+}
+
+static int bl_is_dir(const char *path)
+{
+    struct stat st;
+
+    if (!path || !path[0]) {
+        return 0;
+    }
+    if (stat(path, &st) != 0) {
+        return 0;
+    }
+    return S_ISDIR(st.st_mode) ? 1 : 0;
+}
+
+static int bl_copy_out(char *out, size_t outsz, const char *src)
+{
+    size_t n;
+
+    if (!out || outsz == 0 || !src || !src[0]) {
+        return -1;
+    }
+    n = strlen(src);
+    if (n >= outsz) {
+        return -1;
+    }
+    memcpy(out, src, n + 1);
+    return 0;
+}
+
+static int bl_name_ok(const char *name)
+{
+    if (!name || !name[0]) {
+        return 0;
+    }
+    if (strcmp(name, ".") == 0) {
+        return 0;
+    }
+    if (strstr(name, "..") != NULL) {
+        return 0;
+    }
+    return 1;
+}
+
+static int bl_has_writable(const char *dir)
+{
+    char path[ZK_POWER_DIR_MAX + 32];
+
+    if (join_path(path, sizeof path, dir, "bl_power") == 0 && access(path, W_OK) == 0) {
+        return 1;
+    }
+    if (join_path(path, sizeof path, dir, "brightness") == 0 && access(path, W_OK) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int bl_try_named(const char *root, const char *name, char *out, size_t outsz)
+{
+    char cand[ZK_POWER_DIR_MAX];
+
+    if (join_path(cand, sizeof cand, root, name) != 0) {
+        return 0;
+    }
+    if (!bl_is_dir(cand)) {
+        return 0;
+    }
+    return bl_copy_out(out, outsz, cand) == 0;
+}
+
+static int bl_name_cmp(const void *a, const void *b)
+{
+    const char *sa = *(const char *const *)a;
+    const char *sb = *(const char *const *)b;
+
+    return strcmp(sa, sb);
+}
+
+static int bl_scan(const char *root, char *out, size_t outsz)
+{
+    DIR *d;
+    struct dirent *ent;
+    char **names = NULL;
+    size_t n = 0;
+    size_t cap = 0;
+    size_t i;
+    int found = 0;
+    char cand[ZK_POWER_DIR_MAX];
+
+    d = opendir(root);
+    if (!d) {
+        return 0;
+    }
+    while ((ent = readdir(d)) != NULL) {
+        size_t len;
+        char *copy;
+        char **grow;
+
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) {
+            continue;
+        }
+        if (n == cap) {
+            size_t ncap = cap ? cap * 2 : 16;
+            if (ncap > 4096) {
+                break;
+            }
+            grow = (char **)realloc(names, ncap * sizeof(*names));
+            if (!grow) {
+                break;
+            }
+            names = grow;
+            cap = ncap;
+        }
+        len = strlen(ent->d_name) + 1;
+        copy = (char *)malloc(len);
+        if (!copy) {
+            break;
+        }
+        memcpy(copy, ent->d_name, len);
+        names[n++] = copy;
+    }
+    closedir(d);
+    if (n > 1) {
+        qsort(names, n, sizeof(*names), bl_name_cmp);
+    }
+    for (i = 0; i < n; i++) {
+        if (join_path(cand, sizeof cand, root, names[i]) != 0) {
+            continue;
+        }
+        if (!bl_is_dir(cand) || !bl_has_writable(cand)) {
+            continue;
+        }
+        if (bl_copy_out(out, outsz, cand) == 0) {
+            found = 1;
+            break;
+        }
+    }
+    for (i = 0; i < n; i++) {
+        free(names[i]);
+    }
+    free(names);
+    return found;
+}
+
+static int bl_auto_detect(const char *root, char *out, size_t outsz)
+{
+    if (bl_try_named(root, "rpi_backlight", out, outsz)) {
+        return ZK_POWER_BL_RPI;
+    }
+    if (bl_try_named(root, "10-0045", out, outsz)) {
+        return ZK_POWER_BL_10_0045;
+    }
+    if (bl_scan(root, out, outsz)) {
+        return ZK_POWER_BL_SCAN;
+    }
+    return ZK_POWER_BL_NONE;
+}
+
+int zk_power_resolve_backlight(const char *root, const char *override, char *out, size_t outsz)
+{
+    const char *bl_root;
+    int src;
+
+    if (out && outsz > 0) {
+        out[0] = '\0';
+    }
+    if (!out || outsz == 0) {
+        return ZK_POWER_BL_NONE;
+    }
+    bl_root = (root && root[0]) ? root : ZK_POWER_SYSFS_BACKLIGHT_ROOT;
+
+    if (override && override[0]) {
+        int ok = 0;
+
+        if (strchr(override, '/') != NULL) {
+            if (bl_is_dir(override) && bl_copy_out(out, outsz, override) == 0) {
+                ok = 1;
+            }
+        } else if (bl_name_ok(override) && bl_try_named(bl_root, override, out, outsz)) {
+            ok = 1;
+        }
+        if (ok) {
+            return ZK_POWER_BL_OVERRIDE;
+        }
+        fprintf(stderr, "ZAN_BACKLIGHT: invalid (%s); falling back to auto-detect\n", override);
+    }
+
+    src = bl_auto_detect(bl_root, out, outsz);
+    if (src == ZK_POWER_BL_NONE && outsz > 0) {
+        out[0] = '\0';
+    }
+    return src;
 }
 
 static int read_int_file(const char *path, int *out)

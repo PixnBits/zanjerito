@@ -90,6 +90,7 @@ for needle in \
     'ExecStart=/opt/zanjerito/zan-kiosk-run.sh run' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor' \
+    'RestartPreventExitStatus=78' \
     'Restart=always' \
     'RestartSec=2' \
     'WantedBy=multi-user.target' \
@@ -171,8 +172,8 @@ if ! grep -E '^# ZAN_DIM_LEVEL=51$' "$EXAMPLE" >/dev/null; then
     echo "example env should comment ZAN_DIM_LEVEL=51 (client default)" >&2
     exit 1
 fi
-if ! grep -E '^# ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight$' "$EXAMPLE" >/dev/null; then
-    echo "example env should comment the default backlight path" >&2
+if ! grep -E '^# ZAN_BACKLIGHT=10-0045$' "$EXAMPLE" >/dev/null; then
+    echo "example env should comment ZAN_BACKLIGHT=10-0045" >&2
     exit 1
 fi
 if ! grep -F '0 disables' "$EXAMPLE" >/dev/null; then
@@ -816,6 +817,127 @@ env -u BACKLIGHT ZAN_ROOT=$acc ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight 
 env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$miss "$RUN" reset-backlight >/dev/null 2>&1
 pass
 
+# EXIT_STATUS=78 turns the configured backlight off. Unset, 0, and 1 restore max.
+ex=$TMP/fake-exit78
+mkdir -p "$ex/sys/class/backlight/rpi_backlight"
+printf '200\n' >"$ex/sys/class/backlight/rpi_backlight/max_brightness"
+printf '40\n' >"$ex/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$ex/sys/class/backlight/rpi_backlight/bl_power"
+env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex EXIT_STATUS=78 \
+    "$RUN" reset-backlight >/dev/null 2>"$TMP/exit78.err"
+[ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/brightness")" = 0 ]
+[ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/bl_power")" = 4 ]
+grep -F 'reset-backlight: unsupported framebuffer (exit 78); backlight off' "$TMP/exit78.err" >/dev/null
+for st in unset 0 1; do
+    printf '40\n' >"$ex/sys/class/backlight/rpi_backlight/brightness"
+    printf '1\n' >"$ex/sys/class/backlight/rpi_backlight/bl_power"
+    if [ "$st" = unset ]; then
+        env -u EXIT_STATUS -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex \
+            "$RUN" reset-backlight >/dev/null 2>&1
+    else
+        env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex EXIT_STATUS="$st" \
+            "$RUN" reset-backlight >/dev/null 2>&1
+    fi
+    [ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/brightness")" = 200 ]
+    [ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+done
+pass
+
+# 10-0045 only: prepare writes bl_power 0 and max brightness there; reset restores there.
+dsi=$TMP/fake-dsi
+mkdir -p "$dsi/sys/class/backlight/10-0045" "$dsi/dev"
+printf '11\n' >"$dsi/sys/class/backlight/10-0045/brightness"
+printf '255\n' >"$dsi/sys/class/backlight/10-0045/max_brightness"
+printf '1\n' >"$dsi/sys/class/backlight/10-0045/bl_power"
+: >"$CHLOG"
+err=$TMP/dsi.err
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$dsi \
+    "$RUN" prepare >"$TMP/dsi.out" 2>"$err"
+[ "$(tr -d '[:space:]' <"$dsi/sys/class/backlight/10-0045/brightness")" = 255 ]
+[ "$(tr -d '[:space:]' <"$dsi/sys/class/backlight/10-0045/bl_power")" = 0 ]
+grep -F 'prepare: backlight' "$err" >/dev/null
+grep -F '10-0045' "$err" >/dev/null
+[ "$(grep -c 'backlight .* (auto)' "$err" || true)" -eq 1 ]
+printf '3\n' >"$dsi/sys/class/backlight/10-0045/brightness"
+printf '1\n' >"$dsi/sys/class/backlight/10-0045/bl_power"
+reset_err=$TMP/dsi-reset.err
+env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$dsi "$RUN" reset-backlight >/dev/null 2>"$reset_err"
+[ "$(grep -c 'backlight .* (auto)' "$reset_err" || true)" -eq 1 ]
+[ "$(tr -d '[:space:]' <"$dsi/sys/class/backlight/10-0045/brightness")" = 255 ]
+[ "$(tr -d '[:space:]' <"$dsi/sys/class/backlight/10-0045/bl_power")" = 0 ]
+pass
+
+# rpi_backlight is preferred over 10-0045.
+both=$TMP/fake-both
+mkdir -p "$both/sys/class/backlight/rpi_backlight" \
+    "$both/sys/class/backlight/10-0045" "$both/dev"
+printf '11\n' >"$both/sys/class/backlight/rpi_backlight/brightness"
+printf '300\n' >"$both/sys/class/backlight/rpi_backlight/max_brightness"
+printf '1\n' >"$both/sys/class/backlight/rpi_backlight/bl_power"
+printf '22\n' >"$both/sys/class/backlight/10-0045/brightness"
+printf '111\n' >"$both/sys/class/backlight/10-0045/max_brightness"
+printf '1\n' >"$both/sys/class/backlight/10-0045/bl_power"
+: >"$CHLOG"
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$both \
+    "$RUN" prepare >/dev/null 2>&1
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/10-0045/brightness")" = 22 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/10-0045/bl_power")" = 1 ]
+if grep -F 10-0045 "$CHLOG" >/dev/null; then
+    echo "prepare touched 10-0045 while rpi_backlight exists" >&2
+    exit 1
+fi
+pass
+
+# ZAN_BACKLIGHT=10-0045 (name) is honoured even when rpi_backlight exists.
+: >"$CHLOG"
+printf '11\n' >"$both/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$both/sys/class/backlight/rpi_backlight/bl_power"
+printf '22\n' >"$both/sys/class/backlight/10-0045/brightness"
+printf '1\n' >"$both/sys/class/backlight/10-0045/bl_power"
+err=$TMP/name.err
+env -u BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$both \
+    ZAN_BACKLIGHT=10-0045 \
+    "$RUN" prepare >"$TMP/name.out" 2>"$err"
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/10-0045/brightness")" = 111 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/10-0045/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/rpi_backlight/brightness")" = 11 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/rpi_backlight/bl_power")" = 1 ]
+grep -F '(ZAN_BACKLIGHT)' "$err" >/dev/null
+if grep -F rpi_backlight "$CHLOG" >/dev/null; then
+    echo "prepare touched rpi_backlight while ZAN_BACKLIGHT=10-0045" >&2
+    exit 1
+fi
+pass
+
+# Invalid ZAN_BACKLIGHT falls back to auto with a log line.
+: >"$CHLOG"
+printf '11\n' >"$both/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$both/sys/class/backlight/rpi_backlight/bl_power"
+printf '22\n' >"$both/sys/class/backlight/10-0045/brightness"
+printf '1\n' >"$both/sys/class/backlight/10-0045/bl_power"
+err=$TMP/badov.err
+env -u BACKLIGHT PATH="$TMP/bin:$PATH" CHLOG=$CHLOG ZAN_ROOT=$both \
+    ZAN_BACKLIGHT=no-such-device \
+    "$RUN" prepare >"$TMP/badov.out" 2>"$err"
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+[ "$(tr -d '[:space:]' <"$both/sys/class/backlight/10-0045/brightness")" = 22 ]
+grep -F 'no-such-device' "$err" >/dev/null
+[ "$(grep -c 'backlight .* (auto)' "$err" || true)" -eq 1 ]
+[ "$(grep -cF 'ZAN_BACKLIGHT: invalid' "$err" || true)" -eq 1 ]
+pass
+
+# No backlight device: prepare still exits 0. The miss is logged once.
+none=$TMP/fake-none
+mkdir -p "$none"
+err=$TMP/none.err
+env -u BACKLIGHT -u ZAN_BACKLIGHT PATH="$TMP/bin:$PATH" ZAN_ROOT=$none \
+    "$RUN" prepare >"$TMP/none.out" 2>"$err"
+[ "$(grep -cF 'no backlight device found' "$err" || true)" -eq 1 ]
+pass
+
 # Invalid dim/off/level values are skipped. Valid siblings are still passed, in order.
 # 0 is a real value and must be passed through (it disables dim and off in the client).
 out=$(run_wrap ZAN_BIN=$ARGV ZAN_API=http://127.0.0.1:8080 \
@@ -919,9 +1041,10 @@ for needle in \
     'ZAN_ALLOW_WRITES' \
     'make -C native-kiosk arm' \
     'plymouth-quit.service' \
-    'plymouth-quit-wait.service'
+    'plymouth-quit-wait.service' \
+    '--fbshot'
 do
-    if ! grep -F "$needle" "$DOC" >/dev/null; then
+    if ! grep -F -- "$needle" "$DOC" >/dev/null; then
         echo "boot doc missing: $needle" >&2
         exit 1
     fi

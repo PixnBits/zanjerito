@@ -73,6 +73,7 @@ The base URL is never compiled in. With no `--api`, no `ZAN_API`, and no `--fixt
 | `--live-clock` | Advance the clock from the system clock. Fixture mode otherwise freezes `kiosk.now` |
 | `--allow-writes` | Permit the three mutating POSTs. Default is read-only |
 | `--fb PATH` | Framebuffer to open. There is no default device |
+| `--fbshot FILE` | Read that framebuffer and write a PNG. Requires `--fb`. Does not start the UI. Exit 0 if any pixel is non-black, 3 if the frame is all black, 1 on error, 2 without `--fb` or combined with `--script`, `--shot`, or `--shot-all` |
 | `--touch PATH` | evdev device. Default is autodetect |
 | `--touch-swap` | Swap X and Y after open |
 | `--touch-flip-x` | Flip X using the device's reported range |
@@ -122,7 +123,7 @@ Example against a daemon already listening on localhost (nothing in this tree st
 | `12-home-schedules-button.png` | home-rain | Same Home as `01` |
 | `13-paused-schedules-button.png` | paused-rain | Paused with Schedules button |
 
-`--shot` and `--shot-all` use the memory display. They do not open a framebuffer.
+`--shot`, `--shot-all`, and `--script` `shot:` use the memory display. They do not open a framebuffer and do not prove what the panel shows. `--fbshot` reads the framebuffer passed to `--fb`.
 
 ## Host tests
 
@@ -166,7 +167,7 @@ The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pa
 
 ## Raspberry Pi
 
-Target board is a Pi 3B (armv7). The display is the legacy 800×480 32 bpp framebuffer: pass `--fb /dev/fb0`. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
+Target board is a Pi 3B (armv7). Pass `--fb /dev/fb0`. The client supports 16 bpp RGB565 and 32 bpp XRGB8888, picked from the framebuffer's bits_per_pixel and channel layout, and exits 78 with a clear error on anything else. Other failures still exit 1. `--fbshot` still exits 1 for an unsupported format. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
 
 On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Boot-persistent install is opt-in; `make` does not enable it. See below.
 
@@ -179,9 +180,9 @@ Idle dim and backlight-off run only with `--fb`, or when `ZK_POWER_FORCE=1` (tes
 | `--dim-after SEC` | `ZAN_DIM_AFTER_SEC` | 120 |
 | `--off-after SEC` | `ZAN_OFF_AFTER_SEC` | 600 |
 | `--dim-level N` | `ZAN_DIM_LEVEL` | 51 (about 20% of 255) |
-| `--backlight DIR` | `ZAN_BACKLIGHT` | `/sys/class/backlight/rpi_backlight` |
+| `--backlight DIR` | `ZAN_BACKLIGHT` | auto-detect: `rpi_backlight`, then `10-0045`, then first writable under `/sys/class/backlight` |
 
-Flags win, including an explicit `0`. Junk and values above the cap (seconds `1000000000`, level `255`) exit 2 with the usage text. A bad env value does the same.
+Flags win, including an explicit `0`. Junk and values above the cap (seconds `1000000000`, level `255`) exit 2 with the usage text. A bad numeric env value does the same. A bad `ZAN_BACKLIGHT` (missing, invalid, or too long) logs one line and falls back to auto-detect.
 
 `0` for `--dim-after` disables dimming and off. The directory is not opened. `0` for `--off-after` disables off only. If off is positive and not strictly greater than dim, off is disabled (not bumped by one second) so a bad pair cannot black the screen. Off is measured from the last touch, not from the moment of dim. The threshold is `idle >= N` seconds. A configured dim level of 0 is written as 1 when that would not raise the panel. The written dim is the minimum of that level (at least 1), the brightness read at startup, and the panel max. A dim never raises brightness. If the saved brightness is below 1, dimming writes nothing and wake or exit restores `max_brightness`. If the original could not be read, the dim write is min(level, max).
 
@@ -225,7 +226,7 @@ Backlight writes, in order:
 
 The original brightness and `max_brightness` are read in `zk_power_init` when dimming is enabled and the backlight directory is usable, and restored by `zk_power_shutdown`. They are not read again on the first dim. Shutdown that never dimmed or blanked writes nothing. Normal exit and SIGINT/SIGTERM both get there: the signal handler only sets a flag, and the main loop calls shutdown. A second shutdown does not write again.
 
-`brightness` on the Pi panel is `root:root` mode `0644`. `prepare` in `deploy/zan-kiosk-run.sh` (root, `ExecStartPre=+`) runs `chgrp video` and `chmod g+w` on `brightness` and `bl_power` in the configured directory only (`ZAN_BACKLIGHT`, or `rpi_backlight`) when the file exists. It writes `0` to `bl_power` (panel on) in that same configured directory when the file exists; absence or a failed write is logged and ignored. If `BACKLIGHT` is unset it also writes `max_brightness` there, so the client restores full brightness. If `BACKLIGHT` is set, that fixed level is written to that same directory only, not to every backlight device, and it is the saved original. The unit's `ExecStopPost` is `reset-backlight` then `restore-cursor`. `reset-backlight` writes the panel max and `bl_power` 0 on that same directory. Rollback calls it best effort and still does not fail the desktop restore. This repository does not run those steps on a machine.
+`brightness` on the Pi panel is `root:root` mode `0644`. `prepare` in `deploy/zan-kiosk-run.sh` (root, `ExecStartPre=+`) runs `chgrp video` and `chmod g+w` on `brightness` and `bl_power` in the configured directory only (`ZAN_BACKLIGHT`, or auto-detect: `rpi_backlight`, then `10-0045`, then the first writable device) when the file exists. On Bookworm with KMS, the official 7-inch DSI panel backlight appears as `10-0045`; `brightness` may already be group `video`, `bl_power` is root-only, and `prepare` handles it. It writes `0` to `bl_power` (panel on) in that same configured directory when the file exists; absence or a failed write is logged and ignored. If `BACKLIGHT` is unset it also writes `max_brightness` there, so the client restores full brightness. If `BACKLIGHT` is set, that fixed level is written to that same directory only, not to every backlight device, and it is the saved original. The unit's `ExecStopPost` is `reset-backlight` then `restore-cursor`. `reset-backlight` writes the panel max and `bl_power` 0 on that same directory, unless `EXIT_STATUS` is 78 (unsupported framebuffer), when it writes brightness 0 and `bl_power` 4. Rollback calls it best effort and still does not fail the desktop restore. This repository does not run those steps on a machine.
 
 Failure modes, all non-fatal, each logged once on stderr:
 
@@ -236,7 +237,7 @@ Failure modes, all non-fatal, each logged once on stderr:
 
 ## Boot-persistent kiosk (full kiosk mode)
 
-`deploy/` can install a systemd unit that starts `/opt/zanjerito/zan-kiosk` on `/dev/fb0` at boot and keeps the desktop off that framebuffer. Copying the files does not enable the unit and does not change the boot target. The procedure, the framebuffer dump, and the rollback commands are in [docs/native-kiosk-boot.md](../docs/native-kiosk-boot.md).
+`deploy/` can install a systemd unit that starts `/opt/zanjerito/zan-kiosk` on `/dev/fb0` at boot and keeps the desktop off that framebuffer. Copying the files does not enable the unit and does not change the boot target. The procedure, the `--fbshot` panel check, and the rollback commands are in [docs/native-kiosk-boot.md](../docs/native-kiosk-boot.md).
 
 Build the binary with `make -C native-kiosk arm` (daemon already running; do not restart it for this). Then, on the Pi:
 
@@ -256,7 +257,7 @@ There is no `ExecStop=` that sends STOP or all-off. The kiosk is only a client. 
 
 Writes stay off unless `ZAN_ALLOW_WRITES=1`. An existing install may already have writes on. The installed example leaves them off.
 
-`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. It also `chgrp video` and `chmod g+w` on the configured backlight directory (not every device), writes `0` to `bl_power` there (configured path only), and writes either `max_brightness` or the optional `BACKLIGHT` level. Missing files are skipped. Idle dim and off are the client's job; see Display power above. `ZAN_DIM_AFTER_SEC=0` turns both off. After the client exits, `ExecStopPost` runs `reset-backlight` and then `restore-cursor`. Applying this on a board is a separate step from the files in this tree.
+`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. It also `chgrp video` and `chmod g+w` on the auto-detected or `ZAN_BACKLIGHT` directory (not every device), writes `0` to `bl_power` there (that path only), and writes either `max_brightness` or the optional `BACKLIGHT` level. Missing files are skipped. Idle dim and off are the client's job; see Display power above. `ZAN_DIM_AFTER_SEC=0` turns both off. After the client exits, `ExecStopPost` runs `reset-backlight` and then `restore-cursor`. Exit 78 turns the backlight off; any other status restores it. Applying this on a board is a separate step from the files in this tree.
 
 Kernel printk can still draw on tty1. `sudo dmesg -n 1` is optional and not persistent. Putting the tty in `KD_GRAPHICS` is a future client change.
 

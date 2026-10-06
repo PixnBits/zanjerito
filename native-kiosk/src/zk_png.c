@@ -49,3 +49,14 @@ int zk_png_write_xrgb8888(const char *path, const uint8_t *src, int w, int h, in
     free(rgb);
     return rc == 0 ? -1 : 0;
 }
+
+int zk_png_write_rgb888(const char *path, const uint8_t *rgb, int w, int h)
+{
+    int rc;
+
+    if (!path || !path[0] || !rgb || w <= 0 || h <= 0) {
+        return -1;
+    }
+    rc = stbi_write_png(path, w, h, 3, rgb, w * 3);
+    return rc == 0 ? -1 : 0;
+}

@@ -29,11 +29,14 @@ ZAN_OFF_AFTER_SEC=600
 # panel was already on. Leave this commented to keep the client default.
 # ZAN_DIM_LEVEL=51
 
-# Backlight sysfs directory. Optional. The default is rpi_backlight.
-# ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight
+# Backlight sysfs device: a name under /sys/class/backlight, or a full
+# directory path. Optional. Unset: auto-detect rpi_backlight, then 10-0045,
+# then the first writable device (C locale sort). Invalid or missing values
+# fall back to auto-detect.
+# ZAN_BACKLIGHT=10-0045
 
 # Fixed level, 0-255, written once at start to the configured backlight
-# directory only (ZAN_BACKLIGHT, or rpi_backlight). Not every device.
+# directory only (ZAN_BACKLIGHT, or auto-detect). Not every device.
 # That value is what the client later restores. When unset, prepare writes
 # max_brightness there instead. This is not the idle-dim level.
 # BACKLIGHT=255
