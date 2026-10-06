@@ -193,6 +193,29 @@ sudo /opt/zanjerito/zan-kiosk-run.sh reset-backlight
 
 Rollback runs that same subcommand, best effort, after it stops the kiosk. A failure there does not fail the desktop restore. Nothing in this tree applies these steps on a board; that install is a separate step.
 
+## After exit 78 (unsupported framebuffer)
+
+Exit status 78 means the client opened the framebuffer but cannot draw its pixel format: something other than 16 bpp RGB565 or 32 bpp XRGB8888. `RestartPreventExitStatus=78` keeps systemd from restarting it, so the unit stays failed and `reset-backlight` turns the panel off. The daemon keeps running and watering is not affected; only the screen is down. Nothing retries on its own until the next boot.
+
+1. Confirm the cause. `systemctl status zan-kiosk` shows `status=78/CONFIG`, and the journal has a line starting `fb: unsupported framebuffer format:`:
+
+   ```sh
+   systemctl status zan-kiosk --no-pager
+   sudo journalctl -u zan-kiosk -n 50 --no-pager
+   ```
+
+2. Fix the framebuffer format so `/dev/fb0` is 16 bpp RGB565 or 32 bpp XRGB8888 (for example the display or framebuffer depth settings in the boot config). `fbset -i` or `cat /sys/class/graphics/fb0/bits_per_pixel` shows the current depth. Some changes need a reboot.
+
+3. Clear the failed state and start the kiosk again. This does not touch `zanjerito.service`:
+
+   ```sh
+   sudo systemctl reset-failed zan-kiosk && sudo systemctl start zan-kiosk
+   ```
+
+4. Check it with `--fbshot` as in [Check](#check). If it exits 78 again, the format is still unsupported.
+
+Exit status 1 is different: the unit keeps restarting every 2 seconds (for example while `/dev/fb0` is not there yet at boot), and there is no failed state to clear.
+
 ## If the panel is blank
 
 SSH in. The daemon is still running; the kiosk is only the screen. Roll the desktop back (next section). You do not need the panel for that.
