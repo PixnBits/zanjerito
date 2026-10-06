@@ -51,7 +51,8 @@ func New(e *engine.Engine, path string) *Server {
 	s := &Server{Eng: e, Path: path, mux: http.NewServeMux()}
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("GET /api/kiosk", s.handleKiosk)
-	s.mux.HandleFunc("GET /api/ha", s.handleHA)
+	// No method: a GET pattern's 405 Allow list includes HEAD, and HEAD is refused.
+	s.mux.HandleFunc("/api/ha", s.handleHA)
 	s.mux.HandleFunc("GET /api/stations", s.handleStationsList)
 	s.mux.HandleFunc("GET /api/stations/{id}", s.handleStationGet)
 	s.mux.HandleFunc("PATCH /api/stations/{id}", s.handleStationPatch)

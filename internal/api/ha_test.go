@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -233,6 +234,38 @@ func TestHAGolden(t *testing.T) {
 	}
 }
 
+func TestHAUnknownLastRun(t *testing.T) {
+	s := haServer(t)
+	fixed := haClock(t)
+	hl, err := history.Open(filepath.Join(filepath.Dir(s.Path), "history.json"), func() time.Time { return fixed })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(hl.Close)
+	start := time.Date(2000, 1, 2, 5, 0, 0, 0, fixed.Location())
+	hl.Append(engine.RunRecord{
+		Kind:    "not-a-kind",
+		Outcome: "not-an-outcome",
+		Start:   start,
+		End:     start.Add(time.Hour),
+	})
+	s.History = hl
+	body := getHA(t, s)
+	var p haBody
+	if err := json.Unmarshal(body, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.LastRunKind == nil || *p.LastRunKind != "unknown" || p.LastRunOut == nil || *p.LastRunOut != "unknown" {
+		t.Fatalf("kind/outcome %+v %+v body %s", p.LastRunKind, p.LastRunOut, body)
+	}
+	if p.LastRunStart == nil || p.LastRunEnd == nil {
+		t.Fatalf("history times nulled %s", body)
+	}
+	if strings.Contains(string(body), "not-a-kind") || strings.Contains(string(body), "not-an-outcome") {
+		t.Fatalf("raw label leaked %s", body)
+	}
+}
+
 func TestHANoLeak(t *testing.T) {
 	forbidden := []string{
 		haTitle1, haTitle2, haID1, haID2, haSchedID, haSchedName, haPowerTitle,
@@ -276,10 +309,14 @@ func TestHANoWrite(t *testing.T) {
 		}
 		dir := filepath.Dir(s.Path)
 		files := snapshotDir(t, dir)
+		ids := haFileIDs(t, dir)
 		raw := s.Eng.PauseRaw()
 		body := getHA(t, s)
 		if !bytesEqualDir(files, snapshotDir(t, dir)) {
 			t.Fatal("GET /api/ha wrote the config directory")
+		}
+		if got := haFileIDs(t, dir); !reflect.DeepEqual(ids, got) {
+			t.Fatalf("file mtime or inode changed\nbefore %+v\nafter  %+v", ids, got)
 		}
 		if got := s.Eng.PauseRaw(); !pauseEqual(raw, got) {
 			t.Fatalf("pause changed %+v -> %+v", raw, got)
@@ -304,6 +341,9 @@ func TestHANoWrite(t *testing.T) {
 			if rr.Code != http.StatusMethodNotAllowed {
 				t.Fatalf("%s %d %s", method, rr.Code, rr.Body.String())
 			}
+			if got := rr.Header().Get("Allow"); got != http.MethodGet {
+				t.Fatalf("%s Allow %q", method, got)
+			}
 		}
 		if after := haSnapshot(t, s); !reflect.DeepEqual(before, after) {
 			t.Fatalf("non-GET changed state\nbefore %+v\nafter  %+v", before, after)
@@ -318,6 +358,7 @@ type haSnap struct {
 	Pause     engine.PauseSnap
 	Hist      []history.Entry
 	Files     map[string][]byte
+	FileIDs   map[string]haFileID
 	RainOn    bool
 	RainBad   bool
 	RainErr   string
@@ -337,13 +378,15 @@ func haSnapshot(t *testing.T, s *Server) haSnap {
 	if s.History != nil {
 		hist = s.History.List(0)
 	}
+	dir := filepath.Dir(s.Path)
 	snap := haSnap{
 		Phase:     string(st.Phase),
 		LastError: st.LastError,
 		On:        on,
 		Pause:     s.Eng.PauseRaw(),
 		Hist:      hist,
-		Files:     snapshotDir(t, filepath.Dir(s.Path)),
+		Files:     snapshotDir(t, dir),
+		FileIDs:   haFileIDs(t, dir),
 	}
 	if s.Rain != nil {
 		rs := s.Rain.Status()
@@ -361,6 +404,36 @@ func haSnapshot(t *testing.T, s *Server) haSnap {
 		snap.Step = prog.StepIndex
 	}
 	return snap
+}
+
+// haFileID is one watched file's mtime and inode, from os.Stat.
+type haFileID struct {
+	MtimeUnixNano int64
+	Ino           uint64
+}
+
+func haFileIDs(t *testing.T, dir string) map[string]haFileID {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]haFileID{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			t.Fatalf("%s: os.Stat Sys type %T", e.Name(), info.Sys())
+		}
+		out[e.Name()] = haFileID{MtimeUnixNano: info.ModTime().UnixNano(), Ino: st.Ino}
+	}
+	return out
 }
 
 func pauseEqual(a, b engine.PauseSnap) bool {

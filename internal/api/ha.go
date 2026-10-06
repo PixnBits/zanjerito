@@ -50,8 +50,8 @@ type haBody struct {
 // /api/kiosk, but it does not call PauseDetail: that expires a timed pause
 // in memory. An elapsed until is reported as not paused and left stored.
 // It does not write config, history, or pause.json, and it does not start a run.
-// A GET pattern also matches HEAD; HEAD is rejected here. Other methods
-// never reach this handler (the mux returns 405).
+// Registered for every method so the mux does not answer 405 itself.
+// Anything but GET, including HEAD, is 405 with Allow exactly GET.
 func (s *Server) handleHA(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -197,8 +197,30 @@ func haLastRun(s *Server, loc *time.Location) (kind, outcome, started, ended *st
 	if loc == nil {
 		loc = time.UTC
 	}
-	k, o := e.Kind, e.Outcome
+	k := haToken(e.Kind, engine.KindSchedule, engine.KindManual)
+	o := haToken(e.Outcome,
+		engine.OutcomeCompleted,
+		engine.OutcomeStopped,
+		engine.OutcomeSkipped,
+		engine.OutcomeRefused,
+		engine.OutcomeError,
+	)
 	a := e.StartedAt.In(loc).Format(time.RFC3339)
 	b := e.EndedAt.In(loc).Format(time.RFC3339)
-	return &k, &o, &a, &b
+	return k, o, &a, &b
+}
+
+// haToken keeps a label the engine and scheduler actually store.
+// Any other non-empty value is "unknown". Empty stays empty.
+// No history is null, decided by haLastRun before this is called.
+func haToken(v string, allowed ...string) *string {
+	for _, a := range allowed {
+		if v == a {
+			return &v
+		}
+	}
+	if v != "" {
+		v = "unknown"
+	}
+	return &v
 }
