@@ -373,12 +373,36 @@ restore_cursor() {
 
 # Root, best effort, always exits 0. Configured directory only.
 # Writes max_brightness into brightness and 0 into bl_power.
+# EXIT_STATUS=78 (unsupported framebuffer, set by systemd for ExecStopPost)
+# writes brightness 0 and bl_power 4 instead.
 reset_backlight() {
     backlight_ensure
     dir=$(backlight_sysdir)
     br=$dir/brightness
     mx=$dir/max_brightness
     bl=$dir/bl_power
+    if [ "${EXIT_STATUS-}" = 78 ]; then
+        printf 'reset-backlight: unsupported framebuffer (exit 78); backlight off\n' >&2
+        if [ -e "$br" ]; then
+            if printf '0\n' >"$br"; then
+                printf 'reset-backlight: wrote 0 to %s\n' "$br" >&2
+            else
+                printf 'reset-backlight: could not write %s (ignored)\n' "$br" >&2
+            fi
+        else
+            printf 'reset-backlight: skipped brightness (absent)\n' >&2
+        fi
+        if [ -e "$bl" ]; then
+            if printf '4\n' >"$bl"; then
+                printf 'reset-backlight: wrote 4 to %s\n' "$bl" >&2
+            else
+                printf 'reset-backlight: could not write %s (ignored)\n' "$bl" >&2
+            fi
+        else
+            printf 'reset-backlight: skipped bl_power (absent)\n' >&2
+        fi
+        exit 0
+    fi
     if [ -f "$mx" ] && [ -e "$br" ]; then
         level=$(tr -d '[:space:]' <"$mx" 2>/dev/null || true)
         case $level in

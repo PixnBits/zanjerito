@@ -478,6 +478,7 @@ int main(int argc, char **argv)
     char resolved_bl[ZK_POWER_DIR_MAX];
     const char *force;
     int rc = 0;
+    int init_rc;
     int data_on = 0;
     zk_app_t app;
     zk_platform_opts_t opts;
@@ -722,8 +723,12 @@ int main(int argc, char **argv)
     opts.touch_flip_y = touch_flip_y;
     opts.virtual_pointer = script ? 1 : 0;
     opts.autodetect_touch = (!script && !shot_file && !shot_all && !touch) ? 1 : 0;
-    if (zk_platform_init(&opts) != 0) {
+    init_rc = zk_platform_init(&opts);
+    if (init_rc != 0) {
         zk_platform_print_stats(stats);
+        if (init_rc == ZK_EXIT_FB_UNSUPPORTED) {
+            return ZK_EXIT_FB_UNSUPPORTED;
+        }
         return 1;
     }
     if (want_power) {

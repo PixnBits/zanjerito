@@ -90,6 +90,7 @@ for needle in \
     'ExecStart=/opt/zanjerito/zan-kiosk-run.sh run' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor' \
+    'RestartPreventExitStatus=78' \
     'Restart=always' \
     'RestartSec=2' \
     'WantedBy=multi-user.target' \
@@ -784,6 +785,32 @@ env -u BACKLIGHT ZAN_ROOT=$acc ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight 
 [ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/brightness")" = 300 ]
 [ "$(tr -d '[:space:]' <"$acc/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
 env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$miss "$RUN" reset-backlight >/dev/null 2>&1
+pass
+
+# EXIT_STATUS=78 turns the configured backlight off. Unset, 0, and 1 restore max.
+ex=$TMP/fake-exit78
+mkdir -p "$ex/sys/class/backlight/rpi_backlight"
+printf '200\n' >"$ex/sys/class/backlight/rpi_backlight/max_brightness"
+printf '40\n' >"$ex/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$ex/sys/class/backlight/rpi_backlight/bl_power"
+env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex EXIT_STATUS=78 \
+    "$RUN" reset-backlight >/dev/null 2>"$TMP/exit78.err"
+[ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/brightness")" = 0 ]
+[ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/bl_power")" = 4 ]
+grep -F 'reset-backlight: unsupported framebuffer (exit 78); backlight off' "$TMP/exit78.err" >/dev/null
+for st in unset 0 1; do
+    printf '40\n' >"$ex/sys/class/backlight/rpi_backlight/brightness"
+    printf '1\n' >"$ex/sys/class/backlight/rpi_backlight/bl_power"
+    if [ "$st" = unset ]; then
+        env -u EXIT_STATUS -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex \
+            "$RUN" reset-backlight >/dev/null 2>&1
+    else
+        env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex EXIT_STATUS="$st" \
+            "$RUN" reset-backlight >/dev/null 2>&1
+    fi
+    [ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/brightness")" = 200 ]
+    [ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+done
 pass
 
 # 10-0045 only: prepare writes bl_power 0 and max brightness there; reset restores there.
