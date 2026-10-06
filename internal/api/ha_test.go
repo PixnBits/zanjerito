@@ -315,6 +315,69 @@ func TestHAEmptyLastRunUnknown(t *testing.T) {
 	})
 }
 
+// TestHAEmptyHistoryFile opens a history.json that exists and is empty.
+// That is the len==0 return in haLastRun, not a nil History.
+func TestHAEmptyHistoryFile(t *testing.T) {
+	s := haServer(t)
+	path := filepath.Join(filepath.Dir(s.Path), "history.json")
+	if err := os.WriteFile(path, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() != 0 {
+		t.Fatalf("history file %d bytes", info.Size())
+	}
+	hl, err := history.Open(path, func() time.Time { return haClock(t) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(hl.Close)
+	if len(hl.List(1)) != 0 {
+		t.Fatal("empty history file loaded entries")
+	}
+	s.History = hl
+	body := getHA(t, s)
+	var p haBody
+	if err := json.Unmarshal(body, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.LastRunKind != nil || p.LastRunOut != nil || p.LastRunStart != nil || p.LastRunEnd != nil {
+		t.Fatalf("empty history log should stay null %s", body)
+	}
+	for _, key := range []string{"last_run_kind", "last_run_outcome", "last_run_started_at", "last_run_ended_at"} {
+		if !bytes.Contains(body, []byte(`"`+key+`":null`)) {
+			t.Fatalf("%s not null in %s", key, body)
+		}
+	}
+}
+
+func TestHALastRunWhitespaceCase(t *testing.T) {
+	cases := []struct {
+		name, kind, outcome string
+	}{
+		{"leading space", " manual", " completed"},
+		{"title case", "Manual", "Completed"},
+		{"trailing newline", "manual\n", "completed\n"},
+		{"upper swapped label", "COMPLETED", "SCHEDULE"},
+		{"upper kind", "MANUAL", "STOPPED"},
+		{"upper schedule", "SCHEDULE", "SKIPPED"},
+		{"trailing space", "manual ", "refused "},
+		{"leading newline", "\nmanual", "\nerror"},
+		{"mixed case", "sChEdUlE", "eRrOr"},
+		{"tab", "\tmanual", "completed\t"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := haServer(t)
+			haAppendLabel(t, s, tc.kind, tc.outcome)
+			assertHALastRun(t, getHA(t, s), "unknown", "unknown")
+		})
+	}
+}
+
 func haAppendLabel(t *testing.T, s *Server, kind, outcome string) {
 	t.Helper()
 	fixed := haClock(t)
