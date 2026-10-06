@@ -1,19 +1,19 @@
 # Bill of materials
 
-Generic part descriptions only. TBD rows are placeholders to fill in.
+TBD entries are placeholders to fill in. No shop or affiliate links.
 
 | Part | Qty | Notes/specs | Status |
 |---|---|---|---|
 | Raspberry Pi 3 Model B | 1 | armv7l; runs Raspberry Pi OS Bookworm Lite 32-bit | Installed |
-| 3.5" 800x480 DSI capacitive touch display (v1.0) | 1 | | Installed |
-| 8-channel relay board | 1 | Opto-isolated, active-low inputs, ~15-20 mA per input, JD-VCC jumper | Installed |
+| Osoyoo 3.5" 800x480 DSI capacitive touch display (v1.0) | 1 | | Installed |
+| JBtek 8-channel relay board | 1 | Opto-isolated, active-low inputs, ~15-20 mA per input, JD-VCC jumper | Installed |
 | microSD card | 1 | Size TBD | Installed |
-| Pi power supply | 1 | Rating TBD | Installed |
+| 5 V DC supply: Mean Well RS-15-5 | 1 | 5 V 3 A 15 W, 88-264 VAC in, screw terminals. Presumably powers the Pi and relay board (to be confirmed) | Installed |
 | 3D-printed screen mount | 1 | See [`prints/`](prints/) and [README](README.md) | Installed (print-verified) |
 | Irrigation valves | TBD | Model TBD | TBD |
-| 24VAC transformer | 1 | Rating TBD | TBD |
+| 24 VAC valve transformer: Hotop PS-D40 plug-in transformer internals | 1 | 120 VAC in, 24 VAC 40 VA out, PTC-fused secondary. Model believed; confirm on unit | Installed |
 | Wire | TBD | Gauge/type TBD | TBD |
-| Enclosure | 1 | Model TBD | TBD |
+| Enclosure: salvaged Orbit B-hyve 6-zone indoor/outdoor smart sprinkler timer housing | 1 | Original electronics removed; the printed screen mount ([`prints/`](prints/)) fits its frame | Installed |
 
 ## Wiring
 
