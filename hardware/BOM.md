@@ -12,6 +12,7 @@ TBD entries are placeholders to fill in. No shop or affiliate links.
 | 3D-printed screen mount | 1 | See [`prints/`](prints/) and [README](README.md) | Installed (print-verified) |
 | Standard 24 VAC sprinkler valve solenoids | 4 | One per active station relay (see Wiring) | Installed |
 | 24 VAC valve transformer: Hotop PS-D40 plug-in transformer internals | 1 | 120 VAC in, 24 VAC 40 VA out, PTC-fused secondary. Model believed; confirm on unit | Installed |
+| Inline fuse holder for 5x20 mm fuses, plus a 1 A 250 V slow-blow (time-delay) fuse | 1 each | On the transformer's 120 VAC primary hot leg, after the power relay. The 40 VA primary draws about 0.33 A; slow-blow rides through transformer inrush | Required |
 | Wire | TBD | Gauge/type TBD | TBD |
 | Enclosure: salvaged Orbit B-hyve 6-zone indoor/outdoor smart sprinkler timer housing | 1 | Original electronics removed; the printed screen mount ([`prints/`](prints/)) fits its frame | Installed |
 
@@ -19,15 +20,19 @@ TBD entries are placeholders to fill in. No shop or affiliate links.
 
 GPIO assignments come from [docs/pin-map.md](../docs/pin-map.md), the source of truth. Relays are active-low (logic HIGH = off).
 
-| BCM | Physical pin | Use |
-|---|---|---|
-| GPIO5 | 29 | Station relay |
-| GPIO6 | 31 | Station relay |
-| GPIO13 | 33 | Station relay |
-| GPIO19 | 35 | Station relay |
-| GPIO26 | 37 | Unused |
-| GPIO16 | 36 | Unused |
-| GPIO20 | 38 | Unused |
-| GPIO21 | 40 | 24VAC power enable relay |
+| BCM | Physical pin | Use | Relay channel |
+|---|---|---|---|
+| GPIO5 | 29 | Station relay | verify on board |
+| GPIO6 | 31 | Station relay | verify on board |
+| GPIO13 | 33 | Station relay | verify on board |
+| GPIO19 | 35 | Station relay | verify on board |
+| GPIO26 | 37 | Unused | verify on board |
+| GPIO16 | 36 | Unused | verify on board |
+| GPIO20 | 38 | Unused | verify on board |
+| GPIO21 | 40 | 24VAC power enable relay | CH8 (top), verify on board |
 
-Relay board channel numbers for each pin: TBD (not documented in the repo).
+Channel numbering is believed to be CH1 at the bottom of the board and CH8 at the top; verify on the board's silkscreen. The repo doesn't document which channel each station pin drives.
+
+## Safety
+
+The 24 VAC secondary is PTC-fused inside the transformer, but the 120 VAC primary needs its own fuse (see the inline fuse row in the parts table). Mains wiring should be done by someone qualified, kept inside the enclosure and strain-relieved.
