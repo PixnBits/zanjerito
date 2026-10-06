@@ -615,39 +615,6 @@ static void rain_parts(const zk_rain_strip_t *rs, char *bold, size_t cb, char *r
     snprintf(rest, cr, " in the last %d h", hours);
 }
 
-static void draw_steps(lv_obj_t *scr)
-{
-    int k;
-    box_at(scr, 0, 474, ZK_SCREEN_W, 3, COL_STOP, 0);
-    for (k = 0; k < 17; k++) {
-        int x0 = k * 48;
-        int x;
-        int w;
-        x = x0 + 6;
-        w = 12;
-        if (x >= ZK_SCREEN_W) {
-            break;
-        }
-        if (x + w > ZK_SCREEN_W) {
-            w = ZK_SCREEN_W - x;
-        }
-        if (w > 0) {
-            box_at(scr, x, 477, w, 3, COL_STOP, 0);
-        }
-        x = x0 + 30;
-        w = 12;
-        if (x >= ZK_SCREEN_W) {
-            continue;
-        }
-        if (x + w > ZK_SCREEN_W) {
-            w = ZK_SCREEN_W - x;
-        }
-        if (w > 0) {
-            box_at(scr, x, 477, w, 3, COL_STOP, 0);
-        }
-    }
-}
-
 static void show_toast(const char *msg)
 {
     snprintf(g_toast_text, sizeof g_toast_text, "%s", msg ? msg : "");
@@ -1704,6 +1671,10 @@ static void overlays_reset(void)
     g_ov_prev_toast_obj = NULL;
 }
 
+/* Toast and stale pill. The removed step strip was the bottom 6 px;
+ * the pill is 48 px tall with a 10 px gap, so this stays at 416. */
+#define OVERLAY_Y (ZK_SCREEN_H - 6 - 10 - 48)
+
 static void overlays(const zk_snapshot_t *s)
 {
     /* Touch LVGL only when the overlay state changes: set_pos and
@@ -1711,7 +1682,7 @@ static void overlays(const zk_snapshot_t *s)
      * After rebuild, LVGL may reuse object addresses, so rebuild clears
      * this cache via overlays_reset. */
     int show_toast = g_toast_text[0] && zk_platform_mono() < g_toast_until;
-    int y = 474 - 10 - 48;
+    int y = OVERLAY_Y;
     int stale = s->stale ? 1 : 0;
     if (!show_toast) {
         g_toast_text[0] = 0;
@@ -1783,7 +1754,6 @@ static void rebuild(const zk_snapshot_t *s)
     if (g_key.modal == ZK_SCREEN_CONFIRM_STOP || g_key.modal == ZK_SCREEN_CONFIRM_PAUSE) {
         build_modal(scr, g_key.modal);
     }
-    draw_steps(scr);
     apply_content(s);
 }
 

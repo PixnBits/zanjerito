@@ -30,7 +30,6 @@
 #define HOLD_H      114
 #define SCHED_HDR_H 72
 #define SCHED_ROW_H 50
-#define STEP_STRIP_H 6
 #define SCHED_BTN_W 120
 #define SCHED_BTN_H 108
 
@@ -167,7 +166,6 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
     out->screen = R(0, 0, ZK_SCREEN_W, ZK_SCREEN_H);
     out->main = R(MAIN_X, MAIN_Y, MAIN_W, MAIN_H);
     out->rail = R(RAIL_X, PAD_TOP, RAIL_W, MAIN_H);
-    out->step_strip = R(0, ZK_SCREEN_H - STEP_STRIP_H, ZK_SCREEN_W, STEP_STRIP_H);
     rail_geometry(screen, &out->stop, &out->slot);
 
     if (screen == ZK_SCREEN_CONFIRM_STOP || screen == ZK_SCREEN_CONFIRM_PAUSE) {

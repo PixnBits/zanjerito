@@ -26,6 +26,7 @@
 #   w  24 bpp is rejected and the fake fb stays zeros
 #   x  all-black --fbshot exits 3
 #   y  --fbshot without --fb exits 2
+#   z  bottom rows 474..479 are background, not the old red step strip
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -251,6 +252,28 @@ def main():
                 if near(pix(rows, x, y), (r, g, b), tol):
                     n += 1
         print(n)
+        return
+    # bgmatch PATH YREF Y0 Y1 TOL
+    # Every pixel on rows [Y0, Y1) matches the same x on row YREF within TOL.
+    if cmd == "bgmatch":
+        yref, y0, y1, tol = (int(sys.argv[i]) for i in range(3, 7))
+        if yref < 0 or yref >= h or y0 < 0 or y1 > h or y0 >= y1:
+            raise SystemExit("bad rows yref=%d y0=%d y1=%d h=%d" % (yref, y0, y1, h))
+        bad = 0
+        shown = None
+        for y in range(y0, y1):
+            for x in range(w):
+                a = pix(rows, x, y)
+                b = pix(rows, x, yref)
+                if any(abs(i - j) > tol for i, j in zip(a, b)):
+                    bad += 1
+                    if shown is None:
+                        shown = (x, y, a, b)
+        if bad:
+            x, y, a, b = shown
+            raise SystemExit(
+                "bgmatch %d pixels differ; first (%d,%d) %s vs row %d %s tol %d"
+                % (bad, x, y, a, yref, b, tol))
         return
     if cmd == "pix":
         x, y = int(sys.argv[3]), int(sys.argv[4])
@@ -1229,6 +1252,65 @@ case_y() {
     fi
 }
 
+# Rows 474..479 used to be a COL_STOP (#B5361A) bar and dashes. They are
+# screen background now (COL_BG #EFDDBE). Row 470 is the same band.
+case_z() {
+    local fix png fb rc red bg
+    for fix in home-norain running; do
+        png=$TMP/z-$fix.png
+        fb=$TMP/z-$fix.fb
+        : >"$fb"
+        truncate -s $((800 * 480 * 4)) "$fb"
+        set +e
+        run_isolated 20 ZK_FB_FAKE=800x480x32 \
+            "$BIN" \
+            --fb "$fb" \
+            --fixture "$FIX/$fix" \
+            --duration 3 \
+            --dim-after 0 --off-after 0 \
+            --touch "$TMP/no-touch-device" \
+            --backlight "$TMP/empty-sysfs-backlight" \
+            >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+        rc=$?
+        set -e
+        if [[ "$rc" -ne 0 ]]; then
+            echo "z $fix render exit $rc" >&2
+            show_kiosk_err
+            return 1
+        fi
+        set +e
+        run_isolated 10 ZK_FB_FAKE=800x480x32 \
+            "$BIN" --fb "$fb" --fbshot "$png" \
+            >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+        rc=$?
+        set -e
+        if [[ "$rc" -ne 0 ]]; then
+            echo "z $fix fbshot exit $rc" >&2
+            show_kiosk_err
+            return 1
+        fi
+        [[ "$(png_size "$png")" == "800x480" ]] || {
+            echo "z $fix size $(png_size "$png")" >&2
+            return 1
+        }
+        # Same channel tolerance as the fault-banner COL_STOP nearcount.
+        red=$(nearcount "$png" 0 800 474 480 181 54 26 16)
+        if [[ "$red" -ne 0 ]]; then
+            echo "z $fix COL_STOP pixels in rows 474..479: $red" >&2
+            return 1
+        fi
+        bg=$(nearcount "$png" 0 800 470 471 239 221 190 8)
+        if [[ "$bg" -ne 800 ]]; then
+            echo "z $fix row 470 is not COL_BG: $bg/800" >&2
+            return 1
+        fi
+        python3 "$TMP/png.py" bgmatch "$png" 470 474 480 1 || {
+            echo "z $fix rows 474..479 differ from row 470" >&2
+            return 1
+        }
+    done
+}
+
 run_case a case_a
 run_case b case_b
 run_case c case_c
@@ -1254,6 +1336,7 @@ run_case v case_v
 run_case w case_w
 run_case x case_x
 run_case y case_y
+run_case z case_z
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1
