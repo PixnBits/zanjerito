@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "gauge_id": "<GAUGE_ID>",
+  "url": "https://alert.fcd.maricopa.gov/php/showdata2.php",
+  "method": "POST",
+  "body": "ID1={gauge}&ST=rain&NM=200",
+  "timeout_seconds": 15,
+  "poll_minutes": 30,
+  "trigger_inches": 0.25,
+  "window_hours": 24,
+  "dry_days": 2,
+  "heavy_inches": 1.0,
+  "heavy_dry_days": 4,
+  "stale_hours": 7,
+  "max_increment_inches": 2.0,
+  "max_window_inches": 6.0
+}

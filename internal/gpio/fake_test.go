@@ -1,0 +1,85 @@
+package gpio
+
+import (
+	"testing"
+)
+
+func TestFakeSetupSetAllOff(t *testing.T) {
+	d := NewFake()
+	lines := []Line{
+		{ID: "front-west", BCM: 5},
+		{ID: "psu", BCM: 21},
+	}
+	if err := d.Setup("gpiochip0", lines, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Set("front-west", On); err != nil {
+		t.Fatal(err)
+	}
+	st := StateForTest(d)
+	if st["front-west"] != On {
+		t.Fatalf("expected On, got %v", st["front-west"])
+	}
+	if err := d.AllOff(); err != nil {
+		t.Fatal(err)
+	}
+	st = StateForTest(d)
+	if st["front-west"] != Off || st["psu"] != Off {
+		t.Fatalf("expected all off, got %#v", st)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLockoutRefusesEnergize(t *testing.T) {
+	d := NewLockout()
+	_ = d.Setup("gpiochip0", []Line{{ID: "front-west", BCM: 5}}, true)
+	if err := d.Set("front-west", On); err != nil {
+		t.Fatal(err)
+	}
+	st := StateForTest(d)
+	if st["front-west"] != Off {
+		t.Fatalf("lockout must leave line Off, got %v", st["front-west"])
+	}
+}
+
+func TestDualrunLogsIntentLeavesOff(t *testing.T) {
+	d, err := New("dualrun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Setup("gpiochip0", []Line{{ID: "front-west", BCM: 5}}, true)
+	if err := d.Set("front-west", On); err != nil {
+		t.Fatal(err)
+	}
+	st := StateForTest(d)
+	if st["front-west"] != Off {
+		t.Fatalf("dualrun must not energize, got %v", st["front-west"])
+	}
+}
+
+func TestRefuserOnlyLockout(t *testing.T) {
+	if r, ok := NewLockout().(Refuser); !ok || !r.RefusesActuation() {
+		t.Fatal("lockout should refuse actuation")
+	}
+	if r, ok := NewFake().(Refuser); !ok || r.RefusesActuation() {
+		t.Fatal("fake should not refuse actuation")
+	}
+	if r, ok := NewDualrun().(Refuser); !ok || r.RefusesActuation() {
+		t.Fatal("dualrun should not refuse actuation")
+	}
+	d, err := NewGpiocdev()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.(Refuser); ok {
+		t.Fatal("gpiocdev must not implement Refuser")
+	}
+}
+
+func TestUnknownDriver(t *testing.T) {
+	if _, err := New("nope"); err == nil {
+		t.Fatal("expected error")
+	}
+}

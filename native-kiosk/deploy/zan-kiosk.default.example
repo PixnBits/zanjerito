@@ -1,0 +1,45 @@
+# Copied once to /etc/default/zan-kiosk. Later installs do not overwrite it.
+# zan-kiosk.service loads this file (EnvironmentFile). The kiosk is read-only
+# unless ZAN_ALLOW_WRITES=1. An existing install may already have writes on; this example
+# leaves them off.
+
+# Controller base URL. Required. --switch refuses this placeholder.
+ZAN_API=http://CONTROLLER_HOST:8080
+
+# Set to 1 to permit STOP, pause, and resume (the three POSTs).
+# ZAN_ALLOW_WRITES=1
+
+# Framebuffer. Default /dev/fb0 (800x480 on this board).
+# ZAN_FB=/dev/fb0
+
+# evdev device. Omit to let the client autodetect.
+# ZAN_TOUCH=/dev/input/event0
+
+# Idle display power. Dim after this many seconds with no touch, then turn
+# the backlight off after ZAN_OFF_AFTER_SEC (counted from the last touch,
+# not from the dim). 0 disables dimming and off entirely. Off must be
+# greater than dim, or off stays disabled. The client defaults are the
+# same numbers when these are unset.
+ZAN_DIM_AFTER_SEC=120
+ZAN_OFF_AFTER_SEC=600
+
+# Dim brightness, 0-255. Optional. The commented value matches the client
+# default, 51 (about 20% of a 255 panel). 0 does not turn the feature off.
+# A dim never raises brightness, and it is never written below 1 when the
+# panel was already on. Leave this commented to keep the client default.
+# ZAN_DIM_LEVEL=51
+
+# Backlight sysfs device: a name under /sys/class/backlight, or a full
+# directory path. Optional. Unset: auto-detect rpi_backlight, then 10-0045,
+# then the first writable device (C locale sort). Invalid or missing values
+# fall back to auto-detect.
+# ZAN_BACKLIGHT=10-0045
+
+# Fixed level, 0-255, written once at start to the configured backlight
+# directory only (ZAN_BACKLIGHT, or auto-detect). Not every device.
+# That value is what the client later restores. When unset, prepare writes
+# max_brightness there instead. This is not the idle-dim level.
+# BACKLIGHT=255
+
+# Extra client arguments, split on spaces. No embedded spaces.
+# ZAN_EXTRA_ARGS=

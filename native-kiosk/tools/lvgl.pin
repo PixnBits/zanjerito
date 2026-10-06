@@ -1,0 +1,4 @@
+# LVGL source pin. tools/fetch-lvgl.sh reads these keys.
+tag=v9.2.2
+commit=7f07a129e8d77f4984fff8e623fd5be18ff42e74
+repo=https://github.com/lvgl/lvgl.git

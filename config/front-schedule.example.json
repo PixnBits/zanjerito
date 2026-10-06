@@ -1,0 +1,12 @@
+{
+  "id": "front-parity",
+  "enabled": true,
+  "note": "front.sh parity: west 4, north 8, south 8",
+  "weekdays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+  "start": "06:00",
+  "steps": [
+    {"station_id": "front-west", "minutes": 4},
+    {"station_id": "front-north", "minutes": 8},
+    {"station_id": "front-south", "minutes": 8}
+  ]
+}

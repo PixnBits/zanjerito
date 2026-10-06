@@ -1,0 +1,47 @@
+[Unit]
+Description=Zanjerito native framebuffer kiosk
+# Soft dependency only. The client already shows "Can't reach the controller"
+# when the API is down, so this unit does not Requires= zanjerito.service.
+After=network-online.target zanjerito.service
+Wants=network-online.target
+# The display manager and the tty1 login prompt both take the framebuffer.
+Conflicts=lightdm.service getty@tty1.service
+# Unlimited restarts, same policy as the old transient systemd-run unit.
+# StartLimitIntervalSec= belongs in [Unit]. On systemd 259 the same key in
+# [Service] is an unknown key and is ignored, which would restore the default
+# burst and stop restarting the panel. 0 disables the limit.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+SupplementaryGroups=video input
+EnvironmentFile=-/etc/default/zan-kiosk
+# prepare is root (+): fbcon cursor, tty cursor, console blank, and the
+# configured backlight directory (ZAN_BACKLIGHT, else rpi_backlight).
+# It chgrp's those nodes to video and chmod g+w, best effort.
+# BACKLIGHT unset writes max_brightness there. BACKLIGHT set writes that
+# level to the same directory only. A missing sysfs file must not fail the
+# unit. Copying this unit does not apply it.
+ExecStartPre=+/opt/zanjerito/zan-kiosk-run.sh prepare
+# run execs the client. No shell is left around. There is no ExecStop=.
+# The kiosk is only a client. Valve safety lives in zanjerito.service
+# (SIGTERM => engine all-off, and the max_on limit). A STOP or all-off on
+# every kiosk stop, restart, or crash-restart would cancel a scheduled or
+# manual run for no reason, and it would depend on the kiosk being able to
+# POST. An earlier Chromium-unit draft put all-off on the UI unit. That
+# belongs on the daemon unit, which already has it.
+ExecStart=/opt/zanjerito/zan-kiosk-run.sh run
+# Panel first, then the VT cursor. Both are root and best effort.
+ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight
+ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor
+# 78 is an unsupported framebuffer (EX_CONFIG). Do not list exit status 1:
+# a missing framebuffer at boot also exits 1 and must keep restarting.
+# 78 stops the loop. reset-backlight turns the panel off for that status.
+RestartPreventExitStatus=78
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

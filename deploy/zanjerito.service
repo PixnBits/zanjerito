@@ -1,0 +1,19 @@
+[Unit]
+Description=Zanjerito irrigation controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/zanjerito
+EnvironmentFile=-/opt/zanjerito/zanjerito.env
+ExecStart=/opt/zanjerito/zanjerito -config /opt/zanjerito/config.json -driver ${DRIVER} -listen ${LISTEN}
+# SIGTERM is handled by cmd/zanjerito: engine.Stop() force all-off, then Close.
+ExecStop=/bin/kill -s TERM $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
