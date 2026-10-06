@@ -130,19 +130,19 @@ Pass: exit 0, and `nonblack` well above zero (more than half the pixels for the 
 - The unit is `After=plymouth-quit.service` (and still `After=` `network-online.target` and `zanjerito.service`). It does not `Wants=` or `Requires=` Plymouth. See [Plymouth splash](#plymouth-splash).
 - On each start, `prepare` hides the console cursor, turns console blank off, and prepares the backlight. The client then dims and blanks from the timers below. Copying these files does not change a running panel. Applying them on the board is a separate step.
 
+The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `RestartPreventExitStatus=78` stops that loop only when the framebuffer format is unsupported. Exit 1 still restarts, including a framebuffer that is not there yet at boot. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
+
 ## Plymouth splash
 
 Without ordering, the kiosk can paint Home and then lose it. On a Pi boot journal (kernel-relative seconds), `zan-kiosk` started at 12.38 s while "Terminate Plymouth Boot Screen" (`plymouth-quit.service` / `plymouth-quit-wait.service`) ran 12.72–12.83 s, and `plymouthd` received quit signals at about 12.77 / 12.81 s. Splash teardown can clear `/dev/fb0` after the kiosk's first frame. Home is static, so nothing repaints. Observed sequence: rainbow, Pi OS boot screen, then a blank panel.
 
 `After=plymouth-quit.service` waits for the unit that sends `plymouth quit`. `After=` on a missing unit is ignored, so a board without Plymouth still starts. There is no `Wants=` or `Requires=` on Plymouth.
 
-Do not `After=plymouth-quit-wait.service`. Its `multi-user.target` ordering differs between images, and this kiosk is `WantedBy=multi-user.target`, so leaving it out rules out any ordering loop. On Raspberry Pi OS Buster (systemd 241), `plymouth-quit.service` is `After=basic.target` and `Before=multi-user.target`, so the chosen `After=` cannot form a cycle. `plymouth-quit-wait` only waits for the quit to finish; ordering after `plymouth-quit.service` is enough.
+Do not `After=plymouth-quit-wait.service`. Its `multi-user.target` ordering differs between images, and this kiosk is `WantedBy=multi-user.target`, so leaving it out rules out any ordering loop. On Raspberry Pi OS Bookworm (systemd 252), `plymouth-quit.service` is `After=basic.target` and `Before=multi-user.target`, so the chosen `After=` cannot form a cycle. `plymouth-quit-wait` only waits for the quit to finish; ordering after `plymouth-quit.service` is enough.
 
 The client also forces a full-screen redraw once at about 2 s after the first rendered frame, and once more at about 5 s (monotonic clock, two one-shots, never periodic). That covers a quit that still clears `fb0` after the kiosk has started. The paint is skipped while display power is dimmed or off; it does not wake or brighten the panel and does not touch the API.
 
 After a reboot, the panel should show Home. `zanjerito.service` must stay active; this unit does not restart the daemon. Check with `systemctl is-active zan-kiosk`, `systemctl is-active zanjerito`, and `journalctl -u zan-kiosk -b`.
-
-The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `RestartPreventExitStatus=78` stops that loop only when the framebuffer format is unsupported. Exit 1 still restarts, including a framebuffer that is not there yet at boot. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
 
 ## What does not change
 
@@ -210,6 +210,8 @@ Rollback runs that same subcommand, best effort, after it stops the kiosk. A fai
 
 Exit status 78 means the client opened the framebuffer but cannot draw its pixel format: something other than 16 bpp RGB565 or 32 bpp XRGB8888. `RestartPreventExitStatus=78` keeps systemd from restarting it, so the unit stays failed and `reset-backlight` turns the panel off. The daemon keeps running and watering is not affected; only the screen is down. Nothing retries on its own until the next boot.
 
+Exit 78 is not only about depth. The same latch applies to geometry, offset and channel-order errors (for example zero resolution, a short `line_length`, an offset outside the buffer, or an unsupported channel layout). The journal line after `fb: unsupported framebuffer format:` names the reason, so read it before changing anything.
+
 1. Confirm the cause. `systemctl status zan-kiosk` shows `status=78/CONFIG`, and the journal has a line starting `fb: unsupported framebuffer format:`:
 
    ```sh
@@ -225,7 +227,7 @@ Exit status 78 means the client opened the framebuffer but cannot draw its pixel
    sudo systemctl reset-failed zan-kiosk && sudo systemctl start zan-kiosk
    ```
 
-4. Check it with `--fbshot` as in [Check](#check). If it exits 78 again, the format is still unsupported.
+4. Check it with `--fbshot` as in [Check](#check). If `--fbshot` exits 1 with `fb: unsupported framebuffer format`, or the unit fails with 78 again, the format is still unsupported.
 
 Exit status 1 is different: the unit keeps restarting every 2 seconds (for example while `/dev/fb0` is not there yet at boot), and there is no failed state to clear.
 

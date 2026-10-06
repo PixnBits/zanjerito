@@ -6,17 +6,17 @@ Description=Zanjerito native framebuffer kiosk
 # first kiosk frame. After= on a missing unit is ignored; no Wants=/Requires=.
 # Not After=plymouth-quit-wait.service: it only waits for the quit to finish,
 # and its multi-user.target ordering differs between images, so leaving it out
-# rules out any loop with WantedBy=multi-user.target. On Raspberry Pi OS Buster
-# (systemd 241) plymouth-quit.service is After=basic.target and
+# rules out any loop with WantedBy=multi-user.target. On Raspberry Pi OS
+# Bookworm (systemd 252) plymouth-quit.service is After=basic.target and
 # Before=multi-user.target, so this After= cannot form a cycle.
 After=plymouth-quit.service network-online.target zanjerito.service
 Wants=network-online.target
 # The display manager and the tty1 login prompt both take the framebuffer.
 Conflicts=lightdm.service getty@tty1.service
 # Unlimited restarts, same policy as the old transient systemd-run unit.
-# StartLimitIntervalSec= belongs in [Unit]. On systemd 259 the same key in
-# [Service] is an unknown key and is ignored, which would restore the default
-# burst and stop restarting the panel. 0 disables the limit.
+# StartLimitIntervalSec= belongs in [Unit]. In [Service] the key is unknown
+# and ignored, which would restore the default burst and stop restarting the
+# panel. 0 disables the limit.
 StartLimitIntervalSec=0
 
 [Service]
