@@ -1,6 +1,6 @@
 # Bill of materials
 
-TBD entries are placeholders to fill in. No shop or affiliate links.
+No shop or affiliate links.
 
 | Part | Qty | Notes/specs | Status |
 |---|---|---|---|
@@ -13,6 +13,9 @@ TBD entries are placeholders to fill in. No shop or affiliate links.
 | Standard 24 VAC sprinkler valve solenoids | 4 | One per active station relay (see Wiring) | Installed |
 | 24 VAC valve transformer: Hotop PS-D40 plug-in transformer internals | 1 | 120 VAC in, 24 VAC 40 VA out, PTC-fused secondary. Model believed; confirm on unit | Installed |
 | Inline fuse holder for 5x20 mm fuses, plus a 1 A 250 V slow-blow (time-delay) fuse | 1 each | On the transformer's 120 VAC primary hot leg, after the power relay. The 40 VA primary draws about 0.33 A; slow-blow rides through transformer inrush | Required |
+| Pi 3B standoffs | 4 + screws | M2.5 brass standoffs and screws (the Pi's mounting holes take M2.5), about 6-10 mm long to clear solder joints | Required |
+| Relay board standoffs | 4 + screws | M3 (verify hole size; a generic datasheet for this style of 8-channel board gives 3.1 mm holes) brass standoffs and screws, about 6-10 mm long | Required |
+| Fasteners: M3 bolts and nuts | As needed | Mount the Mean Well RS-15-5 supply and the transformer | Required |
 | Wire: valve field | 1 run | 18 AWG multi-conductor direct-burial sprinkler (irrigation) wire; one conductor per valve plus a shared common. Use 16 AWG for the common on very long runs | Required |
 | Wire: 120 VAC side | As needed | Plug to power relay to fuse to transformer primary: 18 AWG stranded, insulation rated 300 V or higher | Required |
 | Wire: 5 V supply to Pi and relay board | As needed | 18-20 AWG, kept short to avoid Pi undervoltage | Required |
