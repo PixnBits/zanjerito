@@ -156,6 +156,16 @@ func (e *Engine) Status() Status {
 	return st
 }
 
+// SetLastErrorForTest sets the error Status reports. Production code does not call it.
+func (e *Engine) SetLastErrorForTest(err error) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.lastErr = err
+	e.mu.Unlock()
+}
+
 // SetPause arms a manual watering hold. until==nil means until further notice.
 // Does not Stop(); caller cancels any active run separately.
 func (e *Engine) SetPause(until *time.Time, reason string) {
