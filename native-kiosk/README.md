@@ -44,7 +44,7 @@ From `native-kiosk/`:
 | `make fetch-lvgl` | Clone the pinned LVGL tree if `.cache/lvgl` is missing |
 | `make host` | `build/zan-kiosk-host` for this machine |
 | `make arm` | Static 32-bit ARM hard-float binary `build/zan-kiosk-arm` via Docker (`debian:bookworm-slim`, `gcc-arm-linux-gnueabihf`, `-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard -static`) |
-| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`) |
+| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`, `test_boot`) |
 | `make e2e` | Build the host binary, then `tests/e2e.sh` |
 | `make check` | `test`, then `e2e`, then `deploy-check` |
 | `make deploy-check` | `tests/deploy_test.sh` (unit, installer, wrapper). No LVGL build |
@@ -137,6 +137,7 @@ Example against a daemon already listening on localhost (nothing in this tree st
 | `test_http` | GET and POST to a localhost stub; read-only stop does not connect; cancel, pause, and resume paths; timeout; oversized body; non-`http` URL rejected |
 | `test_data` | `/api/kiosk` poll and `/api/schedules` slow poll; 404 => NEEDS_UPDATE and no `/api/status`; stale after the stub stops; fixture load opens no socket; writes POST and repoll kiosk |
 | `test_stop_latency` | STOP is posted while a GET is in flight; a repeated STOP or resume is one POST; identical pause bodies collapse; a different pause is still sent; the queue still overflows; read-only sends no POST |
+| `test_boot` | Forced redraw after first frame is not due before 2 s, due once at 2 s, due once more at 5 s, never again; unsigned elapsed still works across a clock wrap |
 
 `ZK_POLL_MS_STATUS` overrides the 2 second `/api/kiosk` poll inside those data tests. It is not a user-facing flag.
 
@@ -166,7 +167,7 @@ The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pa
 
 ## Raspberry Pi
 
-Target board is a Pi 3B (armv7). Pass `--fb /dev/fb0`. The client supports 16 bpp RGB565 and 32 bpp XRGB8888, picked from the framebuffer's bits_per_pixel and channel layout, and exits 1 with a clear error on anything else. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
+Target board is a Pi 3B (armv7). Pass `--fb /dev/fb0`. The client supports 16 bpp RGB565 and 32 bpp XRGB8888, picked from the framebuffer's bits_per_pixel and channel layout, and exits 78 with a clear error on anything else. Other failures still exit 1. `--fbshot` still exits 1 for an unsupported format. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
 
 On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Boot-persistent install is opt-in; `make` does not enable it. See below.
 
@@ -225,7 +226,7 @@ Backlight writes, in order:
 
 The original brightness and `max_brightness` are read in `zk_power_init` when dimming is enabled and the backlight directory is usable, and restored by `zk_power_shutdown`. They are not read again on the first dim. Shutdown that never dimmed or blanked writes nothing. Normal exit and SIGINT/SIGTERM both get there: the signal handler only sets a flag, and the main loop calls shutdown. A second shutdown does not write again.
 
-`brightness` on the Pi panel is `root:root` mode `0644`. `prepare` in `deploy/zan-kiosk-run.sh` (root, `ExecStartPre=+`) runs `chgrp video` and `chmod g+w` on `brightness` and `bl_power` in the configured directory only (`ZAN_BACKLIGHT`, or auto-detect: `rpi_backlight`, then `10-0045`, then the first writable device) when the file exists. On Bookworm with KMS, the official 7-inch DSI panel backlight appears as `10-0045`; `brightness` may already be group `video`, `bl_power` is root-only, and `prepare` handles it. It writes `0` to `bl_power` (panel on) in that same configured directory when the file exists; absence or a failed write is logged and ignored. If `BACKLIGHT` is unset it also writes `max_brightness` there, so the client restores full brightness. If `BACKLIGHT` is set, that fixed level is written to that same directory only, not to every backlight device, and it is the saved original. The unit's `ExecStopPost` is `reset-backlight` then `restore-cursor`. `reset-backlight` writes the panel max and `bl_power` 0 on that same directory. Rollback calls it best effort and still does not fail the desktop restore. This repository does not run those steps on a machine.
+`brightness` on the Pi panel is `root:root` mode `0644`. `prepare` in `deploy/zan-kiosk-run.sh` (root, `ExecStartPre=+`) runs `chgrp video` and `chmod g+w` on `brightness` and `bl_power` in the configured directory only (`ZAN_BACKLIGHT`, or auto-detect: `rpi_backlight`, then `10-0045`, then the first writable device) when the file exists. On Bookworm with KMS, the official 7-inch DSI panel backlight appears as `10-0045`; `brightness` may already be group `video`, `bl_power` is root-only, and `prepare` handles it. It writes `0` to `bl_power` (panel on) in that same configured directory when the file exists; absence or a failed write is logged and ignored. If `BACKLIGHT` is unset it also writes `max_brightness` there, so the client restores full brightness. If `BACKLIGHT` is set, that fixed level is written to that same directory only, not to every backlight device, and it is the saved original. The unit's `ExecStopPost` is `reset-backlight` then `restore-cursor`. `reset-backlight` writes the panel max and `bl_power` 0 on that same directory, unless `EXIT_STATUS` is 78 (unsupported framebuffer), when it writes brightness 0 and `bl_power` 4. Rollback calls it best effort and still does not fail the desktop restore. This repository does not run those steps on a machine.
 
 Failure modes, all non-fatal, each logged once on stderr:
 
@@ -248,7 +249,7 @@ sudo reboot
 # or, without a reboot: sudo native-kiosk/deploy/install-kiosk.sh --switch --now
 ```
 
-`--switch` sets the default target to `multi-user.target`, disables `lightdm`, and enables `zan-kiosk`. `--now` also stops `lightdm` and starts the kiosk. The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`.
+`--switch` sets the default target to `multi-user.target`, disables `lightdm`, and enables `zan-kiosk`. `--now` also stops `lightdm` and starts the kiosk. The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`. It is `After=plymouth-quit.service` (and still `network-online.target` and `zanjerito.service`) so splash teardown cannot clear `/dev/fb0` under the first frame. It does not `Wants=` or `Requires=` Plymouth, and it does not `After=plymouth-quit-wait.service` (that wait unit can be `After=multi-user.target`, which would loop with `WantedBy=multi-user.target`). The client also redraws the screen once at about 2 s after the first frame and once more at about 5 s; those paints are skipped while dimmed or off.
 
 It does not change the daemon, `config.json`, `zanjerito.env`, cron, or boot `config.txt` / `cmdline.txt`. It does not stop or restart `zanjerito.service`.
 
@@ -256,7 +257,7 @@ There is no `ExecStop=` that sends STOP or all-off. The kiosk is only a client. 
 
 Writes stay off unless `ZAN_ALLOW_WRITES=1`. An existing install may already have writes on. The installed example leaves them off.
 
-`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. It also `chgrp video` and `chmod g+w` on the auto-detected or `ZAN_BACKLIGHT` directory (not every device), writes `0` to `bl_power` there (that path only), and writes either `max_brightness` or the optional `BACKLIGHT` level. Missing files are skipped. Idle dim and off are the client's job; see Display power above. `ZAN_DIM_AFTER_SEC=0` turns both off. After the client exits, `ExecStopPost` runs `reset-backlight` and then `restore-cursor`. Applying this on a board is a separate step from the files in this tree.
+`prepare` (root, each start) writes `0` to `fbcon/cursor_blink` when that file exists, sends `ESC[?25l` and `ESC[9;0]` to `/dev/tty1`, and runs `setterm --blank 0 --powerdown 0 --cursor off` when `setterm` exists. It also `chgrp video` and `chmod g+w` on the auto-detected or `ZAN_BACKLIGHT` directory (not every device), writes `0` to `bl_power` there (that path only), and writes either `max_brightness` or the optional `BACKLIGHT` level. Missing files are skipped. Idle dim and off are the client's job; see Display power above. `ZAN_DIM_AFTER_SEC=0` turns both off. After the client exits, `ExecStopPost` runs `reset-backlight` and then `restore-cursor`. Exit 78 turns the backlight off; any other status restores it. Applying this on a board is a separate step from the files in this tree.
 
 Kernel printk can still draw on tty1. `sudo dmesg -n 1` is optional and not persistent. Putting the tty in `KD_GRAPHICS` is a future client change.
 

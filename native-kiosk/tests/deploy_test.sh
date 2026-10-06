@@ -78,7 +78,7 @@ fi
 
 # --- unit text ---
 for needle in \
-    'After=network-online.target zanjerito.service' \
+    'After=plymouth-quit.service network-online.target zanjerito.service' \
     'Wants=network-online.target' \
     'Conflicts=lightdm.service getty@tty1.service' \
     'StartLimitIntervalSec=0' \
@@ -90,6 +90,7 @@ for needle in \
     'ExecStart=/opt/zanjerito/zan-kiosk-run.sh run' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh reset-backlight' \
     'ExecStopPost=+/opt/zanjerito/zan-kiosk-run.sh restore-cursor' \
+    'RestartPreventExitStatus=78' \
     'Restart=always' \
     'RestartSec=2' \
     'WantedBy=multi-user.target' \
@@ -113,6 +114,36 @@ if [ -z "$reset_line" ] || [ -z "$restore_line" ] || [ "$reset_line" -ge "$resto
 fi
 if grep -E '^Requires=' "$UNIT" >/dev/null; then
     echo "unit must not Requires= the daemon" >&2
+    exit 1
+fi
+if grep -E '^(Wants|Requires)=.*plymouth' "$UNIT" >/dev/null; then
+    echo "unit must not Wants= or Requires= plymouth" >&2
+    exit 1
+fi
+after_line=$(grep -E '^After=' "$UNIT" || true)
+if ! printf '%s\n' "$after_line" | grep -F 'plymouth-quit.service' >/dev/null; then
+    echo "unit After= must include plymouth-quit.service" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$after_line" | grep -F 'network-online.target' >/dev/null; then
+    echo "unit After= must keep network-online.target" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$after_line" | grep -F 'zanjerito.service' >/dev/null; then
+    echo "unit After= must keep zanjerito.service" >&2
+    exit 1
+fi
+if printf '%s\n' "$after_line" | grep -F 'plymouth-quit-wait' >/dev/null; then
+    echo "unit must not order After=plymouth-quit-wait.service" >&2
+    exit 1
+fi
+conflicts_n=$(grep -c -E '^Conflicts=' "$UNIT" || true)
+if [ "$conflicts_n" -ne 1 ]; then
+    echo "unit must keep a single Conflicts= line" >&2
+    exit 1
+fi
+if ! grep -E '^Conflicts=lightdm.service getty@tty1.service$' "$UNIT" >/dev/null; then
+    echo "unit Conflicts= must stay lightdm.service getty@tty1.service" >&2
     exit 1
 fi
 pass
@@ -786,6 +817,32 @@ env -u BACKLIGHT ZAN_ROOT=$acc ZAN_BACKLIGHT=/sys/class/backlight/rpi_backlight 
 env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$miss "$RUN" reset-backlight >/dev/null 2>&1
 pass
 
+# EXIT_STATUS=78 turns the configured backlight off. Unset, 0, and 1 restore max.
+ex=$TMP/fake-exit78
+mkdir -p "$ex/sys/class/backlight/rpi_backlight"
+printf '200\n' >"$ex/sys/class/backlight/rpi_backlight/max_brightness"
+printf '40\n' >"$ex/sys/class/backlight/rpi_backlight/brightness"
+printf '1\n' >"$ex/sys/class/backlight/rpi_backlight/bl_power"
+env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex EXIT_STATUS=78 \
+    "$RUN" reset-backlight >/dev/null 2>"$TMP/exit78.err"
+[ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/brightness")" = 0 ]
+[ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/bl_power")" = 4 ]
+grep -F 'reset-backlight: unsupported framebuffer (exit 78); backlight off' "$TMP/exit78.err" >/dev/null
+for st in unset 0 1; do
+    printf '40\n' >"$ex/sys/class/backlight/rpi_backlight/brightness"
+    printf '1\n' >"$ex/sys/class/backlight/rpi_backlight/bl_power"
+    if [ "$st" = unset ]; then
+        env -u EXIT_STATUS -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex \
+            "$RUN" reset-backlight >/dev/null 2>&1
+    else
+        env -u BACKLIGHT -u ZAN_BACKLIGHT ZAN_ROOT=$ex EXIT_STATUS="$st" \
+            "$RUN" reset-backlight >/dev/null 2>&1
+    fi
+    [ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/brightness")" = 200 ]
+    [ "$(tr -d '[:space:]' <"$ex/sys/class/backlight/rpi_backlight/bl_power")" = 0 ]
+done
+pass
+
 # 10-0045 only: prepare writes bl_power 0 and max brightness there; reset restores there.
 dsi=$TMP/fake-dsi
 mkdir -p "$dsi/sys/class/backlight/10-0045" "$dsi/dev"
@@ -983,6 +1040,8 @@ for needle in \
     'CONTROLLER_HOST' \
     'ZAN_ALLOW_WRITES' \
     'make -C native-kiosk arm' \
+    'plymouth-quit.service' \
+    'plymouth-quit-wait.service' \
     '--fbshot'
 do
     if ! grep -F -- "$needle" "$DOC" >/dev/null; then

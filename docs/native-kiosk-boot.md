@@ -111,7 +111,7 @@ sudo journalctl -u zan-kiosk -n 50 --no-pager
 
 The daemon's active state should be unchanged from before the switch. This install does not restart it.
 
-The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes it exit 1. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer.
+The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes the running client exit 78. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer. `--fbshot` still exits 1 for an unsupported format.
 
 `--script` `shot:`, `--shot`, and `--shot-all` render the in-app memory display. They do not prove what the panel shows. Deploy verification must use `--fbshot`, which reads the real framebuffer at whatever depth it is. The `pi` user is in group `video`:
 
@@ -127,9 +127,22 @@ Pass: exit 0, and `nonblack` well above zero (more than half the pixels for the 
 - `lightdm` is disabled.
 - `zan-kiosk.service` is enabled (`WantedBy=multi-user.target`).
 - The unit `Conflicts=` with `lightdm.service` and `getty@tty1.service`, so the display manager and a login prompt on tty1 do not fight for `/dev/fb0`.
+- The unit is `After=plymouth-quit.service` (and still `After=` `network-online.target` and `zanjerito.service`). It does not `Wants=` or `Requires=` Plymouth. See [Plymouth splash](#plymouth-splash).
 - On each start, `prepare` hides the console cursor, turns console blank off, and prepares the backlight. The client then dims and blanks from the timers below. Copying these files does not change a running panel. Applying them on the board is a separate step.
 
-The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
+## Plymouth splash
+
+Without ordering, the kiosk can paint Home and then lose it. On a Pi boot journal (kernel-relative seconds), `zan-kiosk` started at 12.38 s while "Terminate Plymouth Boot Screen" (`plymouth-quit.service` / `plymouth-quit-wait.service`) ran 12.72–12.83 s, and `plymouthd` received quit signals at about 12.77 / 12.81 s. Splash teardown can clear `/dev/fb0` after the kiosk's first frame. Home is static, so nothing repaints. Observed sequence: rainbow, Pi OS boot screen, then a blank panel.
+
+`After=plymouth-quit.service` waits for the unit that sends `plymouth quit`. `After=` on a missing unit is ignored, so a board without Plymouth still starts. There is no `Wants=` or `Requires=` on Plymouth.
+
+Do not `After=plymouth-quit-wait.service`. Its `multi-user.target` ordering differs between images, and this kiosk is `WantedBy=multi-user.target`, so leaving it out rules out any ordering loop. On Raspberry Pi OS Buster (systemd 241), `plymouth-quit.service` is `After=basic.target` and `Before=multi-user.target`, so the chosen `After=` cannot form a cycle. `plymouth-quit-wait` only waits for the quit to finish; ordering after `plymouth-quit.service` is enough.
+
+The client also forces a full-screen redraw once at about 2 s after the first rendered frame, and once more at about 5 s (monotonic clock, two one-shots, never periodic). That covers a quit that still clears `fb0` after the kiosk has started. The paint is skipped while display power is dimmed or off; it does not wake or brighten the panel and does not touch the API.
+
+After a reboot, the panel should show Home. `zanjerito.service` must stay active; this unit does not restart the daemon. Check with `systemctl is-active zan-kiosk`, `systemctl is-active zanjerito`, and `journalctl -u zan-kiosk -b`.
+
+The process runs as `pi`, with supplementary groups `video` and `input`, so it can open `/dev/fb0` and the touch device. `Restart=always`, `RestartSec=2`. `RestartPreventExitStatus=78` stops that loop only when the framebuffer format is unsupported. Exit 1 still restarts, including a framebuffer that is not there yet at boot. `StartLimitIntervalSec=0` is in `[Unit]` (systemd ignores that key in `[Service]`), so a crash does not hit the default start burst.
 
 ## What does not change
 
@@ -154,7 +167,7 @@ Stopping `zan-kiosk` kills the client. Water that is already on keeps running un
 - Write `ESC[9;0]` to `/dev/tty1` to set the console blank timeout to 0 minutes.
 - If `setterm` exists, run `setterm --blank 0 --powerdown 0 --cursor off` with stdin and stdout on `/dev/tty1`. A failure is ignored.
 
-`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
+`ExecStopPost=+` runs `reset-backlight`, then `restore-cursor`. There is still no `ExecStop=`. `reset-backlight` writes `max_brightness` into `brightness` and `0` into `bl_power` (best effort). After exit 78 it writes brightness `0` and `bl_power` `4` instead, so a panel that cannot be drawn does not stay lit. `restore-cursor` writes `ESC[?25h` to `/dev/tty1`.
 
 Kernel messages can still land on tty1 and draw over the framebuffer. Optional, this boot only, and not done by the unit:
 

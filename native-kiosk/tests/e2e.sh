@@ -23,10 +23,11 @@
 #   t  SIGINT restores the saved brightness
 #   u  16 bpp RGB565 fake fb matches the memory display
 #   v  32 bpp XRGB8888 fake fb matches the memory display
-#   w  24 bpp is rejected and the fake fb stays zeros
+#   w  24 bpp is rejected (exit 78) and the fake fb stays zeros
 #   x  all-black --fbshot exits 3
 #   y  --fbshot without --fb exits 2
-#   z  bottom rows 474..479 are background, not the old red step strip
+#   z  padded stride keeps the sentinel and matches an unpadded fbshot
+#   aa bottom rows 474..479 are background, not the old red step strip
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -292,6 +293,12 @@ def main():
         b = pix(rowsb, x, y)
         if any(abs(i - j) > tol for i, j in zip(a, b)):
             raise SystemExit("pixel %d,%d %s vs %s tol %d" % (x, y, a, b, tol))
+        return
+    if cmd == "identical":
+        bpath = sys.argv[3]
+        wb, hb, rowsb = load(bpath)
+        if (w, h) != (wb, hb) or rows != rowsb:
+            raise SystemExit("png differs")
         return
     raise SystemExit("unknown cmd")
 
@@ -1172,7 +1179,7 @@ case_w() {
     rc=$?
     set -e
     t1=$(date +%s)
-    if [[ "$rc" -eq 0 || "$rc" -eq 124 ]]; then
+    if [[ "$rc" -ne 78 ]]; then
         echo "24 bpp exit $rc" >&2
         show_kiosk_err
         return 1
@@ -1252,13 +1259,121 @@ case_y() {
     fi
 }
 
+# Padded line_length. Padding bytes stay 0xA5. The visible frame matches
+# the same fixture drawn at the tight stride.
+stride_case() {
+    local bpp=$1
+    local fmt=$2
+    local pp=$3
+    local stride=$4
+    local fb=$TMP/fbpad$bpp
+    local plain=$TMP/fbplain$bpp
+    local shot_pad=$TMP/shotpad$bpp.png
+    local shot_plain=$TMP/shotplain$bpp.png
+    local bytes=$((stride * 480))
+    local plain_bytes=$((800 * 480 * pp))
+    local rc
+
+    python3 -c 'import sys; open(sys.argv[1], "wb").write(b"\xa5" * int(sys.argv[2]))' \
+        "$fb" "$bytes" || return 1
+    set +e
+    run_isolated 20 ZK_FB_FAKE="800x480x${bpp}x${stride}" \
+        "$BIN" \
+        --fb "$fb" \
+        --fixture "$FIX/home-norain" \
+        --duration 3 \
+        --dim-after 0 --off-after 0 \
+        --touch "$TMP/no-touch-device" \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "padded ${bpp} render exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -E "fb: .* 800x480 ${bpp}bpp ${fmt} stride ${stride}$" "$TMP/kiosk.err" >/dev/null; then
+        echo "missing padded ${bpp}bpp line" >&2
+        show_kiosk_err
+        return 1
+    fi
+    python3 - "$fb" "$bpp" "$stride" <<'PY' || return 1
+import sys
+path, bpp, stride = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+w, h = 800, 480
+pix = w * (bpp // 8)
+data = open(path, "rb").read()
+need = stride * h
+if len(data) != need:
+    raise SystemExit("len %d != %d" % (len(data), need))
+if pix >= stride:
+    raise SystemExit("no padding")
+sent = bytes([0xA5]) * (stride - pix)
+for y in range(h):
+    row = data[y * stride:(y + 1) * stride]
+    if row[pix:] != sent:
+        raise SystemExit("padding row %d" % y)
+PY
+    : >"$plain"
+    truncate -s "$plain_bytes" "$plain" || return 1
+    set +e
+    run_isolated 20 ZK_FB_FAKE="800x480x${bpp}" \
+        "$BIN" \
+        --fb "$plain" \
+        --fixture "$FIX/home-norain" \
+        --duration 3 \
+        --dim-after 0 --off-after 0 \
+        --touch "$TMP/no-touch-device" \
+        --backlight "$TMP/empty-sysfs-backlight" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "plain ${bpp} render exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    set +e
+    run_isolated 10 ZK_FB_FAKE="800x480x${bpp}x${stride}" \
+        "$BIN" --fb "$fb" --fbshot "$shot_pad" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "padded fbshot ${bpp} exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    set +e
+    run_isolated 10 ZK_FB_FAKE="800x480x${bpp}" \
+        "$BIN" --fb "$plain" --fbshot "$shot_plain" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+        echo "plain fbshot ${bpp} exit $rc" >&2
+        show_kiosk_err
+        return 1
+    fi
+    python3 "$TMP/png.py" identical "$shot_pad" "$shot_plain" || {
+        echo "padded ${bpp} png differs from unpadded" >&2
+        return 1
+    }
+}
+
+case_z() {
+    stride_case 32 XRGB8888 4 3328 || return 1
+    stride_case 16 RGB565 2 1664 || return 1
+}
+
 # Rows 474..479 used to be a COL_STOP (#B5361A) bar and dashes. They are
 # screen background now (COL_BG #EFDDBE). Row 470 is the same band.
-case_z() {
+case_aa() {
     local fix png fb rc red bg
     for fix in home-norain running; do
-        png=$TMP/z-$fix.png
-        fb=$TMP/z-$fix.fb
+        png=$TMP/aa-$fix.png
+        fb=$TMP/aa-$fix.fb
         : >"$fb"
         truncate -s $((800 * 480 * 4)) "$fb"
         set +e
@@ -1274,7 +1389,7 @@ case_z() {
         rc=$?
         set -e
         if [[ "$rc" -ne 0 ]]; then
-            echo "z $fix render exit $rc" >&2
+            echo "aa $fix render exit $rc" >&2
             show_kiosk_err
             return 1
         fi
@@ -1285,27 +1400,27 @@ case_z() {
         rc=$?
         set -e
         if [[ "$rc" -ne 0 ]]; then
-            echo "z $fix fbshot exit $rc" >&2
+            echo "aa $fix fbshot exit $rc" >&2
             show_kiosk_err
             return 1
         fi
         [[ "$(png_size "$png")" == "800x480" ]] || {
-            echo "z $fix size $(png_size "$png")" >&2
+            echo "aa $fix size $(png_size "$png")" >&2
             return 1
         }
         # Same channel tolerance as the fault-banner COL_STOP nearcount.
         red=$(nearcount "$png" 0 800 474 480 181 54 26 16)
         if [[ "$red" -ne 0 ]]; then
-            echo "z $fix COL_STOP pixels in rows 474..479: $red" >&2
+            echo "aa $fix COL_STOP pixels in rows 474..479: $red" >&2
             return 1
         fi
         bg=$(nearcount "$png" 0 800 470 471 239 221 190 8)
         if [[ "$bg" -ne 800 ]]; then
-            echo "z $fix row 470 is not COL_BG: $bg/800" >&2
+            echo "aa $fix row 470 is not COL_BG: $bg/800" >&2
             return 1
         fi
         python3 "$TMP/png.py" bgmatch "$png" 470 474 480 1 || {
-            echo "z $fix rows 474..479 differ from row 470" >&2
+            echo "aa $fix rows 474..479 differ from row 470" >&2
             return 1
         }
     done
@@ -1337,6 +1452,7 @@ run_case w case_w
 run_case x case_x
 run_case y case_y
 run_case z case_z
+run_case aa case_aa
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

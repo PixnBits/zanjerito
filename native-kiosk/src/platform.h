@@ -20,6 +20,12 @@ void zk_platform_mark_start(void);
 double zk_platform_mono(void);
 double zk_platform_since_main(void);
 
+/* Unsupported framebuffer on the long-running --fb path. sysexits EX_CONFIG.
+ * --fbshot does not use this status. Other init failures stay exit status 1. */
+#define ZK_EXIT_FB_UNSUPPORTED 78
+
+/* 0 on success. ZK_EXIT_FB_UNSUPPORTED when the format cannot be drawn.
+ * -1 on any other failure. */
 int zk_platform_init(const zk_platform_opts_t *opts);
 lv_display_t *zk_platform_display(void);
 
@@ -43,6 +49,10 @@ const uint8_t *zk_platform_frame(int *w, int *h, int *stride);
 void zk_platform_print_stats(int enabled);
 
 int64_t zk_platform_mono_ms(void);
+/* 1 and writes monotonic ms of the first flush. 0 if none yet. */
+int zk_platform_first_frame_ms(int64_t *out_ms);
+/* Invalidate the active screen and flush now. No-op with no display. */
+void zk_platform_force_refresh(void);
 /* NULL clears the gate. The pointer must outlive the indev reads. */
 void zk_platform_bind_power(zk_power_t *power);
 int zk_platform_fb_is_real(void);
