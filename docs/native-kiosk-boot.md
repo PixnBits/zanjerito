@@ -66,7 +66,7 @@ Optional:
 | `ZAN_DIM_AFTER_SEC` | Seconds with no touch before dim. Example ships `120`. `0` disables dim and off. |
 | `ZAN_OFF_AFTER_SEC` | Seconds from the last touch before the backlight goes off. Example ships `600`. `0` disables off only. Must be greater than dim, or off stays off. |
 | `ZAN_DIM_LEVEL` | Dim brightness 0–255. Optional. The commented example matches the client default, 51. `0` does not disable the feature. |
-| `ZAN_BACKLIGHT` | Sysfs backlight directory. Optional. Default `/sys/class/backlight/rpi_backlight`. |
+| `ZAN_BACKLIGHT` | Sysfs backlight device name or directory. Optional. Unset: auto-detect `rpi_backlight`, then `10-0045`, then the first writable device. Invalid values fall back to auto-detect. |
 | `BACKLIGHT` | Optional fixed level 0–255 written once at start to that directory only. See below. |
 
 ## 3. Switch on next boot
@@ -191,9 +191,9 @@ Setting the tty to `KD_GRAPHICS` so printk cannot draw there is a future client 
 
 ## Backlight and display power
 
-The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
+The Pi panel exposes `rpi_backlight`. `brightness` on that board is `root:root` mode `0644`, so the `pi` user cannot dim until `prepare` runs. On Bookworm with KMS, the official 7-inch DSI panel backlight appears as `10-0045` instead; `brightness` may already be group `video`, `bl_power` is root-only, and `prepare` handles it. `prepare` (root, `ExecStartPre=+`) does this best effort, and logs each skip:
 
-- `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT`, or `/sys/class/backlight/rpi_backlight` when that is unset. `ZAN_ROOT` prefixes the directory in tests only.
+- `chgrp video` and `chmod g+w` on `<dir>/brightness` and, if the file exists, `<dir>/bl_power`. `<dir>` is `ZAN_BACKLIGHT` when that names an existing device, else auto-detect (`rpi_backlight`, then `10-0045`, then the first writable device). `ZAN_ROOT` prefixes the directory in tests only.
 - Write `0` to `<dir>/bl_power` when that file exists (panel on). Configured path only, not every backlight device. Absence or a failed write is logged and ignored.
 - If `BACKLIGHT` is unset, write `max_brightness` into `brightness` (the raw panel max, not capped at 255). The client reads that value at startup and restores it on exit.
 - If `BACKLIGHT` is set to 0–255, write that fixed level only to `<dir>/brightness` (the same directory as above, not every backlight device). That level is what the client later restores. It is not the idle-dim level.

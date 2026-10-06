@@ -112,6 +112,9 @@ if ! command -v timeout >/dev/null 2>&1; then
 fi
 
 TMP=$(mktemp -d)
+mkdir -p "$TMP/empty-sysfs-backlight"
+# TEST-ONLY: never scan the machine's real /sys/class/backlight.
+export ZAN_SYSFS_BACKLIGHT_ROOT="$TMP/empty-sysfs-backlight"
 
 cat >"$TMP/png.py" <<'PY'
 import struct, sys, zlib
