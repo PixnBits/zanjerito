@@ -111,7 +111,7 @@ sudo journalctl -u zan-kiosk -n 50 --no-pager
 
 The daemon's active state should be unchanged from before the switch. This install does not restart it.
 
-The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes the running client exit 78. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer. `--fbshot` still exits 1 for an unsupported format.
+The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes the running client exit 78. A startup line `fb: unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer. `--fbshot` still exits 1 for an unsupported format.
 
 `--script` `shot:`, `--shot`, and `--shot-all` render the in-app memory display. They do not prove what the panel shows. Deploy verification must use `--fbshot`, which reads the real framebuffer at whatever depth it is. The `pi` user is in group `video`:
 
@@ -208,7 +208,7 @@ Rollback runs that same subcommand, best effort, after it stops the kiosk. A fai
 
 ## After exit 78 (unsupported framebuffer)
 
-Exit status 78 means the client opened the framebuffer but cannot draw its pixel format: something other than 16 bpp RGB565 or 32 bpp XRGB8888. `RestartPreventExitStatus=78` keeps systemd from restarting it, so the unit stays failed and `reset-backlight` turns the panel off. The daemon keeps running and watering is not affected; only the screen is down. Nothing retries on its own until the next boot.
+Exit status 78 means the client opened the framebuffer but cannot draw it: an unsupported depth (anything other than 16 bpp RGB565 or 32 bpp XRGB8888), or bad geometry, offsets or channel order. `RestartPreventExitStatus=78` keeps systemd from restarting it, so the unit stays failed and `reset-backlight` turns the panel off. The daemon keeps running and watering is not affected; only the screen is down. Nothing retries on its own until the next boot.
 
 Exit 78 is not only about depth. The same latch applies to geometry, offset and channel-order errors (for example zero resolution, a short `line_length`, an offset outside the buffer, or an unsupported channel layout). The journal line after `fb: unsupported framebuffer format:` names the reason, so read it before changing anything.
 
@@ -219,7 +219,7 @@ Exit 78 is not only about depth. The same latch applies to geometry, offset and 
    sudo journalctl -u zan-kiosk -n 50 --no-pager
    ```
 
-2. Fix the framebuffer format so `/dev/fb0` is 16 bpp RGB565 or 32 bpp XRGB8888 (for example the display or framebuffer depth settings in the boot config). `fbset -i` or `cat /sys/class/graphics/fb0/bits_per_pixel` shows the current depth. Some changes need a reboot.
+2. Fix whatever reason the log line names. For depth, make `/dev/fb0` 16 bpp RGB565 or 32 bpp XRGB8888 (for example the display or framebuffer depth settings in the boot config); for geometry, offsets or channel order, fix the matching display settings. `fbset -i` shows the current mode, and `cat /sys/class/graphics/fb0/bits_per_pixel` the depth. Some changes need a reboot.
 
 3. Clear the failed state and start the kiosk again. This does not touch `zanjerito.service`:
 
