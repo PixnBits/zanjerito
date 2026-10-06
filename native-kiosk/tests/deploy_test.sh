@@ -78,7 +78,7 @@ fi
 
 # --- unit text ---
 for needle in \
-    'After=network-online.target zanjerito.service' \
+    'After=plymouth-quit.service network-online.target zanjerito.service' \
     'Wants=network-online.target' \
     'Conflicts=lightdm.service getty@tty1.service' \
     'StartLimitIntervalSec=0' \
@@ -114,6 +114,36 @@ if [ -z "$reset_line" ] || [ -z "$restore_line" ] || [ "$reset_line" -ge "$resto
 fi
 if grep -E '^Requires=' "$UNIT" >/dev/null; then
     echo "unit must not Requires= the daemon" >&2
+    exit 1
+fi
+if grep -E '^(Wants|Requires)=.*plymouth' "$UNIT" >/dev/null; then
+    echo "unit must not Wants= or Requires= plymouth" >&2
+    exit 1
+fi
+after_line=$(grep -E '^After=' "$UNIT" || true)
+if ! printf '%s\n' "$after_line" | grep -F 'plymouth-quit.service' >/dev/null; then
+    echo "unit After= must include plymouth-quit.service" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$after_line" | grep -F 'network-online.target' >/dev/null; then
+    echo "unit After= must keep network-online.target" >&2
+    exit 1
+fi
+if ! printf '%s\n' "$after_line" | grep -F 'zanjerito.service' >/dev/null; then
+    echo "unit After= must keep zanjerito.service" >&2
+    exit 1
+fi
+if printf '%s\n' "$after_line" | grep -F 'plymouth-quit-wait' >/dev/null; then
+    echo "unit must not order After=plymouth-quit-wait.service" >&2
+    exit 1
+fi
+conflicts_n=$(grep -c -E '^Conflicts=' "$UNIT" || true)
+if [ "$conflicts_n" -ne 1 ]; then
+    echo "unit must keep a single Conflicts= line" >&2
+    exit 1
+fi
+if ! grep -E '^Conflicts=lightdm.service getty@tty1.service$' "$UNIT" >/dev/null; then
+    echo "unit Conflicts= must stay lightdm.service getty@tty1.service" >&2
     exit 1
 fi
 pass
@@ -1010,6 +1040,8 @@ for needle in \
     'CONTROLLER_HOST' \
     'ZAN_ALLOW_WRITES' \
     'make -C native-kiosk arm' \
+    'plymouth-quit.service' \
+    'plymouth-quit-wait.service' \
     '--fbshot'
 do
     if ! grep -F -- "$needle" "$DOC" >/dev/null; then
