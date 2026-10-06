@@ -18,7 +18,11 @@ Times are RFC3339 in the config timezone, the same clock as `/api/status` and `/
 
 Zone ids are `zone_N`, 1-based, in config order. `zone_1` is the first station in the config file. `active_zone` uses that map. The response has no schedule id or name. `next_run_*` is the same fire `/api/kiosk` reports as `next_run` (the next start, including one the pause would skip).
 
+Reordering stations in the config renumbers the zones (`zone_N` follows config order), so Home Assistant entities follow the new order.
+
 `rain_24h_in` and `rain_72h_in` are `0` when rain is disabled or the totals are not known. `has_error` is true when the engine has a last error; the text is never included. `lockout` is always `false` today, matching `/api/kiosk`.
+
+`last_run_kind` is `schedule` or `manual`. `last_run_outcome` is `completed`, `stopped`, `skipped`, `refused`, or `error`. Any other non-empty value stored in history is reported as `unknown`. Both are null when there is no history.
 
 | Field | JSON | Meaning |
 |---|---|---|
@@ -41,8 +45,8 @@ Zone ids are `zone_N`, 1-based, in config order. `zone_1` is the first station i
 | `rain_last_ok_at` | string or null | last good rain fetch |
 | `rain_24h_in` | number | inches over the last 24 hours |
 | `rain_72h_in` | number | inches over the last 72 hours |
-| `last_run_kind` | string or null | newest history row's kind; null if there is no history |
-| `last_run_outcome` | string or null | `completed`, `stopped`, `skipped`, `refused`, or `error`; null if none |
+| `last_run_kind` | string or null | `schedule`, `manual`, or `unknown`; null if there is no history |
+| `last_run_outcome` | string or null | `completed`, `stopped`, `skipped`, `refused`, `error`, or `unknown`; null if there is no history |
 | `last_run_started_at` | string or null | when that run started |
 | `last_run_ended_at` | string or null | when that run ended |
 | `zones` | array | `{"id":"zone_N","on":bool}` for every configured station, config order |
@@ -51,7 +55,7 @@ Calling this route does not start or stop a run, set or clear a pause, or rewrit
 
 ## Example
 
-Replace the host and port. `scan_interval: 30` is seconds. Null fields (`active_zone`, `next_run_at`, `last_run_outcome`, and the other nullable times) are JSON `null` when they do not apply; the next-run sensor stays unavailable in that case.
+Replace the host and port. `scan_interval: 30` is seconds. Null fields (`active_zone`, `next_run_at`, `last_run_outcome`, and the other nullable times) are JSON `null` when they do not apply; the next-run sensor stays unavailable in that case. Home Assistant templates render JSON `null` as `None`. Guard a nullable text field, for example `{{ value_json.active_zone if value_json.active_zone is not none else 'none' }}`.
 
 ```yaml
 rest:
@@ -61,7 +65,7 @@ rest:
       - name: Irrigation phase
         value_template: "{{ value_json.phase }}"
       - name: Irrigation active zone
-        value_template: "{{ value_json.active_zone }}"
+        value_template: "{{ value_json.active_zone if value_json.active_zone is not none else 'none' }}"
       - name: Irrigation run remaining
         value_template: "{{ value_json.run_remaining_sec }}"
         unit_of_measurement: s
@@ -70,7 +74,7 @@ rest:
         availability: "{{ value_json.next_run_at is not none }}"
         value_template: "{{ value_json.next_run_at }}"
       - name: Irrigation last run outcome
-        value_template: "{{ value_json.last_run_outcome }}"
+        value_template: "{{ value_json.last_run_outcome if value_json.last_run_outcome is not none else 'none' }}"
     binary_sensor:
       - name: Irrigation paused
         value_template: "{{ value_json.paused }}"
