@@ -982,9 +982,10 @@ for needle in \
     'max_on' \
     'CONTROLLER_HOST' \
     'ZAN_ALLOW_WRITES' \
-    'make -C native-kiosk arm'
+    'make -C native-kiosk arm' \
+    '--fbshot'
 do
-    if ! grep -F "$needle" "$DOC" >/dev/null; then
+    if ! grep -F -- "$needle" "$DOC" >/dev/null; then
         echo "boot doc missing: $needle" >&2
         exit 1
     fi

@@ -10,13 +10,13 @@ BUILD = build
 
 SANITIZE := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c -o /dev/null - >/dev/null 2>&1 && echo -fsanitize=address,undefined)
 
-TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text $(BUILD)/test_power
+TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text $(BUILD)/test_power $(BUILD)/test_fb
 
 HOST_CC := gcc
 ARM_CC ?= arm-linux-gnueabihf-gcc
 LVGL_DIR := .cache/lvgl
 
-APP_SRCS := $(SRC_CORE) $(SRC_DATA) src/main.c src/platform.c src/ui.c src/shots.c src/zk_png.c
+APP_SRCS := $(SRC_CORE) $(SRC_DATA) src/main.c src/platform.c src/ui.c src/shots.c src/zk_png.c src/zk_fb.c
 GEN_SRCS := $(wildcard generated/*.c)
 LVGL_CORE_SRCS := $(shell find $(LVGL_DIR)/src -name '*.c' \
 	-not -path '*/drivers/*' \
@@ -63,6 +63,7 @@ test: $(TEST_BINS)
 	$(BUILD)/test_text
 	$(BUILD)/test_ui_text
 	$(BUILD)/test_power
+	$(BUILD)/test_fb
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -88,11 +89,14 @@ $(BUILD)/test_stop_latency: tests/test_stop_latency.c $(SRC_CORE) $(SRC_DATA) $(
 $(BUILD)/test_text: tests/test_text.c src/zk_text.c | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_text.c src/zk_text.c
 
+$(BUILD)/test_fb: tests/test_fb.c src/zk_fb.c | $(BUILD)
+	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_fb.c src/zk_fb.c
+
 $(BUILD)/test_power: tests/test_power.c src/zk_power.c | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_power.c src/zk_power.c
 
 TESTUI_DIR := $(BUILD)/testui
-TESTUI_SRCS := tests/test_ui_text.c $(SRC_CORE) $(SRC_DATA) src/platform.c src/ui.c src/zk_png.c $(GEN_SRCS) $(CJSON) $(LVGL_SRCS)
+TESTUI_SRCS := tests/test_ui_text.c $(SRC_CORE) $(SRC_DATA) src/platform.c src/ui.c src/zk_png.c src/zk_fb.c $(GEN_SRCS) $(CJSON) $(LVGL_SRCS)
 TESTUI_OBJS := $(addprefix $(TESTUI_DIR)/,$(TESTUI_SRCS:.c=.o))
 TESTUI_APP_CFLAGS := $(STD) -Wall -Wextra -Werror -Os -g $(SANITIZE) $(INC)
 TESTUI_EXT_CFLAGS := $(STD) -w -Os -g $(SANITIZE) $(INC)

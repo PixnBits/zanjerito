@@ -111,40 +111,15 @@ sudo journalctl -u zan-kiosk -n 50 --no-pager
 
 The daemon's active state should be unchanged from before the switch. This install does not restart it.
 
-Dump `/dev/fb0` (800×480, 32 bpp, BGRA, stride 3200 = 800×4):
+The client draws 16 bpp RGB565 or 32 bpp XRGB8888, picked from the framebuffer's `bits_per_pixel` and channel layout. Anything else makes it exit 1. A startup line `fb: ... unsupported framebuffer format` in `journalctl -u zan-kiosk` means this build cannot draw on that framebuffer.
+
+`--script` `shot:`, `--shot`, and `--shot-all` render the in-app memory display. They do not prove what the panel shows. Deploy verification must use `--fbshot`, which reads the real framebuffer at whatever depth it is. The `pi` user is in group `video`:
 
 ```sh
-dd if=/dev/fb0 of=/tmp/fb0.raw bs=3200 count=480 status=none
-python3 - <<'PY'
-import struct, zlib, pathlib
-w, h, stride = 800, 480, 3200
-raw = pathlib.Path("/tmp/fb0.raw").read_bytes()
-need = h * stride
-if len(raw) < need:
-    raise SystemExit(f"short read: {len(raw)} bytes, want {need}")
-
-def chunk(tag, data):
-    crc = zlib.crc32(tag + data) & 0xFFFFFFFF
-    return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
-
-rows = []
-for y in range(h):
-    row = raw[y * stride:y * stride + w * 4]
-    px = bytearray()
-    for i in range(0, w * 4, 4):
-        b, g, r, a = row[i:i + 4]
-        px += bytes((r, g, b, a))
-    rows.append(b"\x00" + bytes(px))
-ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
-png = b"\x89PNG\r\n\x1a\n"
-png += chunk(b"IHDR", ihdr)
-png += chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
-png += chunk(b"IEND", b"")
-pathlib.Path("/tmp/fb0.png").write_bytes(png)
-PY
+sudo -u pi /opt/zanjerito/zan-kiosk --fb /dev/fb0 --fbshot /tmp/fb0.png
 ```
 
-`/tmp/fb0.png` is the panel. The recipe only reads the framebuffer.
+Pass: exit 0, and `nonblack` well above zero (more than half the pixels for the normal dashboard). Then look at `/tmp/fb0.png`. Exit 3 means the frame was read and every pixel is black.
 
 ## What changes
 

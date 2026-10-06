@@ -73,6 +73,7 @@ The base URL is never compiled in. With no `--api`, no `ZAN_API`, and no `--fixt
 | `--live-clock` | Advance the clock from the system clock. Fixture mode otherwise freezes `kiosk.now` |
 | `--allow-writes` | Permit the three mutating POSTs. Default is read-only |
 | `--fb PATH` | Framebuffer to open. There is no default device |
+| `--fbshot FILE` | Read that framebuffer and write a PNG. Requires `--fb`. Does not start the UI. Exit 0 if any pixel is non-black, 3 if the frame is all black, 1 on error, 2 without `--fb` or combined with `--script`, `--shot`, or `--shot-all` |
 | `--touch PATH` | evdev device. Default is autodetect |
 | `--touch-swap` | Swap X and Y after open |
 | `--touch-flip-x` | Flip X using the device's reported range |
@@ -122,7 +123,7 @@ Example against a daemon already listening on localhost (nothing in this tree st
 | `12-home-schedules-button.png` | home-rain | Same Home as `01` |
 | `13-paused-schedules-button.png` | paused-rain | Paused with Schedules button |
 
-`--shot` and `--shot-all` use the memory display. They do not open a framebuffer.
+`--shot`, `--shot-all`, and `--script` `shot:` use the memory display. They do not open a framebuffer and do not prove what the panel shows. `--fbshot` reads the framebuffer passed to `--fb`.
 
 ## Host tests
 
@@ -165,7 +166,7 @@ The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pa
 
 ## Raspberry Pi
 
-Target board is a Pi 3B (armv7). The display is the legacy 800×480 32 bpp framebuffer: pass `--fb /dev/fb0`. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
+Target board is a Pi 3B (armv7). Pass `--fb /dev/fb0`. The client supports 16 bpp RGB565 and 32 bpp XRGB8888, picked from the framebuffer's bits_per_pixel and channel layout, and exits 1 with a clear error on anything else. With `--fb`, the process best-effort hides the VT cursor on `/dev/tty1` (override `ZK_TTY`) at start and shows it again on normal, `--duration`, SIGINT, and SIGTERM exit. A missing or unwritable tty logs one stderr line and continues. The client does not call `KD_SETMODE` / `KD_GRAPHICS` (a crash could leave the console dead). Host, memory, and fixture modes never open a tty. Touch is evdev. Autodetect prefers a device whose name contains `raspberrypi-ts`, and the client maps that device's reported absolute range onto the framebuffer with no rotation. For that panel the mapping is identity (screen pixels). `--touch-swap` and the flip flags stay off unless you pass them.
 
 On the Raspberry Pi OS desktop image, X owns `/dev/fb0` and the touch device. Do not run this client on top of a live desktop. Boot-persistent install is opt-in; `make` does not enable it. See below.
 
@@ -235,7 +236,7 @@ Failure modes, all non-fatal, each logged once on stderr:
 
 ## Boot-persistent kiosk (full kiosk mode)
 
-`deploy/` can install a systemd unit that starts `/opt/zanjerito/zan-kiosk` on `/dev/fb0` at boot and keeps the desktop off that framebuffer. Copying the files does not enable the unit and does not change the boot target. The procedure, the framebuffer dump, and the rollback commands are in [docs/native-kiosk-boot.md](../docs/native-kiosk-boot.md).
+`deploy/` can install a systemd unit that starts `/opt/zanjerito/zan-kiosk` on `/dev/fb0` at boot and keeps the desktop off that framebuffer. Copying the files does not enable the unit and does not change the boot target. The procedure, the `--fbshot` panel check, and the rollback commands are in [docs/native-kiosk-boot.md](../docs/native-kiosk-boot.md).
 
 Build the binary with `make -C native-kiosk arm` (daemon already running; do not restart it for this). Then, on the Pi:
 

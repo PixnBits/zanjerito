@@ -6,14 +6,18 @@
 #include "shots.h"
 #include "ui.h"
 #include "zk_console.h"
+#include "zk_fb.h"
+#include "zk_png.h"
 #include "zk_power.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -26,7 +30,8 @@ enum {
     OPT_DIM_AFTER,
     OPT_OFF_AFTER,
     OPT_DIM_LEVEL,
-    OPT_BACKLIGHT
+    OPT_BACKLIGHT,
+    OPT_FBSHOT
 };
 
 enum {
@@ -75,6 +80,7 @@ static void usage(FILE *fp, const char *argv0)
             "  --live-clock         follow the system clock\n"
             "  --allow-writes       permit mutating API calls\n"
             "  --fb PATH            open this framebuffer only (never a default device)\n"
+            "  --fbshot FILE        read --fb and write a PNG; no UI (needs --fb)\n"
             "  --touch PATH         evdev device; default is autodetect\n"
             "  --touch-swap         swap touch X/Y after open\n"
             "  --touch-flip-x       flip touch X\n"
@@ -322,6 +328,75 @@ static int script_timeout_ms(double now)
     return (int)(left + 0.999);
 }
 
+/* Reads the framebuffer before lv_init. Does not touch backlight, tty, power, or the API. */
+static int run_fbshot(const char *fb_path, const char *out_path)
+{
+    int fd;
+    zk_fb_geom_t g;
+    zk_fb_fmt_t fmt;
+    char err[512];
+    void *map = MAP_FAILED;
+    uint8_t *rgb = NULL;
+    size_t nonblack = 0;
+    size_t total;
+    const char *name;
+    int rc = 1;
+
+    fd = open(fb_path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        fprintf(stderr, "fbshot: %s: %s\n", fb_path, strerror(errno));
+        return 1;
+    }
+    if (zk_fb_probe(fd, fb_path, &g, err, sizeof err) != 0) {
+        fprintf(stderr, "fbshot: %s: %s\n", fb_path, err);
+        close(fd);
+        return 1;
+    }
+    fmt = zk_fb_pick_format(&g, err, sizeof err);
+    if (fmt == ZK_FB_FMT_NONE) {
+        fprintf(stderr, "fb: unsupported framebuffer format: %s\n", err);
+        close(fd);
+        return 1;
+    }
+    if (g.xres == 0 || g.yres == 0 || g.xres > 2147483647u || g.yres > 2147483647u ||
+        (uint64_t)g.xres * (uint64_t)g.yres > (SIZE_MAX / 3u)) {
+        fprintf(stderr, "fbshot: bad geometry\n");
+        close(fd);
+        return 1;
+    }
+    total = (size_t)g.xres * (size_t)g.yres;
+    map = mmap(NULL, g.smem_len, PROT_READ, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) {
+        fprintf(stderr, "fbshot: %s: mmap: %s\n", fb_path, strerror(errno));
+        close(fd);
+        return 1;
+    }
+    rgb = malloc(total * 3u);
+    if (!rgb) {
+        fprintf(stderr, "fbshot: out of memory\n");
+        goto done;
+    }
+    if (zk_fb_to_rgb(fmt, &g, map, rgb, &nonblack) != 0) {
+        fprintf(stderr, "fbshot: convert failed\n");
+        goto done;
+    }
+    if (zk_png_write_rgb888(out_path, rgb, (int)g.xres, (int)g.yres) != 0) {
+        fprintf(stderr, "fbshot: %s: write failed\n", out_path);
+        goto done;
+    }
+    name = fmt == ZK_FB_FMT_RGB565 ? "RGB565" : "XRGB8888";
+    printf("fbshot: %s %ux%u %ubpp %s nonblack=%zu/%zu\n", out_path, g.xres, g.yres, g.bpp, name,
+           nonblack, total);
+    rc = nonblack > 0 ? 0 : 3;
+done:
+    free(rgb);
+    if (map != MAP_FAILED) {
+        munmap(map, g.smem_len);
+    }
+    close(fd);
+    return rc;
+}
+
 static void on_signal(int sig)
 {
     (void)sig;
@@ -366,6 +441,7 @@ int main(int argc, char **argv)
         {"off-after", required_argument, 0, OPT_OFF_AFTER},
         {"dim-level", required_argument, 0, OPT_DIM_LEVEL},
         {"backlight", required_argument, 0, OPT_BACKLIGHT},
+        {"fbshot", required_argument, 0, OPT_FBSHOT},
         {"stats", no_argument, 0, 'T'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
@@ -380,6 +456,7 @@ int main(int argc, char **argv)
     const char *shot_file = NULL;
     const char *shot_all = NULL;
     const char *fixtures_root = NULL;
+    const char *fbshot = NULL;
     int live_clock = 0;
     int allow_writes = 0;
     int touch_swap = 0;
@@ -487,6 +564,9 @@ int main(int argc, char **argv)
             backlight = optarg;
             saw_bl = 1;
             break;
+        case OPT_FBSHOT:
+            fbshot = optarg;
+            break;
         case 'T':
             stats = 1;
             break;
@@ -497,6 +577,24 @@ int main(int argc, char **argv)
             usage(stderr, argv[0]);
             return 2;
         }
+    }
+    if (fbshot) {
+        if (optind < argc) {
+            fprintf(stderr, "unexpected argument: %s\n", argv[optind]);
+            usage(stderr, argv[0]);
+            return 2;
+        }
+        if (!fb || !fb[0] || !fbshot[0]) {
+            fprintf(stderr, "fbshot: need --fb PATH\n");
+            usage(stderr, argv[0]);
+            return 2;
+        }
+        if (script || shot_spec || shot_all) {
+            fprintf(stderr, "fbshot: incompatible with --script, --shot, and --shot-all\n");
+            usage(stderr, argv[0]);
+            return 2;
+        }
+        return run_fbshot(fb, fbshot);
     }
     if (!saw_dim) {
         env_rc = take_env_nonneg("ZAN_DIM_AFTER_SEC", &dim_after);
