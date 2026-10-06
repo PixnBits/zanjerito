@@ -22,7 +22,7 @@ Reordering stations in the config renumbers the zones (`zone_N` follows config o
 
 `rain_24h_in` and `rain_72h_in` are `0` when rain is disabled or the totals are not known. `has_error` is true when the engine has a last error; the text is never included. `lockout` is always `false` today, matching `/api/kiosk`.
 
-`last_run_kind` is `schedule` or `manual`. `last_run_outcome` is `completed`, `stopped`, `skipped`, `refused`, or `error`. Any other non-empty value stored in history is reported as `unknown`. Both are null when there is no history.
+`last_run_kind` is `schedule` or `manual`. `last_run_outcome` is `completed`, `stopped`, `skipped`, `refused`, or `error`. Empty or unrecognised values report `unknown`. Both are null when there is no history.
 
 | Field | JSON | Meaning |
 |---|---|---|

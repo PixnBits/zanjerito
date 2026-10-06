@@ -211,7 +211,7 @@ func haLastRun(s *Server, loc *time.Location) (kind, outcome, started, ended *st
 }
 
 // haToken keeps a label the engine and scheduler actually store.
-// Any other non-empty value is "unknown". Empty stays empty.
+// Empty or any other value is "unknown".
 // No history is null, decided by haLastRun before this is called.
 func haToken(v string, allowed ...string) *string {
 	for _, a := range allowed {
@@ -219,8 +219,6 @@ func haToken(v string, allowed ...string) *string {
 			return &v
 		}
 	}
-	if v != "" {
-		v = "unknown"
-	}
+	v = "unknown"
 	return &v
 }
