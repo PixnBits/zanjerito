@@ -53,33 +53,266 @@ Reordering stations in the config renumbers the zones (`zone_N` follows config o
 
 Calling this route does not start or stop a run, set or clear a pause, or rewrite config, history, or `pause.json`. An expired timed pause is reported as not paused and is left for the status route or the scheduler to clear.
 
-## Example
+## Home Assistant setup
 
-Replace the host and port. `scan_interval: 30` is seconds. Null fields (`active_zone`, `next_run_at`, `last_run_outcome`, and the other nullable times) are JSON `null` when they do not apply; the next-run sensor stays unavailable in that case. Home Assistant templates render JSON `null` as `None`. Guard a nullable text field, for example `{{ value_json.active_zone if value_json.active_zone is not none else 'none' }}`.
+This is a ready-to-paste RESTful config. One `rest:` resource polls `GET /api/ha` every 30 seconds (one HTTP request feeds all entities), timeout 10 seconds. Every field in the response maps to one entity; `zones` maps to one `binary_sensor` per zone (`zone_1`..`zone_4`). The host `http://zanjerito.local:8080` is a placeholder: replace it with the controller's host and LISTEN port; if `zanjerito.local` does not resolve (mDNS is not always available to Home Assistant, for example in some Docker/VM setups) use the controller's LAN address, `http://<pi-ip>:8080/api/ha`.
+
+### Config
+
+The `template:` block at the end is optional; it adds a connectivity sensor that is off (rather than unavailable) whenever `sensor.irrigation_phase` has no usable value: the controller cannot be reached, returns an error or a body without `phase`, or the rest entities do not exist yet.
 
 ```yaml
 rest:
-  - resource: http://<controller-host>:<port>/api/ha
+  - resource: http://zanjerito.local:8080/api/ha
+    method: GET
     scan_interval: 30
+    timeout: 10
     sensor:
       - name: Irrigation phase
-        value_template: "{{ value_json.phase }}"
-      - name: Irrigation active zone
-        value_template: "{{ value_json.active_zone if value_json.active_zone is not none else 'none' }}"
-      - name: Irrigation run remaining
-        value_template: "{{ value_json.run_remaining_sec }}"
-        unit_of_measurement: s
-      - name: Irrigation next run
+        unique_id: zanjerito_phase
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:sprinkler-variant
+        value_template: "{{ value_json.get('phase') or 'unknown' }}"
+      - name: Irrigation pause source
+        unique_id: zanjerito_pause_source
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:pause-circle-outline
+        value_template: "{{ value_json.get('pause_source') or 'none' }}"
+      - name: Irrigation paused until
+        unique_id: zanjerito_paused_until
         device_class: timestamp
-        availability: "{{ value_json.next_run_at is not none }}"
-        value_template: "{{ value_json.next_run_at }}"
+        availability: "{{ value_json is mapping and 'phase' in value_json and value_json.get('paused_until') is not none }}"
+        value_template: "{{ value_json.get('paused_until') }}"
+      - name: Irrigation active zone
+        unique_id: zanjerito_active_zone
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:sprinkler
+        value_template: "{{ value_json.get('active_zone') or 'none' }}"
+      - name: Irrigation zones on
+        unique_id: zanjerito_zones_on
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:counter
+        state_class: measurement
+        value_template: "{{ value_json.get('zones_on') or 0 }}"
+      - name: Irrigation step remaining
+        unique_id: zanjerito_step_remaining
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: duration
+        unit_of_measurement: s
+        value_template: "{{ value_json.get('step_remaining_sec') or 0 }}"
+      - name: Irrigation run remaining
+        unique_id: zanjerito_run_remaining
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: duration
+        unit_of_measurement: s
+        value_template: "{{ value_json.get('run_remaining_sec') or 0 }}"
+      - name: Irrigation next run
+        unique_id: zanjerito_next_run_at
+        device_class: timestamp
+        availability: "{{ value_json is mapping and 'phase' in value_json and value_json.get('next_run_at') is not none }}"
+        value_template: "{{ value_json.get('next_run_at') }}"
+      - name: Irrigation next run ends
+        unique_id: zanjerito_next_run_ends_at
+        device_class: timestamp
+        availability: "{{ value_json is mapping and 'phase' in value_json and value_json.get('next_run_ends_at') is not none }}"
+        value_template: "{{ value_json.get('next_run_ends_at') }}"
+      - name: Irrigation next run length
+        unique_id: zanjerito_next_run_total_min
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: duration
+        unit_of_measurement: min
+        value_template: "{{ value_json.get('next_run_total_min') or 0 }}"
+      - name: Irrigation rain last update
+        unique_id: zanjerito_rain_last_ok_at
+        device_class: timestamp
+        availability: "{{ value_json is mapping and 'phase' in value_json and value_json.get('rain_last_ok_at') is not none }}"
+        value_template: "{{ value_json.get('rain_last_ok_at') }}"
+      - name: Irrigation rain 24h
+        unique_id: zanjerito_rain_24h
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: precipitation
+        unit_of_measurement: in
+        state_class: measurement
+        value_template: "{{ value_json.get('rain_24h_in') or 0 }}"
+      - name: Irrigation rain 72h
+        unique_id: zanjerito_rain_72h
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: precipitation
+        unit_of_measurement: in
+        state_class: measurement
+        value_template: "{{ value_json.get('rain_72h_in') or 0 }}"
+      - name: Irrigation last run kind
+        unique_id: zanjerito_last_run_kind
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:history
+        value_template: "{{ value_json.get('last_run_kind') or 'none' }}"
       - name: Irrigation last run outcome
-        value_template: "{{ value_json.last_run_outcome if value_json.last_run_outcome is not none else 'none' }}"
+        unique_id: zanjerito_last_run_outcome
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:clipboard-check-outline
+        value_template: "{{ value_json.get('last_run_outcome') or 'none' }}"
+      - name: Irrigation last run started
+        unique_id: zanjerito_last_run_started_at
+        device_class: timestamp
+        availability: "{{ value_json is mapping and 'phase' in value_json and value_json.get('last_run_started_at') is not none }}"
+        value_template: "{{ value_json.get('last_run_started_at') }}"
+      - name: Irrigation last run ended
+        unique_id: zanjerito_last_run_ended_at
+        device_class: timestamp
+        availability: "{{ value_json is mapping and 'phase' in value_json and value_json.get('last_run_ended_at') is not none }}"
+        value_template: "{{ value_json.get('last_run_ended_at') }}"
     binary_sensor:
       - name: Irrigation paused
-        value_template: "{{ value_json.paused }}"
-      - name: Irrigation rain unavailable
-        value_template: "{{ value_json.rain_unavailable }}"
-      - name: Irrigation has error
-        value_template: "{{ value_json.has_error }}"
+        unique_id: zanjerito_paused
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:pause-circle
+        value_template: "{{ value_json.get('paused') is sameas true }}"
+      - name: Irrigation lockout
+        unique_id: zanjerito_lockout
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: problem
+        value_template: "{{ value_json.get('lockout') is sameas true }}"
+      - name: Irrigation error
+        unique_id: zanjerito_has_error
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: problem
+        value_template: "{{ value_json.get('has_error') is sameas true }}"
+      - name: Irrigation next run skipped by pause
+        unique_id: zanjerito_next_run_skipped_by_pause
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:calendar-remove
+        value_template: "{{ value_json.get('next_run_skipped_by_pause') is sameas true }}"
+      - name: Irrigation rain feed enabled
+        unique_id: zanjerito_rain_enabled
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        icon: mdi:weather-rainy
+        value_template: "{{ value_json.get('rain_enabled') is sameas true }}"
+      - name: Irrigation rain feed unavailable
+        unique_id: zanjerito_rain_unavailable
+        availability: "{{ value_json is mapping and 'phase' in value_json }}"
+        device_class: problem
+        value_template: "{{ value_json.get('rain_unavailable') is sameas true }}"
+      - name: Irrigation zone 1
+        unique_id: zanjerito_zone_1
+        device_class: running
+        availability: "{{ value_json is mapping and 'phase' in value_json and (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_1') | list | count == 1 }}"
+        value_template: "{{ (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_1') | selectattr('on') | list | count > 0 }}"
+      - name: Irrigation zone 2
+        unique_id: zanjerito_zone_2
+        device_class: running
+        availability: "{{ value_json is mapping and 'phase' in value_json and (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_2') | list | count == 1 }}"
+        value_template: "{{ (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_2') | selectattr('on') | list | count > 0 }}"
+      - name: Irrigation zone 3
+        unique_id: zanjerito_zone_3
+        device_class: running
+        availability: "{{ value_json is mapping and 'phase' in value_json and (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_3') | list | count == 1 }}"
+        value_template: "{{ (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_3') | selectattr('on') | list | count > 0 }}"
+      - name: Irrigation zone 4
+        unique_id: zanjerito_zone_4
+        device_class: running
+        availability: "{{ value_json is mapping and 'phase' in value_json and (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_4') | list | count == 1 }}"
+        value_template: "{{ (value_json.get('zones') or []) | selectattr('id', 'eq', 'zone_4') | selectattr('on') | list | count > 0 }}"
+
+template:
+  - binary_sensor:
+      - name: Irrigation controller online
+        unique_id: zanjerito_controller_online
+        device_class: connectivity
+        state: "{{ has_value('sensor.irrigation_phase') }}"
 ```
+
+### Entities
+
+Home Assistant derives entity ids from the names.
+
+| Field | Entity | Notes |
+|---|---|---|
+| `phase` | `sensor.irrigation_phase` | text: `Idle`, `PowerUp`, `StationOn`, `Overlap`, `PowerDown`, `Fault` |
+| `paused` | `binary_sensor.irrigation_paused` | |
+| `pause_source` | `sensor.irrigation_pause_source` | `none` when not paused |
+| `paused_until` | `sensor.irrigation_paused_until` | timestamp; unavailable when null |
+| `lockout` | `binary_sensor.irrigation_lockout` | problem; always off today |
+| `has_error` | `binary_sensor.irrigation_error` | problem; the error text is not exposed |
+| `active_zone` | `sensor.irrigation_active_zone` | `none` when no zone is on |
+| `zones_on` | `sensor.irrigation_zones_on` | |
+| `step_remaining_sec` | `sensor.irrigation_step_remaining` | duration, s |
+| `run_remaining_sec` | `sensor.irrigation_run_remaining` | duration, s |
+| `next_run_at` | `sensor.irrigation_next_run` | timestamp; unavailable when null |
+| `next_run_ends_at` | `sensor.irrigation_next_run_ends` | timestamp; unavailable when null |
+| `next_run_total_min` | `sensor.irrigation_next_run_length` | duration, min |
+| `next_run_skipped_by_pause` | `binary_sensor.irrigation_next_run_skipped_by_pause` | |
+| `rain_enabled` | `binary_sensor.irrigation_rain_feed_enabled` | |
+| `rain_unavailable` | `binary_sensor.irrigation_rain_feed_unavailable` | problem |
+| `rain_last_ok_at` | `sensor.irrigation_rain_last_update` | timestamp; unavailable when null |
+| `rain_24h_in` | `sensor.irrigation_rain_24h` | precipitation, in |
+| `rain_72h_in` | `sensor.irrigation_rain_72h` | precipitation, in |
+| `last_run_kind` | `sensor.irrigation_last_run_kind` | `none` with no history |
+| `last_run_outcome` | `sensor.irrigation_last_run_outcome` | `none` with no history |
+| `last_run_started_at` | `sensor.irrigation_last_run_started` | timestamp |
+| `last_run_ended_at` | `sensor.irrigation_last_run_ended` | timestamp |
+| `zones` | `binary_sensor.irrigation_zone_1` .. `binary_sensor.irrigation_zone_4` | running = that zone's valve is on; a `zone_N` the controller does not report is unavailable |
+| (none) | `binary_sensor.irrigation_controller_online` | optional template, connectivity |
+
+If an entity id already exists, Home Assistant appends a suffix such as `_2`; the `unique_id`s let you rename entities in the UI.
+
+### Null, missing, and unreachable
+
+- Controller unreachable: when the fetch itself fails (timeout, connection refused, DNS failure), the RESTful integration marks every entity from the resource unavailable on its own. Once the entities exist they recover on the next successful poll. If the controller was already unreachable when Home Assistant started, the integration has not created the entities yet and retries setup with a backoff, so they appear about 2 minutes after the controller comes back rather than on the next 30 second poll.
+- HTTP error reply: Home Assistant does not treat a reply such as the 500 above as a failed fetch; it hands the body to the templates. The controller's 500 is itself JSON (`{"error":"..."}`), so checking only that the body parsed is not enough. Every entity therefore has `availability: "{{ value_json is mapping and 'phase' in value_json }}"`: a reply that is not a JSON object with a `phase` field (the error JSON, `{}`, `[]`, `null`, or a body that is not JSON) makes the entity unavailable instead of showing default values or logging template errors.
+- Null fields: nullable times add `and value_json.get(...) is not none` to `availability`, so they are unavailable instead of logging an invalid timestamp. Nullable text shows `none`. Numbers fall back to `0` and booleans to off. A `zone_N` the controller does not report is unavailable.
+- Missing fields: templates read fields with `value_json.get(...)`, so a field missing from an older or newer controller does not raise template errors.
+- `binary_sensor.irrigation_controller_online` is `off` whenever `sensor.irrigation_phase` is unavailable or missing (it uses `has_value(...)`, so it is also off before the entities exist and if that entity id was renamed or suffixed); use it for automations or alerts on connectivity. If you rename `sensor.irrigation_phase`, update the template to match.
+- Home Assistant reads the controller only; nothing in this config can start, stop, or pause watering.
+
+### Install
+
+1. Paste the block into `configuration.yaml`. If it already has a top-level `rest:` or `template:` key, add these list items under the existing key instead of adding a second key. Alternatively use a package: add the following to `configuration.yaml` and save the block as `packages/zanjerito.yaml`.
+
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+
+2. Replace `zanjerito.local:8080` with your controller's host and port.
+3. Developer tools > YAML > Check configuration. Fix anything it reports.
+4. Restart Home Assistant (Settings > System > Restart). A full restart is needed the first time the `rest:` integration is added; afterwards Developer tools > YAML > "RESTful entities" reloads changes.
+5. Check Settings > Devices & services > Entities, search "irrigation", and confirm the states match `curl http://zanjerito.local:8080/api/ha`.
+6. Add the entities to a dashboard: edit a dashboard, Add card > Manual, paste the example card below.
+
+### Example dashboard card
+
+```yaml
+type: entities
+title: Irrigation
+state_color: true
+entities:
+  - entity: binary_sensor.irrigation_controller_online
+    name: Controller
+  - entity: sensor.irrigation_phase
+    name: Phase
+  - entity: sensor.irrigation_active_zone
+    name: Active zone
+  - entity: sensor.irrigation_run_remaining
+    name: Run remaining
+  - entity: sensor.irrigation_next_run
+    name: Next run
+    format: relative
+  - entity: binary_sensor.irrigation_paused
+    name: Paused
+  - entity: sensor.irrigation_paused_until
+    name: Paused until
+  - entity: binary_sensor.irrigation_error
+    name: Error
+  - entity: sensor.irrigation_rain_72h
+    name: Rain (72 h)
+  - entity: sensor.irrigation_last_run_outcome
+    name: Last run
+  - type: section
+    label: Zones
+  - binary_sensor.irrigation_zone_1
+  - binary_sensor.irrigation_zone_2
+  - binary_sensor.irrigation_zone_3
+  - binary_sensor.irrigation_zone_4
+```
+
+Rename zones in the UI (entity settings) rather than in this file; `zone_N` follows config order (see above).
