@@ -6,18 +6,37 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/zanjerito
+# EnvironmentFile is read by systemd as root before dropping to the dynamic user,
+# so keep it root:root 0600.
 EnvironmentFile=/opt/zanjerito/zanjerito-mqtt.env
 ExecStart=/opt/zanjerito/zanjerito-mqtt
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15
-NoNewPrivileges=true
+DynamicUser=yes
+NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-RestrictSUIDSGID=true
-LockPersonality=true
-RestrictRealtime=true
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# AF_UNIX is for local DNS (nss/resolved) and the journal socket.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

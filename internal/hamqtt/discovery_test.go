@@ -219,6 +219,75 @@ func TestDiscoveryShape(t *testing.T) {
 	}
 }
 
+func TestDiscoveryBinaryAndZoneTemplates(t *testing.T) {
+	body := haFixture(t, "idle.json")
+	zones, ok := ParseState(body)
+	if !ok || len(zones) == 0 {
+		t.Fatal("fixture zones")
+	}
+	root := decodeDiscovery(t, "v", zones, nil)
+	cmps := cmpsOf(t, root)
+
+	paused, _ := cmps["paused"]["val_tpl"].(string)
+	if paused != "{{ 'ON' if value_json.paused else 'OFF' }}" {
+		t.Fatalf("paused template %q", paused)
+	}
+
+	for _, z := range zones {
+		tpl, _ := cmps[z]["val_tpl"].(string)
+		want := "{{ 'ON' if (value_json.zones | selectattr('id','eq','" + z + "') | selectattr('on') | list | count) > 0 else 'OFF' }}"
+		if tpl != want {
+			t.Fatalf("zone %s template %q", z, tpl)
+		}
+		if !strings.Contains(tpl, "selectattr('on')") {
+			t.Fatalf("zone %s missing selectattr('on'): %q", z, tpl)
+		}
+	}
+
+	for key, c := range cmps {
+		if c["p"] != "binary_sensor" {
+			continue
+		}
+		tpl, _ := c["val_tpl"].(string)
+		if tpl == "" {
+			continue
+		}
+		if !binaryTemplate(tpl) {
+			t.Fatalf("%s binary template %q", key, tpl)
+		}
+	}
+}
+
+// binaryTemplate checks the ON/OFF shape every binary sensor template uses.
+func binaryTemplate(tpl string) bool {
+	return strings.HasPrefix(tpl, "{{ 'ON' if") && strings.HasSuffix(tpl, "else 'OFF' }}")
+}
+
+func TestUniqueIDPrefixLiteral(t *testing.T) {
+	if uniqueIDPrefix != "zanjerito_mqtt_" {
+		t.Fatalf("uniqueIDPrefix = %q", uniqueIDPrefix)
+	}
+	root := decodeDiscovery(t, "v", []string{"zone_1"}, []string{"zone_9"})
+	cmps := cmpsOf(t, root)
+	n := 0
+	for key, c := range cmps {
+		uid, _ := c["uniq_id"].(string)
+		if key == "zone_9" {
+			if uid != "" {
+				t.Fatalf("removed zone uniq_id %q", uid)
+			}
+			continue
+		}
+		if !strings.HasPrefix(uid, "zanjerito_mqtt_") {
+			t.Fatalf("%s uniq_id %q", key, uid)
+		}
+		n++
+	}
+	if n == 0 {
+		t.Fatal("no uniq_id values")
+	}
+}
+
 func TestDiscoveryPauseSourceEmptyVsNull(t *testing.T) {
 	root := decodeDiscovery(t, "v", nil, nil)
 	cmps := cmpsOf(t, root)

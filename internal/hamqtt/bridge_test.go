@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,9 +21,10 @@ type pubCall struct {
 }
 
 type fakePub struct {
-	mu    sync.Mutex
-	calls []pubCall
-	err   error
+	mu           sync.Mutex
+	calls        []pubCall
+	err          error
+	disconnected bool
 }
 
 func (f *fakePub) Publish(topic string, qos byte, retained bool, payload []byte) error {
@@ -34,6 +37,12 @@ func (f *fakePub) Publish(topic string, qos byte, retained bool, payload []byte)
 		Payload:  bytes.Clone(payload),
 	})
 	return f.err
+}
+
+func (f *fakePub) Connected() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.disconnected
 }
 
 func (f *fakePub) snapshot() []pubCall {
@@ -285,8 +294,8 @@ func TestOnConnect(t *testing.T) {
 	pub := &fakePub{}
 	b := newTestBridge(pub, nil)
 	b.OnConnect()
-	if got := pub.topics(); len(got) != 1 || string(pub.payloads(TopicAvailability)[0]) != PayloadOffline {
-		t.Fatalf("no lastGood: %v", pub.topics())
+	if len(pub.snapshot()) != 0 {
+		t.Fatalf("connect before any poll published %v", pub.topics())
 	}
 
 	idle := haFixture(t, "idle.json")
@@ -362,4 +371,198 @@ func TestRepublishAfterFailedPollStaysOffline(t *testing.T) {
 			t.Fatalf("%s: want discovery and last state republished, got %v", name, pub.topics())
 		}
 	}
+}
+
+func TestDisconnectedPollSkipsPublishUntilConnect(t *testing.T) {
+	idle := haFixture(t, "idle.json")
+	running := haFixture(t, "running.json")
+	pub := &fakePub{disconnected: true}
+	var body []byte
+	var ferr error
+	b := newTestBridge(pub, func(context.Context) ([]byte, error) {
+		if ferr != nil {
+			return nil, ferr
+		}
+		return body, nil
+	})
+
+	b.OnConnect()
+	if len(pub.snapshot()) != 0 {
+		t.Fatalf("fresh connect published %v", pub.topics())
+	}
+
+	body = idle
+	b.Poll(context.Background())
+	body = running
+	b.Poll(context.Background())
+	if len(pub.snapshot()) != 0 {
+		t.Fatalf("disconnected poll published %v", pub.topics())
+	}
+
+	pub.disconnected = false
+	b.OnConnect()
+	got := pub.topics()
+	if len(got) != 3 || got[0] != TopicDiscovery || got[1] != TopicState || got[2] != TopicAvailability {
+		t.Fatalf("reconnect topics %v", got)
+	}
+	if !bytes.Equal(pub.payloads(TopicState)[0], running) {
+		t.Fatal("want latest state")
+	}
+	if string(pub.payloads(TopicAvailability)[0]) != PayloadOnline {
+		t.Fatal("want online")
+	}
+	if len(pub.payloads(TopicDiscovery)) != 1 || len(pub.payloads(TopicState)) != 1 || len(pub.payloads(TopicAvailability)) != 1 {
+		t.Fatalf("counts disc=%d state=%d avail=%d", len(pub.payloads(TopicDiscovery)), len(pub.payloads(TopicState)), len(pub.payloads(TopicAvailability)))
+	}
+
+	pub.reset()
+	pub.disconnected = true
+	ferr = errors.New("unreachable")
+	b.Poll(context.Background())
+	if len(pub.snapshot()) != 0 {
+		t.Fatal("disconnected failure published")
+	}
+	pub.disconnected = false
+	b.OnConnect()
+	got = pub.topics()
+	if len(got) != 3 || got[0] != TopicDiscovery || got[1] != TopicState || got[2] != TopicAvailability {
+		t.Fatalf("after failed poll: %v", got)
+	}
+	if string(pub.payloads(TopicAvailability)[0]) != PayloadOffline {
+		t.Fatal("want offline after a failed poll")
+	}
+	if !bytes.Equal(pub.payloads(TopicState)[0], running) {
+		t.Fatal("keep latest good state")
+	}
+}
+
+func TestOnConnectOfflineOnlyAfterFailedPoll(t *testing.T) {
+	pub := &fakePub{}
+	b := newTestBridge(pub, fetchBody(nil, errors.New("unreachable")))
+	b.Poll(context.Background())
+	pub.reset()
+	b.OnConnect()
+	got := pub.topics()
+	if len(got) != 1 || got[0] != TopicAvailability || string(pub.payloads(TopicAvailability)[0]) != PayloadOffline {
+		t.Fatalf("reconnect after failed poll with no snapshot: %v", got)
+	}
+
+	pub.reset()
+	pub.disconnected = true
+	b2 := newTestBridge(pub, fetchBody(nil, errors.New("unreachable")))
+	b2.Poll(context.Background())
+	if len(pub.snapshot()) != 0 {
+		t.Fatalf("disconnected failed poll published %v", pub.topics())
+	}
+	pub.disconnected = false
+	b2.OnConnect()
+	got = pub.topics()
+	if len(got) != 1 || got[0] != TopicAvailability || string(pub.payloads(TopicAvailability)[0]) != PayloadOffline {
+		t.Fatalf("connect after disconnected failed poll: %v", got)
+	}
+}
+
+func TestFailedPublishRepublishes(t *testing.T) {
+	idle := haFixture(t, "idle.json")
+	for _, pubErr := range []error{ErrNotConnected, errors.New("broker down")} {
+		t.Run(pubErr.Error(), func(t *testing.T) {
+			pub := &fakePub{err: pubErr}
+			b := newTestBridge(pub, fetchBody(idle, nil))
+			b.Poll(context.Background())
+			if len(pub.snapshot()) == 0 {
+				t.Fatal("expected publish attempts")
+			}
+			pub.reset()
+			pub.err = nil
+			b.Poll(context.Background())
+			got := pub.topics()
+			if len(got) != 3 || got[0] != TopicDiscovery || got[1] != TopicState || got[2] != TopicAvailability {
+				t.Fatalf("retry topics %v", got)
+			}
+			if !bytes.Equal(pub.payloads(TopicState)[0], idle) {
+				t.Fatal("state")
+			}
+		})
+	}
+}
+
+func TestShutdownWhileDisconnected(t *testing.T) {
+	pub := &fakePub{disconnected: true}
+	b := newTestBridge(pub, fetchBody(haFixture(t, "idle.json"), nil))
+	b.Poll(context.Background())
+	b.Shutdown()
+	if len(pub.snapshot()) != 0 {
+		t.Fatalf("published while disconnected: %v", pub.topics())
+	}
+}
+
+func TestOnConnectResetsPublishCaches(t *testing.T) {
+	idle := haFixture(t, "idle.json")
+	pub := &fakePub{}
+	b := newTestBridge(pub, fetchBody(idle, nil))
+	b.Poll(context.Background())
+	if len(pub.payloads(TopicDiscovery)) != 1 || len(pub.payloads(TopicState)) != 1 || len(pub.payloads(TopicAvailability)) != 1 {
+		t.Fatalf("first poll %v", pub.topics())
+	}
+	b.OnConnect()
+	if len(pub.payloads(TopicDiscovery)) != 2 || len(pub.payloads(TopicState)) != 2 || len(pub.payloads(TopicAvailability)) != 2 {
+		t.Fatalf("OnConnect did not republish (caches still suppressing): %v", pub.topics())
+	}
+	states := pub.payloads(TopicState)
+	if !bytes.Equal(states[1], idle) {
+		t.Fatal("republished state")
+	}
+}
+
+func TestPollLogTransitions(t *testing.T) {
+	var logs []string
+	pub := &fakePub{}
+	var body []byte
+	var ferr error
+	b := newTestBridge(pub, func(context.Context) ([]byte, error) {
+		if ferr != nil {
+			return nil, ferr
+		}
+		return body, nil
+	})
+	b.Logf = func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	}
+
+	ferr = errors.New("dial tcp: refused")
+	b.Poll(context.Background())
+	ferr = nil
+	body = []byte(`{}`)
+	b.Poll(context.Background())
+	b.Poll(context.Background())
+
+	if n := countSub(logs, "recovered"); n != 0 {
+		t.Fatalf("recovered %d times before a valid body: %q", n, logs)
+	}
+	if n := countSub(logs, "ha body invalid: not a JSON object with phase"); n != 1 {
+		t.Fatalf("bad-body logs %d, want 1: %q", n, logs)
+	}
+	if n := countSub(logs, "dial tcp: refused"); n != 1 {
+		t.Fatalf("fetch error logs %d, want 1: %q", n, logs)
+	}
+
+	body = []byte(`{"phase":"Idle"}`)
+	b.Poll(context.Background())
+	b.Poll(context.Background())
+	if n := countSub(logs, "recovered"); n != 1 {
+		t.Fatalf("recovered %d times, want 1: %q", n, logs)
+	}
+	if n := countSub(logs, "ha body invalid: not a JSON object with phase"); n != 1 {
+		t.Fatalf("bad-body logs %d after recovery: %q", n, logs)
+	}
+}
+
+func countSub(logs []string, sub string) int {
+	n := 0
+	for _, line := range logs {
+		if strings.Contains(line, sub) {
+			n++
+		}
+	}
+	return n
 }

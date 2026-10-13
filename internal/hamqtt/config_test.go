@@ -12,7 +12,8 @@ func envMap(m map[string]string) func(string) string {
 
 func TestLoadConfigDefaults(t *testing.T) {
 	cfg, err := LoadConfig(envMap(map[string]string{
-		"MQTT_URL": "tcp://127.0.0.1:1883",
+		"MQTT_URL":         "tcp://127.0.0.1:1883",
+		"ZANJERITO_HA_URL": "http://127.0.0.1:8080/api/ha",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +85,7 @@ func TestLoadConfigValidation(t *testing.T) {
 	for _, poll := range []string{"499ms", "10s1ns", "11s", "0s", "-1s", "foo"} {
 		_, err := LoadConfig(envMap(map[string]string{
 			"MQTT_URL":           "tcp://127.0.0.1:1883",
+			"ZANJERITO_HA_URL":   "http://127.0.0.1:8080/api/ha",
 			"MQTT_POLL_INTERVAL": poll,
 		}))
 		if err == nil {
@@ -93,6 +95,7 @@ func TestLoadConfigValidation(t *testing.T) {
 	for _, poll := range []string{"500ms", "2s", "10s"} {
 		if _, err := LoadConfig(envMap(map[string]string{
 			"MQTT_URL":           "tcp://127.0.0.1:1883",
+			"ZANJERITO_HA_URL":   "http://127.0.0.1:8080/api/ha",
 			"MQTT_POLL_INTERVAL": poll,
 		})); err != nil {
 			t.Fatalf("MQTT_POLL_INTERVAL=%s: %v", poll, err)
@@ -101,6 +104,7 @@ func TestLoadConfigValidation(t *testing.T) {
 
 	_, err = LoadConfig(envMap(map[string]string{
 		"MQTT_URL":              "tcp://127.0.0.1:1883",
+		"ZANJERITO_HA_URL":      "http://127.0.0.1:8080/api/ha",
 		"MQTT_REFRESH_INTERVAL": "nope",
 	}))
 	if err == nil {
@@ -108,10 +112,50 @@ func TestLoadConfigValidation(t *testing.T) {
 	}
 	_, err = LoadConfig(envMap(map[string]string{
 		"MQTT_URL":              "tcp://127.0.0.1:1883",
+		"ZANJERITO_HA_URL":      "http://127.0.0.1:8080/api/ha",
 		"MQTT_REFRESH_INTERVAL": "-1s",
 	}))
 	if err == nil {
 		t.Fatal("negative refresh: want error")
+	}
+}
+
+func TestLoadConfigRequiresHAURL(t *testing.T) {
+	const want = "ZANJERITO_HA_URL is required (set it to the daemon LISTEN address, e.g. http://<controller-host>:8080/api/ha)"
+	for _, ha := range []string{"", "   "} {
+		_, err := LoadConfig(envMap(map[string]string{
+			"MQTT_URL":         "tcp://127.0.0.1:1883",
+			"ZANJERITO_HA_URL": ha,
+		}))
+		if err == nil || err.Error() != want {
+			t.Fatalf("HA URL %q: %v", ha, err)
+		}
+	}
+	for _, ha := range []string{
+		"not-a-url",
+		"/api/ha",
+		"ftp://controller.example/api/ha",
+		"mqtt://broker.example:1883",
+		"http://",
+		"://controller.example/api/ha",
+	} {
+		_, err := LoadConfig(envMap(map[string]string{
+			"MQTT_URL":         "tcp://127.0.0.1:1883",
+			"ZANJERITO_HA_URL": ha,
+		}))
+		if err == nil || !strings.Contains(err.Error(), "http or https") {
+			t.Fatalf("HA URL %q: %v", ha, err)
+		}
+	}
+	cfg, err := LoadConfig(envMap(map[string]string{
+		"MQTT_URL":         "tcp://127.0.0.1:1883",
+		"ZANJERITO_HA_URL": "https://controller.example/api/ha",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HAURL != "https://controller.example/api/ha" {
+		t.Fatalf("HAURL %q", cfg.HAURL)
 	}
 }
 

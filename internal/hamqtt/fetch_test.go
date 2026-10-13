@@ -52,6 +52,34 @@ func TestHTTPFetcherNon2xx(t *testing.T) {
 	}
 }
 
+func TestHTTPFetcherTimeout(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		case <-timer.C:
+		}
+	}))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+
+	fetch := NewHTTPFetcher(srv.URL, 100*time.Millisecond)
+	start := time.Now()
+	_, err := fetch(context.Background())
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("want timeout error")
+	}
+	if elapsed > time.Second {
+		t.Fatalf("fetcher returned in %s, want under 1s", elapsed)
+	}
+}
+
 func TestHTTPFetcherBodyCap(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

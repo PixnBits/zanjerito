@@ -57,10 +57,21 @@ func TestMQTTServiceIsolated(t *testing.T) {
 		"Restart=on-failure",
 		"ExecStart=/opt/zanjerito/zanjerito-mqtt",
 		"WantedBy=multi-user.target",
+		"DynamicUser=yes",
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+		"RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
+		"CapabilityBoundingSet=",
+		"AmbientCapabilities=",
+		"SystemCallFilter=@system-service",
+		"UMask=0077",
 	} {
-		if !strings.Contains(s, need) {
-			t.Fatalf("mqtt unit missing %q", need)
+		if !hasExactLine(s, need) {
+			t.Fatalf("mqtt unit missing line %q", need)
 		}
+	}
+	if !strings.Contains(s, "EnvironmentFile is read by systemd as root") {
+		t.Fatal("mqtt unit missing EnvironmentFile ownership comment")
 	}
 	if strings.Contains(s, "zanjerito.service") {
 		t.Fatal("mqtt unit must not reference zanjerito.service")
@@ -68,6 +79,15 @@ func TestMQTTServiceIsolated(t *testing.T) {
 	if strings.Contains(strings.ToLower(s), "kiosk") {
 		t.Fatal("mqtt unit must not reference kiosk")
 	}
+}
+
+func hasExactLine(s, want string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMQTTEnvExample(t *testing.T) {

@@ -6,19 +6,16 @@ The sidecar is read-only. There are no command topics. Stop, pause, and manual r
 
 ## Setup
 
-The install script does not install this sidecar. Build, copy, and enable it yourself.
+The install script does not install this sidecar. Cross-compile on a workstation with Go 1.24 or newer, copy the binary to the controller, then install the unit. Do not build on the Pi. Debian Bookworm's apt Go is 1.19, which is too old for this module.
 
 ```sh
-# on the controller, or cross-compile:
-make build-mqtt              # arch from uname -m (or GOARCH=)
-# make build-mqtt-arm       # dist/zanjerito-mqtt-linux-armv7
-# make build-mqtt-arm64     # dist/zanjerito-mqtt-linux-arm64
+# Workstation (Go >= 1.24):
+make build-mqtt-arm       # 32-bit Pi OS -> dist/zanjerito-mqtt-linux-armv7
+# make build-mqtt-arm64   # 64-bit Pi OS -> dist/zanjerito-mqtt-linux-arm64
+# Copy that binary to the controller as /opt/zanjerito/zanjerito-mqtt (mode 0755).
 
-sudo cp zanjerito-mqtt /opt/zanjerito/zanjerito-mqtt
-sudo chmod 755 /opt/zanjerito/zanjerito-mqtt
-
-sudo cp deploy/zanjerito-mqtt.env.example /opt/zanjerito/zanjerito-mqtt.env
-sudo chmod 0600 /opt/zanjerito/zanjerito-mqtt.env
+# On the controller:
+sudo install -o root -g root -m 0600 deploy/zanjerito-mqtt.env.example /opt/zanjerito/zanjerito-mqtt.env
 # set MQTT_URL, MQTT_USER, MQTT_PASS, ZANJERITO_HA_URL
 
 sudo cp deploy/zanjerito-mqtt.service /etc/systemd/system/zanjerito-mqtt.service
@@ -27,9 +24,9 @@ sudo systemctl enable --now zanjerito-mqtt
 journalctl -u zanjerito-mqtt -f
 ```
 
-`ZANJERITO_HA_URL` must match the daemon `LISTEN` address. The daemon may not bind loopback, so `http://127.0.0.1:8080/api/ha` is only correct when `LISTEN` is loopback.
+`ZANJERITO_HA_URL` is required. It must be an `http` or `https` URL of the daemon `LISTEN` address, for example `http://<controller-host>:8080/api/ha`. Use a loopback URL only when the daemon binds loopback.
 
-The unit does not start after, require, or bind to the irrigation service. If `/api/ha` is down, the sidecar publishes availability `offline` and watering is unchanged.
+The unit sets `DynamicUser=yes`. systemd reads `EnvironmentFile` as root before it starts the process as the dynamic user, so the env file stays `root:root` mode `0600`. The dynamic user never opens that file. The unit does not start after, require, or bind to the irrigation service or the kiosk. If `/api/ha` is down, the sidecar publishes availability `offline` and watering is unchanged.
 
 ## Broker
 
@@ -39,15 +36,15 @@ Alternative: a LAN-only Mosquitto 2.x broker with password auth, anonymous disab
 
 ## Environment
 
-Real file: `/opt/zanjerito/zanjerito-mqtt.env`, mode `0600`, never committed. See `deploy/zanjerito-mqtt.env.example`.
+Real file: `/opt/zanjerito/zanjerito-mqtt.env`, owner `root:root`, mode `0600`, never committed. See `deploy/zanjerito-mqtt.env.example`. `root:root` mode `0600` works with `DynamicUser=yes` because systemd reads `EnvironmentFile` as root before dropping to the dynamic user.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `MQTT_URL` | (required) | Broker URL, for example `tcp://<broker-host>:1883` |
-| `MQTT_USER` | empty | Broker username |
+| `MQTT_USER` | empty | Broker username. If `MQTT_URL` itself has userinfo, that login is used and the startup log says `user=(from url)` |
 | `MQTT_PASS` | empty | Broker password (never logged) |
 | `MQTT_CLIENT_ID` | `zanjerito-mqtt` | MQTT client id |
-| `ZANJERITO_HA_URL` | `http://127.0.0.1:8080/api/ha` | `GET /api/ha` URL; must match daemon `LISTEN` |
+| `ZANJERITO_HA_URL` | (required) | `http` or `https` URL of `GET /api/ha`; must match daemon `LISTEN` |
 | `MQTT_POLL_INTERVAL` | `2s` | Poll period (Go duration). Rejected below `500ms` or above `10s` |
 | `MQTT_REFRESH_INTERVAL` | `5m` | Re-publish state even if unchanged |
 
@@ -99,17 +96,19 @@ If a REST `rest:` package already created the same names, remove it first. MQTT 
 
 ## Behaviour
 
-The sidecar polls `ZANJERITO_HA_URL` every `MQTT_POLL_INTERVAL` (first poll immediately). It publishes discovery when the zone set changes (and tombstones removed `zone_N` components), publishes the snapshot body verbatim on `zanjerito/state` when the bytes change or `MQTT_REFRESH_INTERVAL` has elapsed, then publishes `online`.
+The sidecar polls `ZANJERITO_HA_URL` every `MQTT_POLL_INTERVAL` (first poll immediately). While the broker connection is open, it publishes discovery when the zone set changes (and tombstones removed `zone_N` components), publishes the snapshot body verbatim on `zanjerito/state` when the bytes change or `MQTT_REFRESH_INTERVAL` has elapsed, then publishes `online`.
+
+Polls while the broker is disconnected do not publish and do not queue messages for later. They still remember the latest good snapshot and whether the latest poll was valid. A failed publish does not advance the last-published caches, so the next connected poll publishes again. Each publish waits at most a couple of seconds.
 
 When Home Assistant comes back (`homeassistant/status` payload `online`), the sidecar waits a random 0–2s and republishes discovery, state, and availability.
 
-Broker reconnect forgets last-published caches and republishes the last good snapshot, or `offline` if there has never been one.
+On broker connect the sidecar clears last-published caches and publishes once, in order: discovery, the latest good snapshot, then availability (`online` if the latest poll succeeded, otherwise `offline`). If there is no good snapshot yet, connect publishes nothing unless a poll has already failed, in which case it publishes `offline`. A fresh start leaves availability to the retained last-will `offline`, so Home Assistant does not see an extra offline message before the first good poll.
 
 ## When the publisher stops
 
 | Event | Availability |
 |---|---|
-| Clean stop (`systemctl stop`, SIGINT/SIGTERM) | retained `offline` |
+| Clean stop (`systemctl stop`, SIGINT/SIGTERM) | retained `offline` when the broker connection is open; otherwise the session last-will |
 | Crash / kill | broker LWT retained `offline` within about 1.5× keepalive (keepalive is 15s) |
 | `/api/ha` unreachable or body not a snapshot object with `phase` | retained `offline` (once until the snapshot recovers) |
 
