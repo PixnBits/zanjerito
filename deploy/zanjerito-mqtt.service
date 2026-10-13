@@ -1,0 +1,23 @@
+[Unit]
+Description=Zanjerito MQTT discovery for Home Assistant (read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/zanjerito
+EnvironmentFile=/opt/zanjerito/zanjerito-mqtt.env
+ExecStart=/opt/zanjerito/zanjerito-mqtt
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target
