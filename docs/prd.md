@@ -78,12 +78,13 @@ Home Assistant MQTT discovery is under evaluation (#60). Pull request #61 is an 
 
 ### Remaining for v1
 
-- **Auth and write gating**, which reopens D7. The LAN bind stays. Writes (schedules, stations, the pin map, a manual run longer than a short preset, and driver mode) need a local household account with a hashed password. First boot creates the admin. An anonymous-status-on-LAN toggle defaults on, so a kiosk can show status. STOP is allowed without login on the kiosk; the log records who when that is known. The `max_on_sec` cap (default 900) stays in force regardless of auth. There is no cloud identity provider. Not started.
+- **Auth and write gating** (#62), which reopens D7. The LAN bind stays. Writes from a LAN browser (schedules, stations, the pin map, pause, a manual run longer than a short preset, and driver mode) need a local household account with a hashed password. First boot creates the admin. The wall panel is a trusted console: physical access to the box is full access, including STOP, and there is no logged-out watch-only kiosk mode. Anonymous LAN status defaults on and the setting persists across power cycles in the atomic JSON store. The `max_on_sec` cap (default 900) stays in force regardless of auth. There is no cloud identity provider.
+- **Time and discovery:** deploy docs call out NTP time sync and the configured timezone, and the kiosk footer shows how to reach the controller (its `.local` name or LAN address). Not started.
 - **Soil water balance and evapotranspiration** adjustment, including catch-can calibration (#26). Rain pause has shipped. The balance has not.
 - **Home Assistant Phase 2 controls** (stop, pause, manual run) (#49).
 - **Logs and history:** RAM-disk logs (#56), history retention of about 2.5 years (#57), CSV and JSON export (#58), and docs for using Home Assistant as a history archive (#59). Today's log is the short window in D10: the newest 200 runs from the last 60 days.
 - **Installable PWA** (#27) is parked.
-- **Stale drafts** from before the native kiosk: browser kiosk density (#23) and the Chromium kiosk unit notes (#24). Close them or rebase them onto the native client.
+- The pre-native browser kiosk drafts (#23, #24) were closed in favour of the native kiosk.
 
 ### Later
 
@@ -91,6 +92,7 @@ Home Assistant MQTT discovery is under evaluation (#60). Pull request #61 is an 
 - Flow or current sensing.
 - A municipal restriction feed. Honor restrictions in software when that feed exists.
 - Multi-site and remote access beyond the LAN.
+- Physical front-panel inputs (the original controller's dial and buttons), a stretch goal. Nothing is wired to the Pi today and no GPIO inputs are reserved. When it happens it is a second pointer into the same engine, never a second GPIO writer.
 
 Still out of scope: a cloud account, a multi-site product, and a GraphQL server in the Go binary. Watering runs with no internet.
 
@@ -160,7 +162,7 @@ Default sequencing is a 2-second overlap so the next station opens before the pr
 | Automatic rain pause | — | ✓ | Shipped (#30, #41) |
 | Soil estimate and rain strip | — | ✓ | Shipped, display only (#31, #33, #34) |
 | Home Assistant read-only `GET /api/ha` | — | ✓ | Shipped (#51–#55) |
-| Local accounts and write gating | — | ✓ | Not started. Reopens D7 |
+| Local accounts and write gating | — | ✓ | Open (#62). Reopens D7 |
 | Soil water balance / ET | — | ✓ | Open (#26) |
 | Home Assistant controls | — | ✓ | Open (#49) |
 | Log retention, export, archive notes | — | ✓ | Open (#56–#59) |
@@ -169,6 +171,7 @@ Default sequencing is a 2-second overlap so the next station opens before the pr
 | Flow or current sensing | — | — | Later |
 | Municipal restriction feed | — | — | Later |
 | Multi-site or remote access | — | — | Later |
+| Physical front-panel inputs | — | — | Later (stretch) |
 
 ---
 
