@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly sync of Zanjerito RAM /var/log to SD
+After=zanjerito-logs-ram.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=zanjerito-log-sync.service
+
+[Install]
+WantedBy=timers.target

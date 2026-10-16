@@ -1,0 +1,7 @@
+[Unit]
+Description=Sync Zanjerito RAM /var/log to SD
+After=zanjerito-logs-ram.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zanjerito-log-sync.sh
