@@ -3,7 +3,8 @@ Description=Zanjerito RAM /var/log (16M tmpfs)
 DefaultDependencies=no
 Requires=local-fs.target
 After=local-fs.target
-Before=systemd-journald.service systemd-journald.socket systemd-journal-flush.service rsyslog.service syslog.service syslog.target sysinit.target shutdown.target
+RequiresMountsFor=/var/log /var/hdd.log
+Before=systemd-journald.service systemd-journal-flush.service rsyslog.service syslog.service syslog.target sysinit.target shutdown.target
 Conflicts=shutdown.target reboot.target halt.target
 IgnoreOnIsolate=yes
 

@@ -68,6 +68,7 @@ BACKUP_ROOT=$(dest /var/backups/zanjerito-logs-ram)
 SBIN=$(dest /usr/local/sbin)
 UNIT_DIR=$(dest /etc/systemd/system)
 DROPIN_DST=$(dest /etc/systemd/journald.conf.d/zanjerito.conf)
+DROPIN_DIR=$(dest /etc/systemd/journald.conf.d)
 HDD_LOG=$(dest /var/hdd.log)
 
 restore_or_rm() {
@@ -111,6 +112,9 @@ restore_or_rm "$UNIT_DIR/zanjerito-logs-ram.service"
 restore_or_rm "$UNIT_DIR/zanjerito-log-sync.service"
 restore_or_rm "$UNIT_DIR/zanjerito-log-sync.timer"
 restore_or_rm "$DROPIN_DST"
+if [[ -d $DROPIN_DIR ]]; then
+    say_run rmdir "$DROPIN_DIR" 2>/dev/null || true
+fi
 
 if [[ -z $DESTDIR ]]; then
     say_run "$SYSTEMCTL" daemon-reload

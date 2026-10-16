@@ -11,21 +11,31 @@ SIZE=16M
 SIZE_KB=16384
 TMPFS_NAME=zanjerito-logs-ram
 SYNC=/usr/local/sbin/zanjerito-log-sync.sh
+# The EXIT trap runs after start returns. A local is unset there, and set -u
+# would fail a start that succeeded.
+finished=0
 
 usage() {
     printf 'usage: zanjerito-logs-ram.sh start|stop\n' >&2
     exit 2
 }
 
+# Top mount at this path. findmnt without --mountpoint also lists the parent
+# when the path is its own partition; the last line is the mount on top.
+mountpoint_line() {
+    findmnt --mountpoint "$1" -n -o FSTYPE,SOURCE 2>/dev/null | tail -n1 || true
+}
+
 ram_is_ours() {
-    local fstype src
-    fstype=$(findmnt -n -o FSTYPE /var/log 2>/dev/null || true)
-    src=$(findmnt -n -o SOURCE /var/log 2>/dev/null || true)
+    local line fstype src
+    line=$(mountpoint_line "$RAM_LOG")
+    [[ -n $line ]] || return 1
+    read -r fstype src <<<"$line"
     [[ $fstype == tmpfs && $src == "$TMPFS_NAME" ]]
 }
 
 hdd_is_mounted() {
-    findmnt -n "$HDD_LOG" >/dev/null 2>&1
+    findmnt --mountpoint "$HDD_LOG" -n >/dev/null 2>&1
 }
 
 copy_tree() {
@@ -46,15 +56,24 @@ start() {
         printf 'zanjerito-logs-ram: /var/log is our tmpfs but %s is not mounted\n' "$HDD_LOG" >&2
         exit 1
     fi
-    if [[ $(findmnt -n -o FSTYPE /var/log 2>/dev/null || true) == tmpfs ]]; then
+    local line fstype
+    line=$(mountpoint_line "$RAM_LOG")
+    fstype=
+    if [[ -n $line ]]; then
+        read -r fstype _ <<<"$line"
+    fi
+    if [[ $fstype == tmpfs ]]; then
         printf 'zanjerito-logs-ram: /var/log is a tmpfs from another source; refusing\n' >&2
         exit 1
     fi
 
-    local finished=0
+    finished=0
     cleanup() {
         if [[ $finished -eq 0 ]]; then
-            umount -l "$RAM_LOG" 2>/dev/null || true
+            # A real /var/log partition stays mounted. Only our tmpfs comes off.
+            if ram_is_ours; then
+                umount -l "$RAM_LOG" 2>/dev/null || true
+            fi
             umount -l "$HDD_LOG" 2>/dev/null || true
         fi
     }

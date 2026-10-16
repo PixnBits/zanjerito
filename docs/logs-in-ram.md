@@ -11,7 +11,7 @@ Optional log2ram-style setup for a Raspberry Pi: `/var/log` is a **16M tmpfs**, 
 | `/opt/zanjerito/*` | SD | daemon, `config.json`, `history.json`, `pause.json`, rain/soil local files, env |
 | journald | capped | `SystemMaxUse=10M`, `RuntimeMaxUse=10M` |
 
-Unclean power loss **loses up to about one hour of logs** (whatever was not yet synced). Watering state is unaffected.
+Logs written between the last sync and a power-off, or after the uninstall sync and before journald restarts, are lost (up to about one hour). Watering state is unaffected.
 
 ## Install
 
@@ -57,7 +57,7 @@ At boot, `zanjerito-logs-ram.service` runs before journald and other loggers:
 3. Copy `/var/hdd.log` → `/var/log`.
 4. Ensure `/var/log/journal` exists so journald can persist onto the tmpfs.
 
-`zanjerito-log-sync.timer` (`OnCalendar=hourly`, `Persistent=true`) runs `zanjerito-log-sync.sh`: rsync when present, otherwise a staging `cp -a` so a failed copy leaves the SD tree in place. The ram unit's `ExecStop=` runs the same sync, then unmounts, so a clean reboot or halt keeps the last logs.
+`zanjerito-log-sync.timer` (`OnCalendar=hourly`, `Persistent=true`) runs `zanjerito-log-sync.sh`: rsync when present, otherwise a staging `cp -a`. The ram unit's `ExecStop=` runs the same sync, then unmounts, so a clean reboot or halt keeps the logs from that boot.
 
 The daemon and kiosk do not wait on this. Boot still works with no network.
 
@@ -86,9 +86,9 @@ journalctl -b -1 | grep zanjerito-ramlog-test
 
 ## Power loss and recovery
 
-A hard power cut skips `ExecStop`. The card has the last **hourly** (or last clean shutdown) snapshot. On the next boot that snapshot is copied into the new tmpfs. The missing window is gone; there is nothing to replay.
+A hard power cut skips `ExecStop`. Logs written between the last sync and the power-off are lost (up to about one hour). The next boot copies the last finished on-disk tree into a new tmpfs. The missing window is gone; there is nothing to replay.
 
-If the ram unit fails at boot because `/var/hdd.log` is larger than 16M, the bind is undone and `/var/log` stays on the card. Vacuum, then `sudo systemctl start zanjerito-logs-ram.service` or reboot.
+If start fails (for example `/var/hdd.log` is larger than 16M), the script unmounts the bind it added and unmounts `/var/log` when that mount is this unit's tmpfs. A failed start leaves `/var/log` on the card, including when `/var/log` is its own partition. Vacuum, then `sudo systemctl start zanjerito-logs-ram.service` or reboot.
 
 If journal files look torn after a crash:
 
@@ -103,4 +103,4 @@ sudo journalctl --vacuum-size=8M
 sudo deploy/logs-ram/uninstall-logs-ram.sh
 ```
 
-Stops the timer and ram unit (sync + unmount), restores any backed-up files, removes the units/scripts/drop-in, deletes `/var/hdd.log` if it is an empty unmounted directory, and restarts journald so the 10M cap is dropped. Disk `/var/log` is in use again. The irrigation daemon and `/opt/zanjerito` are not changed. Safe to re-run. A reboot is optional.
+Stops the timer and ram unit (sync + unmount), restores any backed-up files, removes the units/scripts/drop-in, deletes `/var/hdd.log` if it is an empty unmounted directory, removes `/etc/systemd/journald.conf.d` if that directory is empty, and restarts journald so the 10M cap is dropped. Logs written after the uninstall sync and before journald restarts are lost. Disk `/var/log` is in use again. The irrigation daemon and `/opt/zanjerito` are not changed. Safe to re-run. A reboot is optional.
