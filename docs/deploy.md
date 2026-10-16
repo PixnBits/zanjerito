@@ -79,3 +79,7 @@ Use the BCM pins from your own `config.json` (the valve stations plus the PSU li
 Verify after a reboot: `pinctrl get 5,6,13,19,21` (or `raspi-gpio get 5,6,13,19,21` on older images) should show level high, output, and the journal should show only `Set <id>=false` lines from the daemon. The firmware still needs a second or two before it applies the setting, so a very brief transient at power-on can remain.
 
 Revert: restore the backup (or delete the two lines) and reboot.
+
+## RAM `/var/log` (optional)
+
+Keeps `/var/log` on a 16M tmpfs and syncs to the SD card hourly and at shutdown, to cut SD wear. Watering history and `/opt/zanjerito` stay on the card. Not part of `make install`. See [logs-in-ram.md](./logs-in-ram.md).
