@@ -204,6 +204,7 @@
       padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
       background: var(--sand);
     }
+    #pause-open, #pause-resume, .stop { min-height: 64px; border-radius: 16px; }
     #pause-open, #pause-resume {
       flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       border: 1.5px solid var(--line); background: var(--cream); color: var(--ink); font-size: 17px; font-weight: 500;
@@ -1923,6 +1924,7 @@
       startRun(d.dataset.id, Number(d.dataset.sec), true);
     });
     $("stop").addEventListener("click", () => {
+      // STOP: cancel live run only — never fold pause duration into STOP; does not Resume.
       state.runTrack = null;
       j("/api/run/cancel", { method: "POST" }).then(() => loadStatus()).catch((e) => alert(e.message));
     });
