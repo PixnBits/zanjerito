@@ -166,3 +166,71 @@ func TestUINameRequiredAndRunDay(t *testing.T) {
 		t.Fatal("editor must not copy the name into the legacy note")
 	}
 }
+
+func TestUIStopConfirm(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/", nil)
+	if rr.Code != 200 {
+		t.Fatalf("GET / %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, need := range []string{
+		"Stop all watering?",
+		"Stop watering",
+		"Nothing is watering right now. This turns every valve off.",
+		"and every other valve now.",
+		`id="stop-sheet"`,
+		`id="stop-confirm"`,
+		`id="stop-cancel"`,
+		`aria-modal="true"`,
+		`aria-labelledby="stop-sheet-title"`,
+		`role="dialog"`,
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("ui missing %q", need)
+		}
+	}
+	if strings.Contains(body, "<dialog") || strings.Contains(body, "</dialog>") {
+		t.Fatal("native dialog element remains")
+	}
+	if strings.Contains(body, "showModal(") {
+		t.Fatal("showModal remains")
+	}
+	if strings.Contains(body, "window.confirm") {
+		t.Fatal("window.confirm remains")
+	}
+	if strings.Contains(body, "http://") || strings.Contains(body, "https://") {
+		t.Fatal("external URL in served UI")
+	}
+	if strings.Count(body, "background: #B5361A") != 2 {
+		t.Fatalf("filled #B5361A backgrounds = %d, want 2 (bottom-bar STOP and stop confirm)", strings.Count(body, "background: #B5361A"))
+	}
+	ruleAt := strings.Index(body, "#stop-confirm")
+	if ruleAt < 0 {
+		t.Fatal("stop confirm rule missing")
+	}
+	rule := body[ruleAt:]
+	end := strings.Index(rule, "}")
+	if end < 0 || !strings.Contains(rule[:end], "background: #B5361A") {
+		t.Fatal("#stop-confirm is not filled #B5361A")
+	}
+	stopAt := strings.Index(body, `$("stop").addEventListener`)
+	confAt := strings.Index(body, `$("stop-confirm").addEventListener`)
+	if stopAt < 0 || confAt < stopAt {
+		t.Fatal("stop listeners missing")
+	}
+	if strings.Contains(body[stopAt:confAt], "/api/run/cancel") {
+		t.Fatal("STOP click handler posts /api/run/cancel")
+	}
+	tail := body[confAt:]
+	next := strings.Index(tail, `$("pause-chips")`)
+	if next < 0 {
+		t.Fatal("confirm handler end missing")
+	}
+	if !strings.Contains(tail[:next], "/api/run/cancel") {
+		t.Fatal("confirm button must POST /api/run/cancel")
+	}
+	if strings.Count(body, "/api/run/cancel") != 1 {
+		t.Fatalf("/api/run/cancel count = %d, want 1", strings.Count(body, "/api/run/cancel"))
+	}
+}

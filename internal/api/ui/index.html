@@ -233,18 +233,9 @@
       font-size: 18px; font-weight: 700; letter-spacing: 3px;
     }
     .stop svg { width: 22px; height: 22px; }
-    dialog {
-      border: 0; border-radius: 24px 24px 0 0; background: var(--cream); color: var(--text);
-      width: min(480px, 100%); max-height: calc(100% - var(--bar-space) - 8px);
-      margin: auto auto var(--bar-space); padding: 18px 20px 16px;
-    }
-    dialog::backdrop { background: rgba(58, 42, 31, .42); }
-    dialog h1 { font-family: var(--serif); font-size: 24px; font-weight: 600; margin: 0 0 8px; }
-    dialog p, dialog label { font-size: 15px; }
-    dialog menu { display: flex; gap: 12px; justify-content: flex-end; margin: 16px 0 0; padding: 0; }
     .pause-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
     .pause-chips button, #pause-days-go, #run-dlg .chip {
-      min-height: 48px; text-align: left; background: var(--sand-deep); border: 0; border-radius: 12px;
+      min-width: 48px; min-height: 48px; text-align: left; background: var(--sand-deep); border: 0; border-radius: 12px;
       padding: 8px 14px; font-size: 16px; font-weight: 600;
     }
     .pause-hint { display: block; font-size: 14px; font-weight: 500; color: var(--muted); }
@@ -309,9 +300,22 @@
       font-size: 15px; white-space: pre-wrap; margin: 8px 0 0;
       background: var(--sand); border-radius: 12px; padding: 10px 12px;
     }
+    .sheet p, .sheet label { font-size: 15px; }
+    .sheet h2.wrap { display: block; -webkit-line-clamp: unset; overflow: visible; }
+    .sheet-scrim.sheet-scrim-top { z-index: 50; }
+    #stop-sheet { z-index: 55; }
+    #stop-sheet .stop-body { font-size: 15px; line-height: 1.4; color: var(--muted); margin: 0 0 4px; }
     .sheet-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 18px; }
     .sheet-actions .text-btn { min-width: 85px; min-height: 52px; font-size: 16px; }
     .sheet-actions .go { min-width: 155px; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+    #stop-sheet .sheet-actions { justify-content: stretch; }
+    #stop-sheet .sheet-actions > button { flex: 1 1 0; min-width: 48px; min-height: 52px; font-size: 16px; }
+    #stop-confirm {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      background: #B5361A; color: #fff; border: 0; border-radius: 16px;
+      font-weight: 700; cursor: pointer;
+    }
+    #stop-confirm svg { width: 22px; height: 22px; flex: 0 0 auto; }
     #sched-dlg { padding-bottom: 24px; }
     .editor-bar {
       position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8;
@@ -577,23 +581,29 @@
       <span>STOP</span>
     </button>
   </footer>
-  <dialog id="run-dlg">
-    <p id="run-msg"></p>
+  <div id="run-dlg" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="run-msg">
+    <div class="grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-x" id="run-dlg-x" aria-label="Close">×</button>
+    <h2 id="run-msg"></h2>
     <p id="run-soil" class="history-note" hidden></p>
     <div id="durs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-    <menu>
-      <button type="button" class="ghost" id="run-cancel">Cancel</button>
-    </menu>
-  </dialog>
-  <dialog id="warn-dlg">
-    <p id="warn-msg">A station is already watering. Stop it and start this manual run?</p>
-    <menu>
-      <button type="button" class="ghost" id="warn-no">Keep going</button>
+    <div class="sheet-actions">
+      <button type="button" class="text-btn" id="run-cancel">Cancel</button>
+    </div>
+  </div>
+  <div id="warn-dlg" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="warn-msg">
+    <div class="grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-x" id="warn-dlg-x" aria-label="Close">×</button>
+    <h2 id="warn-msg" class="wrap">A station is already watering. Stop it and start this manual run?</h2>
+    <div class="sheet-actions">
+      <button type="button" class="text-btn" id="warn-no">Keep going</button>
       <button type="button" class="go" id="warn-yes">Start anyway</button>
-    </menu>
-  </dialog>
-  <dialog id="pause-dlg">
-    <h1>Pause for rain</h1>
+    </div>
+  </div>
+  <div id="pause-dlg" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="pause-dlg-title">
+    <div class="grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-x" id="pause-dlg-x" aria-label="Close">×</button>
+    <h2 id="pause-dlg-title">Pause for rain</h2>
     <p style="margin:0;color:var(--muted)">Don&rsquo;t water for a while. Schedules skip until you resume or the pause ends. A station run asks first and leaves the pause on. STOP still only cancels a live run.</p>
     <div class="pause-chips" id="pause-chips">
       <button type="button" data-pause="tomorrow">
@@ -626,19 +636,21 @@
       <p class="pause-stepper-hint" id="pause-days-hint">Resumes in 3 days, in the morning</p>
       <button type="button" class="go" id="pause-days-go">Pause 3 days</button>
     </div>
-    <menu>
-      <button type="button" class="ghost" id="pause-cancel">Cancel</button>
-    </menu>
-  </dialog>
-  <dialog id="paused-block-dlg">
-    <p id="paused-block-msg">Paused for rain — resume before running a station.</p>
-    <menu>
-      <button type="button" class="ghost" id="paused-block-ok">OK</button>
+    <div class="sheet-actions">
+      <button type="button" class="text-btn" id="pause-cancel">Cancel</button>
+    </div>
+  </div>
+  <div id="paused-block-dlg" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="paused-block-msg">
+    <div class="grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-x" id="paused-block-x" aria-label="Close">×</button>
+    <h2 id="paused-block-msg" class="wrap">Paused for rain — resume before running a station.</h2>
+    <div class="sheet-actions">
+      <button type="button" class="text-btn" id="paused-block-ok">OK</button>
       <button type="button" class="go" id="paused-block-resume">Resume</button>
-    </menu>
-  </dialog>
+    </div>
+  </div>
   <div id="sheet-scrim" class="sheet-scrim" hidden></div>
-  <div id="run-sheet" class="sheet" hidden role="dialog" aria-labelledby="run-sheet-title">
+  <div id="run-sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="run-sheet-title">
     <div class="grab" aria-hidden="true"></div>
     <button type="button" class="sheet-x" id="run-sheet-x" aria-label="Close">×</button>
     <div class="eyebrow">Run detail</div>
@@ -661,7 +673,7 @@
     </div>
     <button type="button" class="text-link" id="run-sheet-edit">Edit in Schedules ›</button>
   </div>
-  <div id="paused-run-sheet" class="sheet" hidden role="dialog" aria-labelledby="paused-run-title">
+  <div id="paused-run-sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="paused-run-title">
     <div class="grab" aria-hidden="true"></div>
     <button type="button" class="sheet-x" id="paused-run-x" aria-label="Close">×</button>
     <div class="eyebrow">Paused for rain</div>
@@ -675,12 +687,25 @@
       </button>
     </div>
   </div>
-  <div id="pick-sheet" class="sheet" hidden role="dialog" aria-labelledby="pick-sheet-title">
+  <div id="pick-sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="pick-sheet-title">
     <div class="grab" aria-hidden="true"></div>
     <button type="button" class="sheet-x" id="pick-sheet-x" aria-label="Close">×</button>
     <div class="eyebrow" id="pick-sheet-label">Row 1 · Station</div>
     <h2 id="pick-sheet-title">Choose a station</h2>
     <div id="pick-sheet-list" class="plist"></div>
+  </div>
+  <div id="stop-sheet" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="stop-sheet-title">
+    <div class="grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-x" id="stop-sheet-x" aria-label="Close">×</button>
+    <h2 id="stop-sheet-title">Stop all watering?</h2>
+    <p id="stop-sheet-body" class="stop-body"></p>
+    <div class="sheet-actions">
+      <button type="button" class="text-btn" id="stop-cancel">Cancel</button>
+      <button type="button" id="stop-confirm">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.2 2.5h7.6l5.7 5.7v7.6l-5.7 5.7H8.2l-5.7-5.7V8.2l5.7-5.7Z"/></svg>
+        <span>Stop watering</span>
+      </button>
+    </div>
   </div>
   <script>
     /* zan-pure:start */
@@ -1386,6 +1411,7 @@
         else setQuiet(lastRanLine(), false);
         $("next-text").textContent = state.kioskNextReady ? kioskNextLabel() : globalNextLabel();
       }
+      if (!$("stop-sheet").hidden) $("stop-sheet-body").textContent = stopConfirmBody();
       paintPauseBanner();
       document.querySelectorAll("#stations .station-tile").forEach((el) => {
         const on = (s.stations_on || []).includes(el.dataset.id) || s.current_station === el.dataset.id;
@@ -1772,7 +1798,7 @@
         b.addEventListener("click", () => confirmRun(st, m * 60));
         durs.appendChild(b);
       });
-      $("run-dlg").showModal();
+      showSheet("run-dlg");
     }
     function openPausedRun(st) {
       state.pick = st;
@@ -1785,16 +1811,15 @@
       showSheet("paused-run-sheet");
     }
     function confirmRun(st, sec) {
-      const dlg = $("run-dlg");
-      if (dlg.open) dlg.close();
       if (watering()) {
         $("warn-msg").textContent = shortStation(state.status.current_station || "A station") +
           " is watering. Stop it and run " + shortStation(st.id) + "?";
         $("warn-dlg").dataset.sec = String(sec);
         $("warn-dlg").dataset.id = st.id;
-        $("warn-dlg").showModal();
+        showSheet("warn-dlg");
         return;
       }
+      closeSheet("run-dlg");
       startRun(st.id, sec, false);
     }
     async function startRun(id, sec, preempt) {
@@ -1809,18 +1834,85 @@
       catch { state.status = normalizeStatus(res || { phase: "StationOn", current_station: id, stations_on: [id] }); }
       paintStatus();
     }
+    const BASE_SHEETS = ["run-sheet", "paused-run-sheet", "pick-sheet", "run-dlg", "warn-dlg", "pause-dlg", "paused-block-dlg"];
+    function sheetOpen(id) {
+      const el = $(id);
+      return !!(el && !el.hidden);
+    }
+    function anyBaseOpen() { return BASE_SHEETS.some(sheetOpen); }
+    function focusInSheet(el) {
+      if (!el || !el.focus) return;
+      setTimeout(() => { el.focus({ preventScroll: true }); }, 0);
+    }
+    function focusSheet(id) {
+      let el = null;
+      if (id === "run-dlg") el = $("run-cancel");
+      else if (id === "warn-dlg") el = $("warn-no");
+      else if (id === "pause-dlg") el = $("pause-cancel");
+      else if (id === "paused-block-dlg") el = $("paused-block-ok");
+      else if (id === "paused-run-sheet") el = $("paused-run-cancel");
+      focusInSheet(el);
+    }
+    function hideBase(except) {
+      BASE_SHEETS.forEach((sid) => {
+        if (sid === except) return;
+        const el = $(sid);
+        if (el) el.hidden = true;
+      });
+    }
+    function closeSheet(id) {
+      const el = $(id);
+      if (el) {
+        el.hidden = true;
+        el.removeAttribute("aria-hidden");
+      }
+      if (id === "stop-sheet") {
+        $("sheet-scrim").classList.remove("sheet-scrim-top");
+        BASE_SHEETS.forEach((sid) => {
+          const s = $(sid);
+          if (s) s.removeAttribute("aria-hidden");
+        });
+        if (!anyBaseOpen()) $("sheet-scrim").hidden = true;
+        const stopBtn = $("stop");
+        if (stopBtn) stopBtn.focus({ preventScroll: true });
+        return;
+      }
+      if (!sheetOpen("stop-sheet") && !anyBaseOpen()) {
+        $("sheet-scrim").hidden = true;
+        $("sheet-scrim").classList.remove("sheet-scrim-top");
+      }
+    }
     function showSheet(id) {
-      $("run-sheet").hidden = true;
-      $("paused-run-sheet").hidden = true;
-      $("pick-sheet").hidden = true;
+      if (sheetOpen("stop-sheet")) closeSheet("stop-sheet");
+      hideBase(id);
+      $("sheet-scrim").classList.remove("sheet-scrim-top");
       $("sheet-scrim").hidden = false;
       $(id).hidden = false;
+      focusSheet(id);
     }
     function closeSheets() {
+      if (sheetOpen("stop-sheet")) { closeSheet("stop-sheet"); return; }
+      hideBase("");
       $("sheet-scrim").hidden = true;
-      $("run-sheet").hidden = true;
-      $("paused-run-sheet").hidden = true;
-      $("pick-sheet").hidden = true;
+      $("sheet-scrim").classList.remove("sheet-scrim-top");
+    }
+    function stopConfirmBody() {
+      if (!watering()) return "Nothing is watering right now. This turns every valve off.";
+      const s = state.status || {};
+      const cur = s.current_station || ((s.stations_on || [])[0] || "");
+      const name = shortStation(cur) || "the station";
+      return "This turns off " + name + " and every other valve now.";
+    }
+    function openStopSheet() {
+      $("stop-sheet-body").textContent = stopConfirmBody();
+      BASE_SHEETS.forEach((sid) => {
+        const el = $(sid);
+        if (el && !el.hidden) el.setAttribute("aria-hidden", "true");
+      });
+      $("sheet-scrim").hidden = false;
+      $("sheet-scrim").classList.add("sheet-scrim-top");
+      $("stop-sheet").hidden = false;
+      focusInSheet($("stop-cancel"));
     }
     function historyTZ() { return (state.status && state.status.timezone) || TZ; }
     function tzParts(d) {
@@ -2184,8 +2276,7 @@
     function paintSoil() {
       paintSoilNote();
       paintTileSoil();
-      const dlg = $("run-dlg");
-      if (state.pick && dlg && dlg.open) paintRunSoil(state.pick);
+      if (state.pick && sheetOpen("run-dlg")) paintRunSoil(state.pick);
     }
     function paintRunSoil(st) {
       const el = $("run-soil");
@@ -2249,10 +2340,10 @@
         h.textContent = pauseResumeHint(Number(h.dataset.hintDays));
       });
       syncPauseStepper();
-      $("pause-dlg").showModal();
+      showSheet("pause-dlg");
     }
     async function setPause(body) {
-      $("pause-dlg").close();
+      closeSheet("pause-dlg");
       await j("/api/pause", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       state.runTrack = null;
       await loadStatus();
@@ -2300,16 +2391,26 @@
         }
       });
     }
-    $("run-cancel").addEventListener("click", () => $("run-dlg").close());
-    $("warn-no").addEventListener("click", () => $("warn-dlg").close());
+    $("run-cancel").addEventListener("click", () => closeSheet("run-dlg"));
+    $("run-dlg-x").addEventListener("click", () => closeSheet("run-dlg"));
+    $("warn-no").addEventListener("click", () => closeSheet("warn-dlg"));
+    $("warn-dlg-x").addEventListener("click", () => closeSheet("warn-dlg"));
     $("warn-yes").addEventListener("click", () => {
       const d = $("warn-dlg");
-      d.close();
-      startRun(d.dataset.id, Number(d.dataset.sec), true);
+      const id = d.dataset.id;
+      const sec = Number(d.dataset.sec);
+      closeSheet("warn-dlg");
+      startRun(id, sec, true);
     });
     $("stop").addEventListener("click", () => {
+      openStopSheet();
+    });
+    $("stop-cancel").addEventListener("click", () => closeSheet("stop-sheet"));
+    $("stop-sheet-x").addEventListener("click", () => closeSheet("stop-sheet"));
+    $("stop-confirm").addEventListener("click", () => {
       // STOP: cancel live run only — never fold pause duration into STOP; does not Resume.
       state.runTrack = null;
+      closeSheet("stop-sheet");
       j("/api/run/cancel", { method: "POST" }).then(() => loadStatus()).catch((e) => alert(e.message));
     });
     $("pause-chips").addEventListener("click", (ev) => {
@@ -2335,11 +2436,13 @@
     });
     $("pause-open").addEventListener("click", openPauseSheet);
     $("change-end").addEventListener("click", openPauseSheet);
-    $("pause-cancel").addEventListener("click", () => $("pause-dlg").close());
+    $("pause-cancel").addEventListener("click", () => closeSheet("pause-dlg"));
+    $("pause-dlg-x").addEventListener("click", () => closeSheet("pause-dlg"));
     $("pause-resume").addEventListener("click", () => resumePause().catch((e) => alert(e.message)));
-    $("paused-block-ok").addEventListener("click", () => $("paused-block-dlg").close());
+    $("paused-block-ok").addEventListener("click", () => closeSheet("paused-block-dlg"));
+    $("paused-block-x").addEventListener("click", () => closeSheet("paused-block-dlg"));
     $("paused-block-resume").addEventListener("click", () => {
-      $("paused-block-dlg").close();
+      closeSheet("paused-block-dlg");
       resumePause().catch((e) => alert(e.message));
     });
     $("tab-home").addEventListener("click", showHome);
@@ -2386,8 +2489,17 @@
       closeSheets();
       confirmRun(st, usualMinutes(st) * 60);
     });
-    document.querySelectorAll("dialog").forEach((d) => {
-      d.addEventListener("click", (ev) => { if (ev.target === d) d.close(); });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      if (sheetOpen("stop-sheet")) {
+        ev.preventDefault();
+        closeSheet("stop-sheet");
+        return;
+      }
+      if (anyBaseOpen()) {
+        ev.preventDefault();
+        closeSheets();
+      }
     });
     bindNameLimit();
     loadStatus();

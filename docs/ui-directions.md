@@ -12,8 +12,8 @@ The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its hi
 
 - Works on a phone on the home Wi‑Fi (thumb-friendly primary actions).
 - Glanceable: **what is watering now**, **what’s next**, **any fault**.
-- **STOP** is always visible on the phone app and on the wall screen (when present). STOP while watering needs **no** extra confirm (safety action).
-- Manual run and cancel must be obvious and hard to do by accident for non-STOP actions.
+- **STOP** is always visible on the phone app and on the wall screen (when present). STOP asks "Stop all watering?" before it runs. Confirm, then immediate all-off.
+- Manual run, pause, and STOP must be obvious. STOP asks once, then it is immediate.
 - **Preempt:** if a schedule is watering, starting a manual run shows an **explicit warning dialog**, then aborts the remaining itinerary and starts the manual run.
 - Edits to schedules/stations must be understandable by a non-developer stakeholder (clock + weekday chips + minutes — no raw cron / `PT3M` in the household UI).
 - No dependency on GraphQL or the old component tree.

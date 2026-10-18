@@ -71,7 +71,7 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 - **Status:** decided → **Direction D hybrid strip** (owner, 2026-09-12)
 - **Choice:** Status-first home + compact station chips + always-visible STOP. Schedules on page 2 with clock + weekday chips + minutes (no raw cron / `PT3M` in the household UI).
 - **MVP vs v1:** phone-on-LAN is MVP. Wall / `screen-mount-part` screen is **v1, not MVP** — same layout, bigger type, STOP dominant, edits tucked. One UI, two densities (`?mode=kiosk` or equivalent). Not a second app.
-- **Preempt:** manual run may interrupt a schedule **with an explicit warning dialog**. STOP itself needs no extra confirm when already watering (safety action). See [ui-directions.md](./ui-directions.md).
+- **Preempt:** manual run may interrupt a schedule **with an explicit warning**. STOP asks "Stop all watering?" on every surface, then immediate all-off. See [ui-directions.md](./ui-directions.md).
 - **Unblocks:** frontend implementation.
 
 ### D7. Auth / exposure model
@@ -90,12 +90,17 @@ Record the choice inline when decided (date + rationale). Full ADRs can split ou
 - **Choice:** daemon logs intended actions while bash still actuates; flip after N good scheduled days. Bash stays documented rollback for a season.
 - **Unblocks:** cutover checklist.
 
+### D15. STOP confirm on every surface
+- **Status:** decided (2026-10-18)
+- **Choice:** Phone, web, and the native kiosk ask "Stop all watering?" before stopping. After confirm, all-off and PSU off are immediate. Cancel, Close, and the scrim send no request. `POST /api/run/cancel` itself has no confirm.
+- **Unblocks:** the same STOP question on every client, without a second check inside the API.
+
 ---
 
 ## P2 — Can wait until after skeleton works
 
 ### D10. History / metrics retention
-- **Implementation:** `history.json` beside the config keeps the newest 200 runs from the last 60 days. The engine emits a record only after all-off and after the run is no longer busy (STOP stays instant). `GET /api/history?limit=N`.
+- **Implementation:** `history.json` beside the config keeps the newest 200 runs from the last 60 days. The engine emits a record only after all-off and after the run is no longer busy, so the all-off after confirm is not held for the log. `GET /api/history?limit=N`.
 ### D11. Rain skip / weather
 ### D12. Multi-controller / remote access
 
@@ -118,3 +123,4 @@ Seasonal date windows (winter grass in October) are **not** P2 — they are v1 s
 | D9 | dual-run then flip | 2026-09-12 | decided |
 | D13 | schedule collision → skip + log | 2026-09-12 | decided; manual preempt unchanged |
 | D14 | Architect follow-ups | 2026-09-12 | decided; fault all-off, config-while-watering, ≤2 ON, PRD §10 decided |
+| D15 | STOP confirm on every surface | 2026-10-18 | decided; clients ask first; the API endpoint has no confirm |
