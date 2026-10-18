@@ -20,16 +20,28 @@ func pauseCfg() Config {
 	}
 }
 
-func TestPauseBlocksItinerary(t *testing.T) {
+func TestManualRunWhilePausedKeepsPause(t *testing.T) {
 	e, err := New(pauseCfg(), gpio.NewFake())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer e.Close()
-	e.SetPause(nil, "rain")
-	err = e.RunItinerary(context.Background(), []Step{{StationID: "front-north", Duration: time.Second}})
+	until := time.Now().Add(time.Hour)
+	e.SetPause(&until, "rain")
+	err = e.RunItinerary(context.Background(), []Step{{StationID: "front-north", Duration: 30 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.IsPaused(time.Now()) {
+		t.Fatal("manual run must not clear pause")
+	}
+	_, got, reason := e.PauseSnapshot(time.Now())
+	if got == nil || !got.Equal(until) || reason != "rain" {
+		t.Fatalf("pause changed until=%v reason=%q", got, reason)
+	}
+	err = e.RunProgram(context.Background(), "dawn", "Dawn", []Step{{StationID: "front-north", Duration: time.Second}})
 	if !errors.Is(err, ErrPaused) {
-		t.Fatalf("want ErrPaused, got %v", err)
+		t.Fatalf("scheduled run want ErrPaused, got %v", err)
 	}
 	e.ClearPause()
 	// short run should succeed after resume

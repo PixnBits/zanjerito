@@ -5,459 +5,307 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Zanjerito</title>
   <style>
+    /* Literata SemiBold, SIL OFL. License: OFL-Literata.txt. Static face, not the variable font. */
+    @font-face {
+      font-family: "Literata";
+      src: url("Literata-SemiBold.woff2") format("woff2");
+      font-weight: 600;
+      font-style: normal;
+      font-display: swap;
+    }
     :root {
-      /* Polish v1 Style A — Cards + desert light */
-      --sand: #e8dcc8;
-      --sand-deep: #d9cbb4;
-      --cream: #f7f1e6;
-      --cream-edge: #ebe3d4;
-      --terracotta: #c45c3e;
-      --terracotta-deep: #a8482f;
-      --teal: #2a7a74;
-      --teal-soft: #d5ebe8;
-      --teal-mid: #b8ddd8;
-      --plum: #6b4a6e;
-      --plum-soft: #efe4f0;
-      --ink: #3a2a1f;
-      --muted: #7a6a58;
-      --warn: #c9a24a;
-      --warn-ink: #3a2e10;
-      --warn-bg: #f5e8c8;
-      --off-badge: #9a8a78;
-      --out-badge: #8a6a48;
-      --out-ink: #5a3a20;
-      --dune: #c4a882;
-      --dune-deep: #a88868;
-      --dune-ink: #b89878;
-      --bg: var(--sand);
-      --card: var(--cream);
-      --stop: var(--terracotta);
-      --go: var(--teal);
-      --chip: var(--cream-edge);
-      --on: var(--teal);
-      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-      --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --sand: #FBECD6;
+      --sand-deep: #F3E1C4;
+      --cream: #FFFAEE;
+      --cream-edge: #EEDDC3;
+      --line: #E3D0B3;
+      --ink: #4A2F12;
+      --text: #3A2A1F;
+      --muted: #6E5A45;
+      --label: #7A5A3A;
+      --terracotta: #D26A43;
+      --terra-ink: #B04F2C;
+      --error: #A8432A;
+      --teal: #2A7A74;
+      --teal-ink: #1F6A64;
+      --teal-soft: #D7ECE7;
+      --teal-tile: #EDF6F2;
+      --plum: #4E3F63;
+      --plum-ink: #F3EEF8;
+      --plum-mut: #D9CFE6;
+      --stop: #B5361A;
+      --stop-shadow: #7C2411;
+      --dune: #E7C7A2;
+      --chip-season: #F8E0D2;
+      --serif: "Literata", "Noto Serif", Georgia, serif;
+      --sans: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --bar-space: calc(88px + env(safe-area-inset-bottom, 0px));
     }
     .kiosk { font-size: 22px; }
-    .kiosk .edit, .kiosk #page-schedules { display: none; }
+    .kiosk .edit, .kiosk #page-schedules, .kiosk #sched-dlg { display: none; }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body {
-      margin: 0; font-family: var(--sans); background: var(--sand); color: var(--ink);
-      /* Clear fixed STOP footer so last card Edit/Duplicate stay fully above it */
-      padding: 12px 12px calc(118px + env(safe-area-inset-bottom, 0px)); max-width: 480px; margin-inline: auto;
+      margin: 0 auto; max-width: 480px;
+      padding: 12px 16px var(--bar-space);
+      font-family: var(--sans); font-size: 16px; color: var(--text);
+      background: var(--sand);
     }
-    /* Chrome: wordmark + nav */
-    .chrome {
-      display: flex; align-items: baseline; justify-content: space-between;
-      gap: 12px; margin: 2px 0 12px; flex-wrap: wrap;
-    }
-    .wordmark {
-      font-family: var(--serif); font-size: 1.45rem; font-weight: 700;
-      letter-spacing: -.01em; color: var(--terracotta); margin: 0; line-height: 1.15;
-    }
-    .nav { display: flex; gap: 2px; margin: 0; }
+    button, input, select, textarea { font-family: inherit; color: inherit; }
+    .chrome { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 16px; }
+    .wordmark { font-family: var(--serif); font-size: 30px; font-weight: 600; color: var(--ink); margin: 0; line-height: 1.1; }
+    .nav { display: flex; gap: 4px; }
     .nav button {
-      flex: 0 0 auto; min-height: 40px; border-radius: 0; border: 0;
-      background: transparent; color: var(--muted); font-size: 1rem;
-      padding: 8px 12px; border-bottom: 3px solid transparent; font-weight: 500;
+      min-width: 67px; min-height: 48px; padding: 8px 14px;
+      border: 0; border-bottom: 3px solid transparent; border-radius: 0;
+      background: transparent; color: var(--muted); font-size: 16px; font-weight: 500;
     }
-    .nav button.active {
-      color: var(--ink); border-bottom-color: var(--terracotta); font-weight: 650;
-      background: transparent;
+    .nav button.active { color: var(--ink); border-bottom-color: var(--terracotta); font-weight: 600; }
+    .eyebrow, .strip-label, .field-label {
+      font-size: 12px; font-weight: 600; letter-spacing: 1.4px;
+      text-transform: uppercase; color: var(--label); margin: 20px 0 10px;
     }
-    h1 { font-size: 1.05rem; margin: 0 0 8px; font-weight: 650; font-family: var(--serif); }
-    /* Hero status card */
+    .eyebrow { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
+    .eyebrow .ico { width: 16px; height: 16px; }
+    .status.is-next .eyebrow { color: var(--terracotta); }
+    .status.is-water .eyebrow { color: var(--teal); }
+    .status.is-empty .eyebrow { color: var(--label); }
     .status {
       position: relative; overflow: hidden;
-      background: var(--cream); border-radius: 22px; padding: 20px 18px 18px;
-      min-height: 11.5rem; border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.55) inset,
-        0 2px 8px rgba(58,42,31,.06),
-        0 10px 28px rgba(58,42,31,.05);
+      background: var(--cream); border-radius: 20px; padding: 18px 20px;
+      border: 1px solid var(--cream-edge);
+      box-shadow: 0 2px 10px rgba(110, 70, 25, .09);
+      min-height: 168px;
     }
-    .status.watering {
-      border-color: color-mix(in srgb, var(--teal) 28%, var(--cream-edge));
+    .status.is-paused { background: #4E3F63; color: var(--plum-ink); border-color: transparent; }
+    .status.is-paused .phase, .status.is-paused .hero-body, .status.is-paused .eyebrow { color: var(--plum-ink); }
+    .hero-copy { position: relative; z-index: 2; max-width: 78%; }
+    .phase {
+      font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.15;
+      max-width: 262px; margin: 0;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
-    .hero-copy {
-      position: relative; z-index: 2;
-      max-width: 54%; /* doodle-safe LEFT — generous empty RIGHT for art */
+    .phase .dot { color: var(--terracotta); }
+    .when-line { font-size: 20px; font-weight: 600; white-space: nowrap; margin: 6px 0 0; }
+    .timer { font-size: 20px; font-weight: 500; color: var(--teal); margin: 6px 0 0; }
+    .hero-body { font-size: 15px; line-height: 1.4; margin: 8px 0 0; }
+    .sub {
+      display: flex; align-items: flex-start; gap: 6px;
+      margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line);
+      font-size: 14px; color: var(--muted); line-height: 1.35;
     }
-    .hero-top {
-      display: flex; align-items: center; gap: 8px;
-      margin-bottom: 10px;
+    .status.is-paused .sub { border-top-color: rgba(243, 238, 248, .35); }
+    .sub.fault { color: var(--error); font-weight: 500; }
+    .sub svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
+    .btn-outline, .text-link, .go, .ghost, .text-btn, .add-program, .stop, #pause-open, #pause-resume {
+      min-height: 48px; border-radius: 16px; font-size: 16px; font-weight: 600; cursor: pointer;
     }
-    .season-tag {
-      display: inline-flex; align-items: center; gap: 7px;
-      font-size: .72rem; color: var(--terracotta); letter-spacing: .08em;
-      text-transform: uppercase; font-weight: 700;
-      background: color-mix(in srgb, var(--cream-edge) 70%, #fff);
-      border: 1px solid color-mix(in srgb, var(--dune) 45%, var(--cream-edge));
-      border-radius: 999px; padding: 5px 11px 5px 8px;
-      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset;
+    .btn-outline {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      min-width: 189px; margin-top: 14px; padding: 8px 16px;
+      background: transparent; border: 1.5px solid currentColor; color: inherit;
     }
-    .season-tag svg {
-      width: 14px; height: 14px; flex-shrink: 0;
-      color: var(--terracotta);
+    .btn-outline svg { width: 18px; height: 18px; }
+    .text-link {
+      display: inline-flex; align-items: center; margin-top: 8px; padding: 8px 0;
+      background: none; border: 0; color: var(--terracotta); font-size: 16px;
     }
-    .status .phase {
-      font-family: var(--serif); font-size: 1.9rem; font-weight: 700;
-      line-height: 1.12; margin: 0 0 8px; letter-spacing: -.015em;
-      color: var(--ink);
-    }
-    .status .phase .dot { color: var(--terracotta); font-weight: 700; }
-    .status .timer {
-      display: inline-flex; align-items: center; gap: 8px;
-      font-variant-numeric: tabular-nums; font-size: 1.12rem; font-weight: 700;
-      color: var(--teal); margin: 0 0 12px;
-      letter-spacing: .01em;
-    }
-    .status .timer.hidden { display: none; }
-    .status .timer svg { width: 18px; height: 18px; flex-shrink: 0; }
-    .status .sub {
-      color: var(--muted); margin: 0 0 10px; font-size: .92rem;
-    }
-    .status .sub.hidden { display: none; }
-    .status .next-line {
-      margin-top: 0; padding-top: 12px;
-      border-top: 1px solid color-mix(in srgb, var(--dune) 35%, var(--cream-edge));
-      color: var(--ink); font-size: .95rem;
-      display: flex; align-items: center; gap: 8px;
-      /* Stays inside hero-copy (left ~55%) — never under doodle; ellipsis only */
-      overflow: hidden; white-space: nowrap; max-width: 100%;
-    }
-    .status .next-line .next-ico {
-      flex-shrink: 0; width: 16px; height: 16px; color: var(--terracotta); opacity: .85;
-    }
-    .status .next-line .next-body {
-      min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .status .next-line .lbl { color: var(--muted); font-weight: 500; }
-    .fault { color: #a8482f; }
-    /* Embossed desert doodle — RIGHT half only; never under text */
     .desert-art {
-      position: absolute; right: 2px; top: 8px; bottom: 8px;
-      width: 50%; max-width: 210px;
+      position: absolute; right: 0; top: 8px; bottom: 8px; width: 46%; max-width: 190px;
       pointer-events: none; z-index: 1;
-      /* Soft left fade — art stays RIGHT; text never reaches sun/waves */
-      mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 100%);
-      -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 18%, #000 100%);
     }
-    .desert-art svg {
-      width: 100%; height: 100%; display: block;
-      filter: drop-shadow(0 1px 0 rgba(255,250,240,.55));
-    }
-    /* Station strip — taller vertical tiles, circular icon, Off/On pills */
-    .strip-label {
-      margin: 20px 0 10px; font-family: var(--serif); font-size: .78rem;
-      font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
-    }
-    .strip {
-      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px; margin: 0 0 4px;
-    }
-    @media (min-width: 400px) {
-      .strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    }
-    .chip {
-      background: var(--cream-edge); border: 0; color: var(--ink);
-      border-radius: 999px; padding: 12px 16px; font-size: 1rem; min-height: 44px;
-      font-family: var(--sans); font-weight: 500; cursor: pointer;
-    }
-    .chip.on { outline: 3px solid var(--teal); background: var(--teal-soft); color: var(--teal); }
+    .desert-art svg { width: 100%; height: 100%; display: block; }
+    .status.is-paused .desert-art { opacity: .35; }
+    .status.is-paused .art-waves { display: none; }
+    .rain-hint, .soil-note { font-size: 14px; color: var(--muted); margin: 8px 0; }
+    .rain-strip { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
+    .rain-meter { display: block; height: 8px; background: var(--sand-deep); border-radius: 999px; overflow: hidden; margin-bottom: 6px; }
+    .rain-meter > span { display: block; height: 100%; background: var(--teal); }
+    .strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .station-tile {
-      background: var(--cream); border: 1.5px solid var(--cream-edge); color: var(--ink);
-      border-radius: 18px; padding: 16px 10px 14px;
-      min-height: 128px; cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 8px; text-align: center;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.5) inset,
-        0 2px 6px rgba(58,42,31,.05);
-      transition: background .15s, border-color .15s, box-shadow .15s;
+      min-width: 48px; min-height: 92px; padding: 12px 14px;
+      display: grid; grid-template-columns: 46px 1fr; column-gap: 10px; row-gap: 4px; align-items: center;
+      background: var(--cream); border: 1px solid var(--cream-edge); border-radius: 16px;
+      box-shadow: 0 2px 10px rgba(110, 70, 25, .09);
+      text-align: left; cursor: pointer;
     }
     .station-tile .tile-icon {
-      width: 48px; height: 48px; border-radius: 50%;
-      display: grid; place-items: center;
-      background: color-mix(in srgb, var(--cream-edge) 55%, #fff);
-      border: 1.5px solid color-mix(in srgb, var(--dune) 40%, var(--cream-edge));
-      color: var(--ink); flex-shrink: 0;
-      box-shadow: 0 1px 0 rgba(255,255,255,.55) inset;
+      grid-row: 1 / span 2; width: 46px; height: 46px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--sand-deep); color: var(--ink);
     }
     .station-tile .tile-icon svg { width: 26px; height: 26px; }
-    .station-tile .tile-name {
-      font-family: var(--serif); font-weight: 700; font-size: 1.05rem;
-      letter-spacing: -.01em; line-height: 1.1;
-    }
+    .station-tile .tile-name { font-family: var(--serif); font-size: 18px; font-weight: 600; line-height: 1.15; }
     .station-tile .tile-pill {
-      display: inline-block; font-family: var(--sans); font-size: .68rem; font-weight: 700;
-      letter-spacing: .06em; text-transform: none;
-      border-radius: 999px; padding: 4px 12px;
-      background: color-mix(in srgb, var(--cream-edge) 85%, var(--muted));
-      color: var(--muted); border: 1px solid color-mix(in srgb, var(--dune) 30%, transparent);
+      justify-self: start; font-size: 14px; font-weight: 600; line-height: 1;
+      padding: 4px 10px; border-radius: 999px; background: var(--sand-deep); color: var(--ink);
     }
-    .station-tile.on {
-      background: var(--teal-soft);
-      border-color: color-mix(in srgb, var(--teal) 45%, var(--cream-edge));
-      color: var(--teal);
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.45) inset,
-        0 2px 10px rgba(42,122,116,.14);
-    }
-    .station-tile.on .tile-icon {
-      background: color-mix(in srgb, var(--teal-mid) 70%, #fff);
-      border-color: color-mix(in srgb, var(--teal) 40%, var(--cream-edge));
-      color: var(--teal);
-    }
-    .station-tile.on .tile-name { color: var(--teal); }
-    .station-tile.on .tile-pill {
-      background: color-mix(in srgb, var(--teal) 18%, var(--teal-soft));
-      color: var(--teal); border-color: color-mix(in srgb, var(--teal) 30%, transparent);
-    }
-    /* Soil fill sits under the name. It is not a control; the tile still receives the tap. */
-    .tile-soil {
-      align-self: stretch;
-      width: 100%;
-      height: 4px;
-      border-radius: 999px;
-      background: var(--sand);
-      overflow: hidden;
-      pointer-events: none;
-    }
-    .tile-soil > span {
-      display: block;
-      height: 100%;
-      background: var(--teal);
-      border-radius: 999px;
-    }
-    /* STOP — fixed footer; heavier terracotta; never overlaps Edit/Duplicate */
-    .stop-bar {
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
-      padding: 12px 12px calc(18px + env(safe-area-inset-bottom, 0px));
-      background: linear-gradient(180deg, transparent 0%, var(--sand) 28%, var(--sand) 100%);
-      pointer-events: none;
-    }
-    .stop-bar .stop {
-      pointer-events: auto;
-      display: flex; align-items: center; justify-content: center; gap: 12px;
-      width: 100%; max-width: 456px; margin-inline: auto;
-      background: linear-gradient(180deg, #d06648 0%, var(--terracotta) 55%, var(--terracotta-deep) 100%);
-      color: #fff; border: 0; border-radius: 16px; min-height: 62px;
-      font-size: 1.28rem; font-weight: 800; letter-spacing: .1em;
-      box-shadow:
-        0 1px 0 rgba(255,220,200,.25) inset,
-        0 4px 16px rgba(168,72,47,.4),
-        0 1px 0 rgba(58,42,31,.08);
-    }
-    .stop-bar .stop svg { width: 18px; height: 18px; opacity: .95; }
-    .stop-bar .stop:active { background: var(--terracotta-deep); }
-    /* Dialogs */
-    dialog {
-      border: 0; border-radius: 18px; padding: 18px; width: min(94vw, 420px);
-      max-height: 90vh; overflow: auto; background: var(--cream); color: var(--ink);
-      border: 1px solid var(--cream-edge);
-      box-shadow: 0 12px 40px rgba(58,42,31,.18);
-    }
-    dialog::backdrop { background: rgba(58,42,31,.35); }
-    dialog menu { display: flex; gap: 8px; padding: 0; margin: 16px 0 0; justify-content: flex-end; flex-wrap: wrap; }
-    dialog button, .row-actions button, .sched-head button, #sched-new {
-      min-height: 44px; border: 0; border-radius: 12px; padding: 0 14px; font-size: 1rem;
-    }
-    .go { background: var(--teal); color: #fff; }
-    .ghost { background: var(--cream-edge); color: var(--ink); }
-    #sched-new {
-      background: var(--terracotta); color: #fff; font-weight: 650;
-      border-radius: 12px; padding: 0 16px;
-    }
-    /* Schedules — same cream language as Home */
-    .sched {
-      background: var(--cream); border-radius: 18px; padding: 16px 16px 14px; margin-bottom: 12px;
-      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
-      position: relative; overflow: hidden;
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.5) inset,
-        0 2px 8px rgba(58,42,31,.05);
-    }
-    .sched::after {
-      content: ""; position: absolute; right: 0; bottom: 0; width: 88px; height: 56px;
-      background:
-        radial-gradient(ellipse 36px 22px at 78% 88%, color-mix(in srgb, var(--dune) 28%, transparent), transparent 70%),
-        radial-gradient(ellipse 52px 28px at 95% 100%, color-mix(in srgb, var(--dune-deep) 22%, transparent), transparent 72%),
-        linear-gradient(145deg, transparent 48%, color-mix(in srgb, var(--sand-deep) 40%, transparent) 48%);
-      pointer-events: none; opacity: .85;
-      box-shadow: inset 2px 2px 0 color-mix(in srgb, var(--cream) 40%, transparent);
-    }
-    .sched-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; position: relative; z-index: 1; }
-    .sched-title {
-      flex: 1; min-width: 0; font-weight: 700; font-size: 1.12rem; font-family: var(--serif);
-      letter-spacing: -.01em;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .sched-head > button { flex-shrink: 0; }
-    .sched-meta { color: var(--muted); font-size: .9rem; margin-top: 6px; line-height: 1.35; position: relative; z-index: 1; }
-    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; position: relative; z-index: 1; }
-    .badge {
-      display: inline-block; background: var(--cream-edge); color: var(--ink); border-radius: 999px;
-      padding: 4px 10px; font-size: .78rem;
-    }
-    .badge.off { background: var(--off-badge); color: #fff; }
-    .badge.out { background: #f0e0c8; color: var(--out-ink); }
-    .badge.season { background: var(--teal-soft); color: var(--teal); }
-    .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; position: relative; z-index: 1; }
-    .days { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-    .days button {
-      min-width: 44px; min-height: 44px; border-radius: 10px; border: 0;
-      background: var(--cream-edge); color: var(--ink);
-    }
-    .days button.on { background: var(--teal); color: #fff; }
-    label { display: block; color: var(--muted); font-size: .85rem; margin-top: 10px; }
-    input, select {
-      font-size: 1rem; padding: 10px; border-radius: 8px; border: 1px solid var(--cream-edge);
-      width: 100%; background: #fffef9; color: var(--ink);
-    }
-    input[type="checkbox"] { width: auto; min-height: 22px; min-width: 22px; vertical-align: middle; margin-right: 8px; }
-    .step-row { display: grid; grid-template-columns: 1fr 88px 44px; gap: 8px; align-items: end; margin-top: 8px; }
-    .step-row label { margin-top: 0; }
-    .collide {
-      background: var(--warn-bg); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px;
-      margin: 0 0 12px; font-size: .92rem; border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
-    }
-    .sched-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .hidden { display: none; }
-    .ed-warn {
-      color: var(--warn-ink); background: var(--warn-bg); border-radius: 10px;
-      padding: 10px; margin-top: 10px; font-size: .9rem;
-    }
-    /* Pause — dusk plum banner + cream secondary control (not STOP) */
-    .pause-banner {
-      display: none; background: var(--plum); color: #f8f0f8; border-radius: 14px;
-      padding: 12px 14px; margin: 0 0 12px; font-size: .95rem; font-weight: 600;
-      border: 1px solid color-mix(in srgb, var(--plum) 70%, #fff);
-      box-shadow: 0 2px 10px rgba(107,74,110,.22);
-    }
-    .pause-banner.visible { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    .pause-banner .pause-msg { flex: 1; min-width: 12rem; }
-    .pause-banner .resume {
-      background: #f8f0f8; color: var(--plum); border: 0; border-radius: 12px;
-      min-height: 44px; padding: 0 16px; font-weight: 700; font-size: 1rem;
-    }
-    .pause-banner .resume:active { opacity: .88; }
-    .rain-hint {
-      color: var(--muted); font-size: .78rem; font-weight: 500;
-      margin: 0 0 10px;
-    }
-    /* Under the hero. Hidden on dry days so it adds no gap above Pause. */
-    .rain-strip {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 10px 0 0;
-      padding: 8px 12px;
-      background: var(--cream);
-      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
-      border-radius: 14px;
-      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 6px rgba(58,42,31,.04);
-    }
-    .rain-strip.hidden,
-    .rain-strip[hidden] { display: none; }
-    .rain-meter {
-      flex: 0 0 4.5rem;
-      height: 4px;
-      border-radius: 999px;
-      background: var(--sand);
-      overflow: hidden;
-    }
-    .rain-meter > span {
-      display: block;
-      height: 100%;
-      background: var(--teal);
-      border-radius: 999px;
-    }
-    .rain-strip-text {
-      color: var(--ink);
-      font-size: .85rem;
-      line-height: 1.3;
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-    .soil-note {
-      color: var(--muted);
-      font-size: .82rem;
-      line-height: 1.35;
-      margin: 12px 2px 0;
-    }
-    .home-actions {
-      /* Breathing room under hero card; keep Pause out of STOP footer */
-      display: flex; gap: 8px; margin: 16px 0 18px; flex-wrap: wrap;
-    }
-    .home-actions .pause-open {
-      flex: 1; min-height: 48px; border-radius: 14px; border: 1px solid var(--cream-edge);
-      background: var(--cream); color: var(--ink); font-weight: 650; font-size: 1rem;
-      box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 2px 8px rgba(58,42,31,.05);
-    }
-    .home-actions .pause-open:active { background: var(--cream-edge); }
-    /* Two-up tiles are taller than the 412px row. Keep the bottom row off the fixed STOP bar. */
-    @media (max-width: 399px) {
-      .strip-label { margin: 12px 0 8px; }
-      .station-tile { padding: 10px 8px 8px; gap: 4px; min-height: 108px; }
-      .home-actions { margin: 10px 0 12px; }
-      .rain-strip { margin-top: 8px; padding: 6px 10px; }
-    }
-    .pause-chips { display: flex; flex-direction: column; flex-wrap: nowrap; gap: 8px; margin-top: 12px; }
-    .pause-chips button {
-      width: 100%; min-height: 48px; border-radius: 12px; border: 1px solid var(--cream-edge);
-      background: var(--cream); color: var(--ink); padding: 10px 14px; font-size: 1rem; font-weight: 600;
-      text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-    }
-    .pause-chips button:active, .pause-chips button.active {
-      background: var(--plum-soft); border-color: var(--plum); color: var(--plum);
-    }
-    .pause-chips .pause-hint { font-size: .78rem; font-weight: 500; color: var(--muted); }
-    .pause-stepper { margin-top: 12px; }
-    .pause-stepper-row { display: flex; align-items: center; justify-content: center; gap: 14px; }
-    #pause-days-minus, #pause-days-plus {
-      min-width: 48px; min-height: 48px; width: 48px; height: 48px; padding: 0;
-      border-radius: 50%; border: 1px solid var(--cream-edge);
-      background: var(--cream); color: var(--plum); font-size: 1.35rem; font-weight: 700;
-    }
-    #pause-days-minus:disabled, #pause-days-plus:disabled { opacity: .4; }
-    #pause-days-value {
-      font-family: var(--serif); font-size: 1.35rem; font-weight: 700;
-      min-width: 5.5rem; text-align: center;
-    }
-    .pause-stepper-hint { margin: 8px 0 0; text-align: center; color: var(--muted); font-size: .85rem; }
-    #pause-days-go { width: 100%; margin-top: 12px; min-height: 48px; border-radius: 12px; }
-    /* Recent runs — same cream card as schedules */
+    .station-tile.on { background: var(--teal-tile); border-color: #8FBFB5; }
+    .station-tile.on .tile-icon { background: var(--teal-soft); color: var(--teal-ink); }
+    .station-tile.on .tile-pill { background: var(--teal); color: #fff; }
     .history-card {
-      background: var(--cream);
-      border-radius: 18px;
-      padding: 4px 16px 8px;
-      border: 1px solid color-mix(in srgb, var(--cream-edge) 80%, #fff);
-      box-shadow:
-        0 1px 0 rgba(255,255,255,.5) inset,
-        0 2px 8px rgba(58,42,31,.05);
+      background: var(--cream); border-radius: 20px; padding: 0 16px 8px;
+      border: 1px solid var(--cream-edge); box-shadow: 0 2px 10px rgba(110, 70, 25, .09);
     }
-    .history-item {
-      padding: 10px 0;
-      border-top: 1px solid color-mix(in srgb, var(--dune) 30%, var(--cream-edge));
+    .run-row {
+      display: block; width: 100%; min-height: 48px; padding: 12px 0;
+      border: 0; border-top: 1px solid var(--line); background: transparent;
+      text-align: left; color: inherit; cursor: pointer;
     }
-    .history-item:first-child { border-top: 0; }
-    #run-soil { margin: 8px 0 0; }
-    .history-line { font-size: .98rem; line-height: 1.35; overflow-wrap: anywhere; }
-    .history-detail {
-      color: var(--muted); font-size: .82rem; margin-top: 2px; line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-    .history-note { color: var(--muted); margin: 10px 0; font-size: .95rem; }
+    .run-row:first-child { border-top: 0; }
+    .run-primary { display: flex; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
+    .run-when, .run-sep { flex: 0 0 auto; white-space: nowrap; }
+    .run-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .run-status, .run-detail { display: block; font-size: 14px; line-height: 1.35; }
+    .run-status.muted, .run-detail, .history-note { color: var(--muted); }
+    .run-status.bad { color: #A8432A; font-weight: 500; }
+    .history-note { margin: 12px 0; font-size: 14px; }
     .history-more, .history-back {
-      display: inline-flex; align-items: center;
-      background: transparent; border: 0; color: var(--teal);
-      font-weight: 650; font-size: 1rem; min-height: 44px;
-      padding: 8px 0; cursor: pointer; font-family: var(--sans);
+      display: flex; align-items: center; width: 100%; min-height: 48px;
+      background: transparent; border: 0; color: var(--teal-ink); font-size: 16px; font-weight: 600;
+      cursor: pointer; padding: 0;
     }
-    #page-history { padding-top: 2px; }
-    #page-history .history-back { margin-bottom: 4px; }
+    .sched {
+      background: var(--cream); border: 1px solid var(--cream-edge); border-radius: 20px;
+      padding: 16px 16px 12px; margin: 0 0 12px; box-shadow: 0 2px 10px rgba(110, 70, 25, .09);
+    }
+    .sched-title { font-family: var(--serif); font-size: 20px; font-weight: 600; }
+    .sched-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .sched-meta { font-size: 14px; color: var(--muted); margin: 6px 0; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .badge { font-size: 14px; font-weight: 600; color: var(--muted); }
+    .badge.off { color: var(--muted); }
+    .season-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #F8E0D2; color: #B04F2C; border-radius: 999px;
+      padding: 6px 10px; font-size: 14px; font-weight: 600; min-height: 32px;
+    }
+    .season-chip svg { width: 14px; height: 14px; }
+    .badge.out { color: var(--terra-ink); }
+    .row-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .row-actions button, .sched-head button { min-width: 48px; min-height: 48px; padding: 8px 14px; }
+    .ghost, .text-btn {
+      background: transparent; border: 0; color: var(--ink);
+    }
+    .go {
+      background: var(--teal); color: #fff; border: 0;
+    }
+    .add-program {
+      width: 100%; margin: 4px 0 16px; background: transparent;
+      border: 1.5px solid var(--line); color: var(--ink);
+    }
+    .page-note { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+    .collide, .ed-warn { font-size: 14px; color: var(--ink); background: var(--sand-deep); border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
+    .stop-bar {
+      position: fixed; left: 50%; bottom: 0; transform: translateX(-50%);
+      width: min(480px, 100%); z-index: 60;
+      display: flex; gap: 12px; align-items: center;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+      background: var(--sand);
+    }
+    #pause-open, #pause-resume {
+      flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1.5px solid var(--line); background: var(--cream); color: var(--ink); font-size: 17px; font-weight: 500;
+    }
+    #pause-resume { background: var(--teal); color: #fff; border-color: var(--teal); }
+    #pause-resume svg, #paused-run-go svg { width: 18px; height: 18px; }
+    .stop {
+      flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      background: #B5361A; color: #fff; border: 0;
+      box-shadow: 0 3px 0 #7C2411;
+      font-size: 18px; font-weight: 700; letter-spacing: 3px;
+    }
+    .stop svg { width: 22px; height: 22px; }
+    dialog {
+      border: 0; border-radius: 24px 24px 0 0; background: var(--cream); color: var(--text);
+      width: min(480px, 100%); max-height: calc(100% - var(--bar-space) - 8px);
+      margin: auto auto var(--bar-space); padding: 18px 20px 16px;
+    }
+    dialog::backdrop { background: rgba(58, 42, 31, .42); }
+    dialog h1 { font-family: var(--serif); font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+    dialog p, dialog label { font-size: 15px; }
+    dialog menu { display: flex; gap: 12px; justify-content: flex-end; margin: 16px 0 0; padding: 0; }
+    .pause-chips { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+    .pause-chips button, #pause-days-go, #run-dlg .chip {
+      min-height: 48px; text-align: left; background: var(--sand-deep); border: 0; border-radius: 12px;
+      padding: 8px 14px; font-size: 16px; font-weight: 600;
+    }
+    .pause-hint { display: block; font-size: 14px; font-weight: 500; color: var(--muted); }
+    .pause-stepper { margin-top: 12px; }
+    .pause-stepper-row, .stepper { display: flex; align-items: center; gap: 8px; }
+    .pause-stepper-row button, .stepper button, .step-row [data-rm] {
+      width: 48px; height: 48px; min-width: 48px; min-height: 48px;
+      border-radius: 12px; border: 1.5px solid var(--line); background: var(--cream); font-size: 20px;
+    }
+    .sheet-scrim {
+      position: fixed; left: 0; right: 0; top: 0; bottom: var(--bar-space);
+      background: rgba(58, 42, 31, .42); z-index: 40;
+    }
+    .sheet {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      width: min(480px, 100%); bottom: var(--bar-space); z-index: 45;
+      max-height: calc(100% - var(--bar-space) - 12px); overflow: auto;
+      background: var(--cream); color: var(--text);
+      border-radius: 24px 24px 0 0; padding: 12px 20px 20px;
+      box-shadow: 0 -8px 24px rgba(58, 42, 31, .12);
+    }
+    .sheet-x {
+      position: absolute; top: 8px; right: 8px; width: 48px; height: 48px;
+      border: 0; background: transparent; font-size: 28px; line-height: 1; cursor: pointer;
+    }
+    .sheet h2 {
+      font-family: var(--serif); font-size: 24px; font-weight: 600; line-height: 1.2;
+      margin: 4px 48px 8px 0;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .sheet .eyebrow { margin-bottom: 4px; }
+    .chip-status {
+      display: inline-flex; align-items: center; min-height: 32px; padding: 4px 12px;
+      border-radius: 999px; background: var(--sand-deep); font-size: 14px; font-weight: 600;
+    }
+    .chip-status.bad { color: #A8432A; background: #F8E0D2; }
+    .sheet-block { margin-top: 16px; }
+    .sheet-row, .time-row {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px;
+    }
+    .time-row span:last-child { text-align: right; }
+    .sheet-notes { font-size: 15px; white-space: pre-wrap; margin: 6px 0 0; }
+    .sheet-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 18px; }
+    .sheet-actions .text-btn { min-width: 85px; min-height: 52px; font-size: 16px; }
+    .sheet-actions .go { min-width: 155px; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+    #sched-dlg { padding-bottom: 24px; }
+    .editor-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .editor-bar button { min-height: 48px; padding: 8px 12px; }
+    #ed-save { min-width: 72px; }
+    .editor-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .editor-title h1 { font-family: var(--serif); font-size: 24px; font-weight: 600; margin: 0; }
+    .editor label.field-label { display: block; }
+    .helper { font-size: 14px; color: var(--muted); margin: 6px 0 0; }
+    .name-meta { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .name-meta .helper { margin: 6px 0 0; }
+    #ed-name-count { font-size: 14px; font-weight: 600; color: var(--muted); white-space: nowrap; margin-top: 6px; }
+    #ed-name-count.hot, input.hot { color: var(--terracotta); }
+    input.hot { border-color: var(--terracotta); }
+    input[type="text"], input[type="time"], input[type="date"], textarea, select {
+      width: 100%; min-height: 48px; border-radius: 12px; border: 1.5px solid var(--line);
+      background: #fff; padding: 10px 12px; font-size: 16px;
+    }
+    textarea { min-height: 96px; resize: vertical; }
+    .days { display: flex; flex-wrap: wrap; gap: 8px; }
+    .days button {
+      width: 48px; height: 48px; border-radius: 999px; border: 1.5px solid var(--line);
+      background: var(--cream); font-size: 14px; font-weight: 600;
+    }
+    .days button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
+    .step-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+    .step-row select { min-width: 120px; flex: 1; }
+    .stepper span { min-width: 64px; text-align: center; font-size: 16px; font-weight: 600; }
+    #ed-add-step { width: 100%; margin-top: 8px; }
+    .season-modes { display: flex; flex-wrap: wrap; gap: 8px; }
+    .season-modes button { min-height: 48px; padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream); }
+    .season-modes button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
+    #ed-enabled { width: auto; min-height: 0; margin-right: 8px; }
+    .enable-row { display: flex; align-items: center; min-height: 48px; font-size: 16px; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -470,129 +318,125 @@
   </header>
   <div id="pause-banner" class="pause-banner" role="status" hidden>
     <span class="pause-msg" id="pause-msg">Paused — schedules held. STOP still available.</span>
-    <button type="button" class="resume" id="pause-resume">Resume</button>
   </div>
   <section id="page-home">
     <p id="rain-hint" class="rain-hint hidden" hidden>Rain data unavailable</p>
-    <div class="status" id="status">
+    <div class="status is-next" id="status">
       <div class="hero-copy">
-        <div class="hero-top">
-          <div class="season-tag">
-            <svg viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <circle cx="7" cy="7" r="2.4" stroke="currentColor" stroke-width="1.3"/>
-              <g stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
-                <path d="M7 1.2v1.5M7 11.3v1.5M1.2 7h1.5M11.3 7h1.5"/>
-                <path d="M2.9 2.9l1.1 1.1M10 10l1.1 1.1M10 4l1.1-1.1M2.9 11.1l1.1-1.1"/>
-              </g>
-            </svg>
-            <span id="season-tag">Season</span>
-          </div>
+        <div class="eyebrow" id="hero-label">
+          <svg class="ico" data-kind="next" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 2v2.2M11 2v2.2M2.2 6.4h11.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <svg class="ico" data-kind="water" viewBox="0 0 16 16" fill="none" aria-hidden="true" hidden><path d="M8 1.8C8 1.8 3.2 7.2 3.2 10a4.8 4.8 0 0 0 9.6 0C12.8 7.2 8 1.8 8 1.8Z" stroke="currentColor" stroke-width="1.4"/></svg>
+          <span id="hero-label-text">NEXT RUN</span>
         </div>
         <div class="phase" id="phase">…</div>
-        <div class="timer hidden" id="timer" aria-live="polite"></div>
-        <div class="sub" id="sub"></div>
-        <div class="next-line" id="next-line">
-          <svg class="next-ico" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-            <path d="M5 2.2v2.2M11 2.2v2.2M2.5 6.5h11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-          </svg>
+        <div class="when-line" id="when-line"></div>
+        <div class="timer hidden" id="timer" hidden aria-live="polite"></div>
+        <p class="hero-body" id="hero-body" hidden></p>
+        <p class="sub" id="sub" hidden></p>
+        <button type="button" class="btn-outline" id="change-end" hidden>
+          <svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6.2" stroke="currentColor" stroke-width="1.5"/><path d="M9 5.5V9l2.4 1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Change end time
+        </button>
+        <button type="button" class="text-link" id="hero-add" hidden>Add a program ›</button>
+        <div class="next-line" id="next-line" hidden>
           <span class="next-body"><span class="lbl">Next:</span> <strong id="next-text">…</strong></span>
         </div>
       </div>
       <div class="desert-art" aria-hidden="true">
-        <!-- Embossed / paper-cut desert: rayed sun, 4 wave ridges, dotted dunes -->
         <svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMaxYMid meet">
-          <defs>
-            <filter id="emboss" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="1.1" dy="1.4" stdDeviation="0.7" flood-color="#6e5640" flood-opacity="0.42"/>
-              <feDropShadow dx="-0.9" dy="-0.8" stdDeviation="0.45" flood-color="#fffaf0" flood-opacity="0.85"/>
-            </filter>
-            <filter id="cutShadow" x="-15%" y="-15%" width="140%" height="140%">
-              <feDropShadow dx="0.4" dy="2.2" stdDeviation="1.6" flood-color="#5a4534" flood-opacity="0.38"/>
-            </filter>
-            <pattern id="duneDots" width="4" height="4" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="0.7" fill="#9a7a58" fill-opacity="0.45"/>
-            </pattern>
-            <linearGradient id="duneFill" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#e0d0b8"/>
-              <stop offset="100%" stop-color="#c8b090"/>
-            </linearGradient>
-            <linearGradient id="paperGrain" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#f3eadc" stop-opacity="0"/>
-              <stop offset="100%" stop-color="#d4c0a4" stop-opacity="0.18"/>
-            </linearGradient>
-          </defs>
-          <rect width="200" height="180" fill="url(#paperGrain)"/>
-          <!-- Rayed sun (circle + ~12 short rays), embossed -->
-          <g filter="url(#emboss)" transform="translate(132,36)" stroke="#a88868" stroke-width="1.9" fill="none" stroke-linecap="round">
-            <circle cx="0" cy="0" r="11" fill="#f0e6d4" fill-opacity="0.35"/>
-            <circle cx="0" cy="0" r="11"/>
-            <path d="M0-18v4M0 14v4M-18 0h4M14 0h4"/>
-            <path d="M-12.7-12.7l2.8 2.8M10-10l2.8-2.8M10 10l2.8 2.8M-12.7 12.7l2.8-2.8"/>
-            <path d="M-6.9-16.6l1.5 3.6M6.9-16.6l-1.5 3.6M-6.9 16.6l1.5-3.6M6.9 16.6l-1.5-3.6"/>
-            <path d="M-16.6-6.9l3.6 1.5M16.6-6.9l-3.6 1.5M-16.6 6.9l3.6-1.5M16.6 6.9l-3.6-1.5" opacity="0.85"/>
+          <g class="art-sun" fill="none" stroke="#D2AE86" stroke-width="1.6" stroke-linecap="round" transform="translate(138,42)">
+            <circle cx="0" cy="0" r="14"/>
+            <path d="M0-24v6M0 18v6M-24 0h6M18 0h6M-17-17l4 4M13-13l4-4M13 13l4 4M-17 17l4-4"/>
           </g>
-          <!-- Four parallel wave ridges (recessed grooves) -->
-          <g filter="url(#emboss)" fill="none" stroke="#a88868" stroke-width="2.2" stroke-linecap="round" opacity="0.9">
-            <path d="M78 78 C98 70, 118 86, 138 76 C158 66, 178 80, 198 72"/>
-            <path d="M78 90 C98 82, 118 98, 138 88 C158 78, 178 92, 198 84"/>
-            <path d="M78 102 C98 94, 118 110, 138 100 C158 90, 178 104, 198 96"/>
-            <path d="M78 114 C98 106, 118 122, 138 112 C158 102, 178 116, 198 108"/>
+          <g class="art-waves" fill="none" stroke="#D2AE86" stroke-width="1.6" stroke-linecap="round">
+            <path d="M70 78c16-8 32 8 48 0s32 8 52 0"/>
+            <path d="M70 92c16-8 32 8 48 0s32 8 52 0"/>
+            <path d="M70 106c16-8 32 8 48 0s32 8 52 0"/>
+            <path d="M70 120c16-8 32 8 48 0s32 8 52 0"/>
           </g>
-          <!-- Paper-cut dunes with cut-out shadow + dotted fill -->
-          <g filter="url(#cutShadow)">
-            <path d="M70 180 C95 148, 118 152, 145 138 C160 148, 175 142, 200 128 L200 180 Z"
-                  fill="url(#duneFill)" stroke="#a88868" stroke-width="1.2"/>
-            <path d="M145 138 C160 148, 175 142, 200 128 L200 180 L145 180 Z" fill="url(#duneDots)"/>
-            <path d="M40 180 C70 155, 95 160, 120 150 C135 162, 155 158, 175 150 L175 180 Z"
-                  fill="#ddd0ba" stroke="#a88868" stroke-width="1.1" opacity="0.92"/>
+          <g class="art-dune" fill="none" stroke="#D2AE86" stroke-width="1.6" stroke-linejoin="round">
+            <path d="M48 168c28-28 52-22 78-36 16 10 32 6 52-8"/>
+            <path d="M24 176c32-18 58-14 86-28"/>
           </g>
-          <!-- Soft highlight lip on dunes (paper edge) -->
-          <path d="M70 180 C95 148, 118 152, 145 138" fill="none" stroke="#fff8ee" stroke-width="1.4" stroke-opacity="0.55" stroke-linecap="round"/>
         </svg>
       </div>
     </div>
     <div id="rain-strip" class="rain-strip hidden" hidden></div>
-    <div class="home-actions" id="home-actions">
-      <button type="button" class="pause-open" id="pause-open">Pause for rain</button>
-    </div>
     <h1 class="strip-label">Stations</h1>
     <div class="strip" id="stations"></div>
     <p id="soil-note" class="soil-note hidden" hidden></p>
     <h1 class="strip-label">Recent runs</h1>
     <div class="history-card" id="history-card">
       <div id="history-home"><p class="history-note">No runs yet.</p></div>
-      <button type="button" class="history-more" id="history-see-all">See all</button>
+      <button type="button" class="history-more" id="history-see-all">Show older runs</button>
     </div>
   </section>
   <section id="page-schedules" class="hidden">
-    <div class="sched-toolbar">
-      <h1 style="margin:0">Schedules</h1>
-      <button type="button" class="edit" id="sched-new">+ Add program</button>
-    </div>
-    <p class="sub" style="color:var(--muted);font-size:.9rem;margin:0 0 10px">Programs · America/Phoenix · seasonal windows supported</p>
+    <h1 class="strip-label" style="margin-top:0">Schedules</h1>
+    <p class="page-note">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
+    <button type="button" class="edit add-program" id="sched-new">+ Add program</button>
   </section>
   <section id="page-history" class="hidden">
-    <button type="button" class="history-back" id="history-back">← Back</button>
+    <button type="button" class="history-back" id="history-back">‹ Home</button>
     <h1 class="strip-label">Recent runs</h1>
     <div class="history-card">
       <div id="history-all"><p class="history-note">No runs yet.</p></div>
     </div>
   </section>
+  <section id="sched-dlg" class="hidden">
+    <div class="editor-bar">
+      <button type="button" class="ghost" id="ed-cancel">‹ Schedules</button>
+      <button type="button" class="go" id="ed-save">Save</button>
+    </div>
+    <div class="editor-title">
+      <h1 id="sched-dlg-title">Edit program</h1>
+      <span class="season-chip" id="ed-season-chip"><svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="2.2" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.8 2.8l1.1 1.1M10.1 10.1l1.1 1.1M10.1 3.9l1.1-1.1M2.8 11.2l1.1-1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><span id="ed-season-chip-text">All year</span></span>
+    </div>
+    <label class="field-label" for="ed-name">Name</label>
+    <input id="ed-name" type="text" maxlength="24" autocomplete="off" placeholder="Lawn · Morning">
+    <div class="name-meta">
+      <p class="helper">Zone · Cadence, up to 24 characters. Shown everywhere.</p>
+      <span id="ed-name-count">0/24</span>
+    </div>
+    <label class="field-label" for="ed-notes">Notes · optional</label>
+    <textarea id="ed-notes"></textarea>
+    <p class="helper">Only shown here and in a run's details. Never on Home, Recent runs, the wall screen or notifications.</p>
+    <label class="field-label" for="ed-start">Start time</label>
+    <input id="ed-start" type="time" value="06:00">
+    <label class="field-label">Days</label>
+    <div class="days" id="ed-days"></div>
+    <label class="field-label">Stations</label>
+    <div id="ed-steps"></div>
+    <button type="button" class="ghost" id="ed-add-step">Add step</button>
+    <label class="field-label">Season</label>
+    <div class="season-modes">
+      <button type="button" id="ed-season-all" data-mode="all">All year</button>
+      <button type="button" id="ed-season-between" data-mode="between">Between dates</button>
+    </div>
+    <div id="ed-season-dates" class="hidden">
+      <label class="field-label" for="ed-starts-on">Starts on <input id="ed-starts-on" type="date"></label>
+      <label class="field-label" for="ed-ends-on">Ends on <input id="ed-ends-on" type="date"></label>
+    </div>
+    <label class="enable-row"><input id="ed-enabled" type="checkbox"> Enabled</label>
+    <div id="ed-collide" class="ed-warn hidden" role="status"></div>
+  </section>
   <footer class="stop-bar" aria-label="Emergency stop">
+    <button type="button" id="pause-open">Pause for rain</button>
+    <button type="button" id="pause-resume" hidden>
+      <svg viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><path d="M6 3.5v11l9-5.5-9-5.5Z"/></svg>
+      <span>Resume</span>
+    </button>
     <button type="button" class="stop" id="stop">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.2 2.5h7.6l5.7 5.7v7.6l-5.7 5.7H8.2l-5.7-5.7V8.2l5.7-5.7Z"/></svg>
       <span>STOP</span>
-      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true">
-        <rect x="3.5" y="3.5" width="11" height="11" rx="1.5" stroke="currentColor" stroke-width="1.8"/>
-      </svg>
     </button>
   </footer>
   <dialog id="run-dlg">
     <p id="run-msg"></p>
-    <p id="run-soil" class="history-detail" hidden></p>
-    <div class="strip" id="durs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+    <p id="run-soil" class="history-note" hidden></p>
+    <div id="durs" style="display:flex;flex-wrap:wrap;gap:8px"></div>
     <menu>
       <button type="button" class="ghost" id="run-cancel">Cancel</button>
     </menu>
@@ -605,8 +449,8 @@
     </menu>
   </dialog>
   <dialog id="pause-dlg">
-    <h1 style="margin-top:0;font-family:var(--serif);font-size:1.35rem">Pause for rain</h1>
-    <p style="margin:0;color:var(--muted);font-size:.95rem">Don&rsquo;t water for a while. Schedules skip; manual runs stay blocked until you Resume. STOP still only cancels a live run.</p>
+    <h1>Pause for rain</h1>
+    <p style="margin:0;color:var(--muted)">Don&rsquo;t water for a while. Schedules skip until you resume or the pause ends. A station run asks first and leaves the pause on. STOP still only cancels a live run.</p>
     <div class="pause-chips" id="pause-chips">
       <button type="button" data-pause="tomorrow">
         <span>Until tomorrow morning</span>
@@ -649,52 +493,70 @@
       <button type="button" class="go" id="paused-block-resume">Resume</button>
     </menu>
   </dialog>
-  <dialog id="sched-dlg">
-    <h1 id="sched-dlg-title" style="margin-top:0">Edit program</h1>
-    <label>Name <input id="ed-note" type="text" maxlength="120" placeholder="e.g. Front morning"></label>
-    <label>Start (HH:MM) <input id="ed-start" type="time" value="06:00"></label>
-    <label>Weekdays</label>
-    <div class="days" id="ed-days"></div>
-    <label>Season</label>
-    <div class="strip" style="margin:8px 0;display:flex;flex-wrap:wrap;gap:8px">
-      <button type="button" class="chip" id="ed-season-all" data-mode="all">All-year</button>
-      <button type="button" class="chip" id="ed-season-between" data-mode="between">Between dates</button>
+  <div id="sheet-scrim" class="sheet-scrim" hidden></div>
+  <div id="run-sheet" class="sheet" hidden role="dialog" aria-labelledby="run-sheet-title">
+    <button type="button" class="sheet-x" id="run-sheet-x" aria-label="Close">×</button>
+    <div class="eyebrow">Run detail</div>
+    <h2 id="run-sheet-title"></h2>
+    <p id="run-sheet-sub" class="page-note"></p>
+    <div id="run-sheet-chip" class="chip-status"></div>
+    <div class="sheet-block">
+      <div class="field-label">Stations</div>
+      <div id="run-sheet-stations"></div>
     </div>
-    <div id="ed-season-dates" class="hidden">
-      <label>Starts on <input id="ed-starts-on" type="date"></label>
-      <label>Ends on <input id="ed-ends-on" type="date"></label>
+    <div class="sheet-block">
+      <div class="field-label">Times</div>
+      <div class="time-row"><span>Started</span><span id="run-sheet-started"></span></div>
+      <div class="time-row"><span>Ended</span><span id="run-sheet-ended"></span></div>
+      <div class="time-row"><span>How it ended</span><span id="run-sheet-how"></span></div>
     </div>
-    <label>Itinerary</label>
-    <div id="ed-steps"></div>
-    <button type="button" class="ghost" id="ed-add-step" style="margin-top:8px;width:100%">Add step</button>
-    <label style="margin-top:14px"><input id="ed-enabled" type="checkbox"> Enabled</label>
-    <div id="ed-collide" class="ed-warn hidden" role="status"></div>
-    <menu>
-      <button type="button" class="ghost" id="ed-cancel">Cancel</button>
-      <button type="button" class="go" id="ed-save">Save</button>
-    </menu>
-  </dialog>
+    <div class="sheet-block" id="run-sheet-notes-block" hidden>
+      <div class="field-label">Notes</div>
+      <p class="sheet-notes" id="run-sheet-notes"></p>
+    </div>
+    <button type="button" class="text-link" id="run-sheet-edit">Edit in Schedules ›</button>
+  </div>
+  <div id="paused-run-sheet" class="sheet" hidden role="dialog" aria-labelledby="paused-run-title">
+    <button type="button" class="sheet-x" id="paused-run-x" aria-label="Close">×</button>
+    <div class="eyebrow">Paused for rain</div>
+    <h2 id="paused-run-title"></h2>
+    <p id="paused-run-body" class="hero-body"></p>
+    <div class="sheet-actions">
+      <button type="button" class="text-btn" id="paused-run-cancel">Cancel</button>
+      <button type="button" class="go" id="paused-run-go">
+        <svg viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><path d="M6 3.5v11l9-5.5-9-5.5Z"/></svg>
+        <span id="paused-run-go-label">Run</span>
+      </button>
+    </div>
+  </div>
   <script>
     const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
+    const DAY_LABEL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
     const TZ = "America/Phoenix";
     const PAUSE_MIN_DAYS = 1;
     const PAUSE_MAX_DAYS = 14;
+    const NAME_MAX = 24;
     let pauseDaysPicked = 3;
-    const DROP_SVG = `<svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M9 2.2 C9 2.2 3.8 8.2 3.8 11.2 A5.2 5.2 0 0 0 14.2 11.2 C14.2 8.2 9 2.2 9 2.2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M7.2 11.4c0 1.4 1.1 2.2 1.8 2.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".7"/></svg>`;
+    const SUN_SVG = `<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="2.2" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.8 2.8l1.1 1.1M10.1 10.1l1.1 1.1M10.1 3.9l1.1-1.1M2.8 11.2l1.1-1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
+    const CHECK_SVG = `<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.2 8.2l3 3.1 6.6-6.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const ICONS = {
-      west: `<svg viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M13 3.5v2.2M13 20.3v2.2M3.5 13h2.2M20.3 13h2.2M6.2 6.2l1.6 1.6M18.2 18.2l1.6 1.6M18.2 7.8l1.6-1.6M6.2 19.8l1.6-1.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-      north: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 4.5 L21 20.5 H5 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 11v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
-      south: `<svg viewBox="0 0 26 26" fill="none"><path d="M8 21 V12 C8 8.5 10.2 6 13 6 s5 2.5 5 6 v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10.5 21h5M13 6 V3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="16.5" cy="10" r="1.3" fill="currentColor"/></svg>`,
-      drip: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.5 16.8c0 2 1.5 3.2 2.5 3.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".75"/></svg>`,
-      default: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+      grass: `<svg viewBox="0 0 26 26" fill="none"><path d="M5 20c2-6 3-10 4-14M13 20V6M21 20c-2-6-3-10-4-14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+      flower: `<svg viewBox="0 0 26 26" fill="none"><circle cx="13" cy="11" r="2.2" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="6.2" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="8.4" cy="9" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="17.6" cy="9" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M13 13.2V22" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+      tree: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5l7 9H6l7-9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 10l6 8H7l6-8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M13 18v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+      waves: `<svg viewBox="0 0 26 26" fill="none"><path d="M3 10c3-3 5 3 8 0s5 3 8 0 5 3 4 0M3 16c3-3 5 3 8 0s5 3 8 0 5 3 4 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+      west: `<svg viewBox="0 0 26 26" fill="none"><circle cx="13" cy="13" r="5.5" stroke="currentColor" stroke-width="1.5"/><path d="M13 3.5v2.2M13 20.3v2.2M3.5 13h2.2M20.3 13h2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
+      north: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 4.5 L21 20.5 H5 Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+      south: `<svg viewBox="0 0 26 26" fill="none"><path d="M8 21 V12 C8 8.5 10.2 6 13 6 s5 2.5 5 6 v9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+      drip: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5"/></svg>`,
+      default: `<svg viewBox="0 0 26 26" fill="none"><path d="M13 3.5 C13 3.5 5.5 12.5 5.5 16.5 A7.5 7.5 0 0 0 20.5 16.5 C20.5 12.5 13 3.5 13 3.5Z" stroke="currentColor" stroke-width="1.5"/></svg>`,
     };
     const state = {
       status: { phase: "Idle", stations_on: [] },
       stations: [], schedules: [], pick: null, kiosk: false,
       edit: { id: null, isNew: false },
-      // In-run timer still uses this track. Home Next uses /api/kiosk when that fetch succeeds.
-      runTrack: null, // { steps:[{station_id,minutes}], startedAt, endsAt, source }
+      runTrack: null,
       kioskNext: null,
+      kioskRun: null,
       kioskNextReady: false,
       history: [],
       historyLoaded: false,
@@ -711,7 +573,12 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
     }[c]));
-    /** Normalize /api/status (snake) and SSE/engine Status (Pascal) into one shape. */
+    function runeCount(s) { return [...String(s || "")].length; }
+    function setHidden(el, hide) {
+      if (!el) return;
+      el.hidden = !!hide;
+      el.classList.toggle("hidden", !!hide);
+    }
     function normalizeStatus(d) {
       if (!d || typeof d !== "object") return state.status;
       return {
@@ -753,10 +620,7 @@
       const show = !!(rain.enabled && rain.unavailable);
       el.hidden = !show;
       el.classList.toggle("hidden", !show);
-      if (!show) {
-        el.textContent = "";
-        return;
-      }
+      if (!show) { el.textContent = ""; return; }
       const since = rain.since ? stampPhrase(new Date(rain.since)) : "";
       el.textContent = since ? ("Rain data unavailable since " + since) : "Rain data unavailable";
     }
@@ -767,14 +631,12 @@
       const show = strip.show === true;
       el.hidden = !show;
       el.classList.toggle("hidden", !show);
-      if (!show) {
-        el.innerHTML = "";
-        return;
-      }
-      const inches = Number(strip.inches);
+      if (!show) { el.innerHTML = ""; return; }
+      const rain = (state.status && state.status.rain) || {};
+      let inches = Number(strip.inches);
+      if (!Number.isFinite(inches)) inches = Number(rain.total_72h_inches);
       const safeIn = Number.isFinite(inches) && inches > 0 ? inches : 0;
       const hours = Number(strip.hours) === 24 ? 24 : 72;
-      // Meter is 0–1 in. Totals above 1 in fill the track and keep the real amount in the text.
       const pct = Math.max(0, Math.min(100, safeIn * 100));
       const label = formatRainInches(safeIn) + " in fell in the last " + hours + " hours";
       const shown = Math.min(1, safeIn);
@@ -794,92 +656,43 @@
     function phaseIsWatering(p) {
       return !!(p && p !== "Idle" && p !== "Fault");
     }
-    function watering() {
-      return phaseIsWatering(state.status.phase || "");
-    }
+    function watering() { return phaseIsWatering(state.status.phase || ""); }
     function stationTitle(id) {
       const st = (state.stations || []).find((s) => s.id === id);
       return (st && (st.title || st.id)) || id || "";
     }
-    /** Short display labels: Front West → West, Drip Line → Drip */
     function shortStation(idOrTitle) {
       let t = idOrTitle || "";
-      if (t && !/\s/.test(t) && (state.stations || []).some((s) => s.id === t)) {
-        t = stationTitle(t);
-      }
+      if (t && !/\s/.test(t) && (state.stations || []).some((s) => s.id === t)) t = stationTitle(t);
       t = String(t).trim();
       t = t.replace(/^Front\s+/i, "").replace(/\s+Line$/i, "").trim();
       if (!t) return idOrTitle || "";
-      // Prefer last meaningful token for multi-word leftovers
       const parts = t.split(/\s+/);
       if (parts.length > 1 && /^(north|south|east|west|drip)$/i.test(parts[parts.length - 1])) {
         return parts[parts.length - 1].replace(/^\w/, (c) => c.toUpperCase());
       }
       return t;
     }
-    function stationIconKey(st) {
-      const id = String(st.id || "").toLowerCase();
-      const title = String(st.title || "").toLowerCase();
-      if (id.includes("west") || title.includes("west")) return "west";
-      if (id.includes("north") || title.includes("north")) return "north";
-      if (id.includes("south") || title.includes("south")) return "south";
-      if (id.includes("drip") || title.includes("drip")) return "drip";
-      return "default";
+    function stationIconKey(st, on) {
+      if (on) return "waves";
+      const blob = (String(st.id || "") + " " + String(st.title || "")).toLowerCase();
+      if (blob.includes("tree")) return "tree";
+      if (blob.includes("bed") || blob.includes("flower")) return "flower";
+      if (blob.includes("lawn") || blob.includes("grass")) return "grass";
+      if (blob.includes("west")) return "west";
+      if (blob.includes("north")) return "north";
+      if (blob.includes("south")) return "south";
+      if (blob.includes("drip")) return "drip";
+      return "grass";
     }
-    function isPaused() {
-      return !!(state.status && state.status.paused);
-    }
-    function heroTitle() {
-      const s = state.status;
-      const p = s.phase || "Idle";
-      if (isPaused() && (p === "Idle" || !watering())) return "Paused";
-      if (p === "Idle") return "Idle";
-      if (p === "Fault") return "Fault";
-      const name = shortStation(s.current_station);
-      if (name) return `Watering <span class="dot">•</span> ${esc(name)}`;
-      return "Watering";
-    }
-    function pauseUntilLabel() {
-      const s = state.status || {};
-      if (s.paused_label) return s.paused_label;
-      const u = s.paused_until;
-      if (!u) return "Paused until further notice";
-      try {
-        const d = new Date(u);
-        if (Number.isNaN(d.getTime())) return "Paused until further notice";
-        const within6 = (d.getTime() - Date.now()) <= 6 * 24 * 60 * 60 * 1000;
-        const opts = {
-          timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit", hour12: true,
-        };
-        if (!within6) { opts.month = "short"; opts.day = "numeric"; }
-        const map = {};
-        for (const p of new Intl.DateTimeFormat("en-US", opts).formatToParts(d)) {
-          if (p.type !== "literal") map[p.type] = p.value;
-        }
-        const time = `${map.hour}:${map.minute} ${map.dayPeriod}`;
-        if (within6) return "Paused until " + map.weekday + " " + time;
-        return "Paused until " + map.weekday + " " + map.month + " " + Number(map.day) + ", " + time;
-      } catch { return "Paused until further notice"; }
-    }
-    function seasonTagLabel() {
-      const month = Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, month: "numeric" }).format(new Date()));
-      // Boutique ALL-CAPS chips like LATE SPRING / FALL
-      const map = {
-        1: "WINTER", 2: "LATE WINTER", 3: "EARLY SPRING", 4: "SPRING",
-        5: "LATE SPRING", 6: "EARLY SUMMER", 7: "SUMMER", 8: "LATE SUMMER",
-        9: "EARLY FALL", 10: "FALL", 11: "LATE FALL", 12: "EARLY WINTER",
-      };
-      return map[month] || "SEASON";
-    }
+    function isPaused() { return !!(state.status && state.status.paused); }
     function programName(sch) {
-      const n = (sch.note || "").trim();
-      return n || sch.id || "Program";
-    }
-    function shortProgramName(sch) {
-      const n = programName(sch);
-      // Soft shorten for Next line; CSS ellipsis also applies
-      if (n.length <= 28) return n;
-      return n.slice(0, 26).trimEnd() + "…";
+      if (!sch) return "Program";
+      const name = String(sch.name || "").trim();
+      if (name) return name;
+      const note = String(sch.note || "").trim();
+      if (note) return note;
+      return sch.id || "Program";
     }
     function phoenixParts(d = new Date()) {
       const fmt = new Intl.DateTimeFormat("en-US", {
@@ -906,10 +719,8 @@
       return true;
     }
     function seasonLabel(sch) {
-      if (sch.starts_on || sch.ends_on) {
-        return `${sch.starts_on || "…"}–${sch.ends_on || "…"}`;
-      }
-      return "Year-round";
+      if (sch.starts_on || sch.ends_on) return `${sch.starts_on || "…"}–${sch.ends_on || "…"}`;
+      return "All year";
     }
     function weekdayMatches(sch, wd) {
       const days = sch.weekdays || [];
@@ -923,10 +734,9 @@
       if (h > 23 || mi > 59) return null;
       return { h, m: mi };
     }
-    /** Next fire in America/Phoenix: next matching weekday+start still inside season window. */
-    function nextFireLabel(sch) {
+    function nextFireDate(sch) {
       const clock = parseHHMM(sch.start);
-      if (!clock) return "No start time";
+      if (!clock) return null;
       const now = new Date();
       const seen = new Set();
       for (let i = 0; i < 400; i++) {
@@ -937,34 +747,47 @@
         if (!weekdayMatches(sch, p.weekday)) continue;
         if (!inSeasonNow(sch, p.ymd)) continue;
         if (i === 0 && (p.hour > clock.h || (p.hour === clock.h && p.minute >= clock.m))) continue;
-        return `${p.ymd} ${String(clock.h).padStart(2, "0")}:${String(clock.m).padStart(2, "0")}`;
+        const hh = String(clock.h).padStart(2, "0");
+        const mm = String(clock.m).padStart(2, "0");
+        return new Date(`${p.ymd}T${hh}:${mm}:00-07:00`);
       }
-      return "None in window";
+      return null;
+    }
+    function nextFireLabel(sch) {
+      const at = nextFireDate(sch);
+      if (!parseHHMM(sch.start)) return "No start time";
+      if (!at) return "None in window";
+      return friendlyWhen(at);
+    }
+    function upcomingFire() {
+      if (state.kioskNextReady && state.kioskNext && state.kioskNext.at) {
+        const d = new Date(state.kioskNext.at);
+        if (!Number.isNaN(d.getTime())) {
+          const name = String(state.kioskNext.name || "").trim();
+          return { at: d, name: name || "Program" };
+        }
+      }
+      let best = null;
+      for (const sch of (state.schedules || []).filter((s) => s.enabled)) {
+        const at = nextFireDate(sch);
+        if (!at) continue;
+        if (!best || at < best.at) best = { at, name: programName(sch) };
+      }
+      return best;
     }
     function globalNextLabel() {
-      const enabled = (state.schedules || []).filter((s) => s.enabled);
-      if (!enabled.length) return "No enabled programs";
-      let best = null;
-      for (const sch of enabled) {
-        const label = nextFireLabel(sch);
-        if (label === "No start time" || label === "None in window") continue;
-        if (!best || label < best.label) best = { label, name: shortProgramName(sch) };
-      }
-      if (!best) return "None in window";
-      return `${best.label} · ${best.name}`;
+      const fire = upcomingFire();
+      if (!fire) return "None in window";
+      return friendlyWhen(fire.at) + " · " + fire.name;
     }
     function kioskNextLabel() {
       const run = state.kioskNext;
       if (!run || !run.at) return "None in window";
       const d = new Date(run.at);
       if (Number.isNaN(d.getTime())) return "None in window";
-      const p = phoenixParts(d);
-      const hm = String(p.hour).padStart(2, "0") + ":" + String(p.minute).padStart(2, "0");
-      let name = String(run.name || "").trim();
-      if (name.length > 28) name = name.slice(0, 26).trimEnd() + "…";
-      return p.ymd + " " + hm + (name ? " · " + name : "");
+      const name = String(run.name || "").trim();
+      return friendlyWhen(d) + (name ? " · " + name : "");
     }
-    /** Only a JSON object that carries next_run counts. A malformed 200 keeps the old scan. */
     function kioskNextFrom(d) {
       if (!d || typeof d !== "object" || Array.isArray(d)) return { ok: false, next: null };
       if (!Object.prototype.hasOwnProperty.call(d, "next_run")) return { ok: false, next: null };
@@ -972,7 +795,7 @@
     }
     let kioskNextBusy = false;
     async function loadKioskNext() {
-      if (kioskNextBusy) return; // one in flight; a hung fetch must not pile up
+      if (kioskNextBusy) return;
       kioskNextBusy = true;
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), 3000);
@@ -981,6 +804,7 @@
         const k = kioskNextFrom(d);
         if (k.ok) {
           state.kioskNext = k.next;
+          state.kioskRun = d.run || null;
           state.kioskNextReady = true;
           paintStatus();
         }
@@ -1002,9 +826,7 @@
       for (let i = 0; i < enabled.length; i++) {
         for (let j = i + 1; j < enabled.length; j++) {
           const a = enabled[i], b = enabled[j];
-          if ((a.start || "") === (b.start || "") && a.start && weekdaysOverlap(a, b)) {
-            pairs.push([a, b]);
-          }
+          if ((a.start || "") === (b.start || "") && a.start && weekdaysOverlap(a, b)) pairs.push([a, b]);
         }
       }
       return pairs;
@@ -1012,72 +834,87 @@
     function paintCollide() {
       const box = $("collide-warn");
       const pairs = collidePairs(state.schedules);
-      if (!pairs.length) {
-        box.classList.add("hidden");
-        box.textContent = "";
-        return;
-      }
-      const bits = pairs.map(([a, b]) =>
-        `${programName(a)} and ${programName(b)} both at ${a.start}`);
+      if (!pairs.length) { box.classList.add("hidden"); box.textContent = ""; return; }
+      const bits = pairs.map(([a, b]) => `${programName(a)} and ${programName(b)} both at ${a.start}`);
       box.textContent = "Soft warning: enabled programs share a start time on overlapping days — " +
         bits.join("; ") + ". Engine skips if already watering (D13). Save is still allowed.";
       box.classList.remove("hidden");
     }
+    function pauseUntilLabel() {
+      const s = state.status || {};
+      if (s.paused_label) return s.paused_label;
+      const u = s.paused_until;
+      if (!u) return "Paused until further notice";
+      const d = new Date(u);
+      if (Number.isNaN(d.getTime())) return "Paused until further notice";
+      return "Paused until " + friendlyWhen(d);
+    }
+    function untilHeadline() {
+      const u = state.status && state.status.paused_until;
+      if (!u) return "Until you resume";
+      const d = new Date(u);
+      if (Number.isNaN(d.getTime())) return "Until you resume";
+      const when = friendlyWhen(d);
+      return when ? "Until " + when : "Until you resume";
+    }
+    function joinNames(names) {
+      if (!names.length) return "none";
+      if (names.length === 1) return names[0];
+      if (names.length === 2) return names[0] + " and " + names[1];
+      return names.slice(0, -1).join(", ") + ", and " + names[names.length - 1];
+    }
+    function onHoldNames() {
+      const enabled = (state.schedules || []).filter((s) => s.enabled);
+      const untilRaw = state.status && state.status.paused_until;
+      let list = enabled;
+      if (untilRaw) {
+        const until = new Date(untilRaw);
+        if (!Number.isNaN(until.getTime())) {
+          list = enabled.filter((sch) => {
+            const at = nextFireDate(sch);
+            return at && at.getTime() < until.getTime();
+          });
+        }
+      }
+      return joinNames(list.map(programName));
+    }
     function paintPauseBanner() {
       const banner = $("pause-banner");
       const openBtn = $("pause-open");
-      if (!isPaused()) {
-        banner.classList.remove("visible");
-        banner.hidden = true;
-        if (openBtn) openBtn.classList.remove("hidden");
-        paintRainHint();
-        paintRainStrip();
-        return;
-      }
-      banner.hidden = false;
-      banner.classList.add("visible");
-      const s = state.status || {};
-      let msg = pauseUntilLabel() + " · schedules held";
-      if (s.pause_source === "auto" && s.reason === "rain") {
-        if (s.paused_label && String(s.paused_label).indexOf("Paused for rain") === 0) {
-          msg = s.paused_label;
-        } else {
-          const tail = pauseUntilLabel().replace(/^Paused until\s+/, "");
-          msg = "Paused for rain (" + formatRainInches(s.rain_inches) + " in) until " + tail;
+      const resumeBtn = $("pause-resume");
+      const paused = isPaused();
+      if (banner) { banner.hidden = true; banner.classList.remove("visible"); }
+      if (openBtn) openBtn.hidden = paused;
+      if (resumeBtn) resumeBtn.hidden = !paused;
+      if (paused) {
+        const s = state.status || {};
+        let msg = pauseUntilLabel() + " · schedules held";
+        if (s.pause_source === "auto" && s.reason === "rain") {
+          if (s.paused_label && String(s.paused_label).indexOf("Paused for rain") === 0) msg = s.paused_label;
+          else msg = "Paused for rain (" + formatRainInches(s.rain_inches) + " in) until " + untilHeadline().replace(/^Until\s+/, "");
         }
-      } else {
-        const rain = s.rain || {};
-        const strip = s.rain_strip || {};
-        const t72 = Number(rain.total_72h_inches);
-        if (strip.show === true && Number.isFinite(t72)) {
-          msg += " · " + formatRainInches(t72) + " in in the last 72 hours";
-        }
+        $("pause-msg").textContent = msg;
       }
-      $("pause-msg").textContent = msg;
-      if (openBtn) openBtn.classList.add("hidden");
       paintRainHint();
       paintRainStrip();
     }
-    /** Infer active itinerary + remaining for timer / Next-station. */
     function activeRunInfo() {
       const s = state.status;
       const cur = s.current_station || ((s.stations_on || [])[0] || "");
       if (!watering() || !cur) return null;
-
-      // Prefer client track from POST /run
       if (state.runTrack && state.runTrack.steps && state.runTrack.steps.length) {
         const steps = state.runTrack.steps;
         let idx = steps.findIndex((st) => st.station_id === cur);
         if (idx < 0) idx = 0;
         const remainingMs = Math.max(0, (state.runTrack.endsAt || 0) - Date.now());
+        const fromKiosk = state.kioskRun && state.kioskRun.program;
         return {
           steps, index: idx,
           remainingSec: Math.ceil(remainingMs / 1000),
           source: "track",
+          program: fromKiosk || (state.runTrack.source === "manual" ? "Manual" : ""),
         };
       }
-
-      // Infer from enabled schedule mid-window (Phoenix wall clock)
       const now = phoenixParts();
       const nowSec = now.hour * 3600 + now.minute * 60 + now.second;
       for (const sch of (state.schedules || []).filter((x) => x.enabled)) {
@@ -1087,34 +924,29 @@
         if (!clock) continue;
         const startSec = clock.h * 3600 + clock.m * 60;
         let elapsed = nowSec - startSec;
-        if (elapsed < -60) continue; // not started (1m slack)
+        if (elapsed < -60) continue;
         if (elapsed < 0) elapsed = 0;
         const steps = sch.steps || [];
         if (!steps.length) continue;
         const totalMin = steps.reduce((a, st) => a + (Number(st.minutes) || 0), 0);
-        if (elapsed > totalMin * 60 + 90) continue; // past window
+        if (elapsed > totalMin * 60 + 90) continue;
         let t = 0;
         for (let i = 0; i < steps.length; i++) {
           const mins = Number(steps[i].minutes) || 0;
           const end = t + mins * 60;
-          const matches = steps[i].station_id === cur;
-          if (matches && elapsed <= end + 30) {
-            return {
-              steps, index: i,
-              remainingSec: Math.max(0, end - elapsed),
-              source: "schedule",
-            };
+          if (steps[i].station_id === cur && elapsed <= end + 30) {
+            return { steps, index: i, remainingSec: Math.max(0, end - elapsed), source: "schedule", program: programName(sch) };
           }
           t = end;
         }
-        // Station matches somewhere in itinerary even if clock skew
         const idx = steps.findIndex((st) => st.station_id === cur);
         if (idx >= 0) {
           const mins = Number(steps[idx].minutes) || 0;
-          return { steps, index: idx, remainingSec: mins * 60, source: "schedule-loose" };
+          return { steps, index: idx, remainingSec: mins * 60, source: "schedule-loose", program: programName(sch) };
         }
       }
-      return { steps: [{ station_id: cur, minutes: 0 }], index: 0, remainingSec: null, source: "unknown" };
+      const fromKiosk = state.kioskRun && state.kioskRun.program;
+      return { steps: [{ station_id: cur, minutes: 0 }], index: 0, remainingSec: null, source: "unknown", program: fromKiosk || "" };
     }
     function formatMinLeft(sec) {
       if (sec == null || !Number.isFinite(sec)) return null;
@@ -1129,60 +961,86 @@
       if (!next) return null;
       return shortStation(next.station_id);
     }
+    function setEyebrow(kind, text) {
+      $("hero-label-text").textContent = text;
+      document.querySelectorAll("#hero-label .ico").forEach((el) => { el.hidden = el.dataset.kind !== kind; });
+    }
+    function setQuiet(text, fault) {
+      const sub = $("sub");
+      sub.classList.toggle("fault", !!fault);
+      if (!text) { sub.textContent = ""; setHidden(sub, true); return; }
+      setHidden(sub, false);
+      if (fault) { sub.textContent = text; return; }
+      sub.innerHTML = CHECK_SVG + `<span>${esc(text)}</span>`;
+    }
     function paintStatus() {
       const wasWater = phaseIsWatering(state.prevPhase);
       const s = state.status;
-      $("season-tag").textContent = seasonTagLabel();
-      $("phase").innerHTML = heroTitle();
+      const card = $("status");
       const isWater = watering();
-      $("status").classList.toggle("watering", isWater);
-
+      const paused = isPaused();
       if (!isWater) state.runTrack = null;
-
-      const timer = $("timer");
-      const sub = $("sub");
+      card.classList.remove("is-water", "is-paused", "is-empty", "is-next");
+      setHidden($("timer"), true);
+      setHidden($("when-line"), true);
+      setHidden($("hero-body"), true);
+      setHidden($("change-end"), true);
+      setHidden($("hero-add"), true);
       if (isWater) {
+        card.classList.add("is-water");
+        setEyebrow("water", "WATERING NOW");
         const info = activeRunInfo();
-        const label = formatMinLeft(info && info.remainingSec);
-        if (label) {
-          timer.innerHTML = `${DROP_SVG}<span>${esc(label)}</span>`;
-          timer.classList.remove("hidden");
-        } else {
-          // No remaining available — prefer soft relative cue over wall-clock HH:MM:SS
-          timer.innerHTML = `${DROP_SVG}<span>In progress</span>`;
-          timer.classList.remove("hidden");
-        }
-        sub.textContent = "";
-        sub.classList.add("hidden");
+        const name = shortStation(s.current_station);
+        $("phase").innerHTML = name ? `Watering <span class="dot">•</span> ${esc(name)}` : "Watering";
+        $("timer").textContent = formatMinLeft(info && info.remainingSec) || "In progress";
+        setHidden($("timer"), false);
+        const prog = (info && info.program) || "";
         const nxt = nextWhileWatering(info);
+        setQuiet((prog ? prog + " · " : "") + "Next: " + (nxt || "—"), false);
         $("next-text").textContent = nxt || "—";
+      } else if (paused) {
+        card.classList.add("is-paused");
+        setEyebrow("pause", "PAUSED FOR RAIN");
+        $("phase").textContent = untilHeadline();
+        $("hero-body").textContent = "On hold: " + onHoldNames() + ". They run again when you resume or the pause ends.";
+        setHidden($("hero-body"), false);
+        setHidden($("change-end"), false);
+        const sub = $("sub");
+        sub.textContent = ""; // paused: the banner and the Next line already say it
+        setHidden(sub, true);
+        $("next-text").textContent = state.kioskNextReady ? kioskNextLabel() : globalNextLabel();
+      } else if (!upcomingFire()) {
+        card.classList.add("is-empty");
+        setEyebrow("empty", "SCHEDULE");
+        $("phase").textContent = "Nothing scheduled";
+        $("hero-body").textContent = "No programs are turned on, so nothing will water by itself. You can still run a station by hand below.";
+        setHidden($("hero-body"), false);
+        setHidden($("hero-add"), false);
+        setQuiet(s.last_error || "", !!s.last_error);
+        $("next-text").textContent = "None in window";
       } else {
-        timer.textContent = "";
-        timer.classList.add("hidden");
-        if (s.last_error) {
-          sub.textContent = s.last_error;
-          sub.classList.remove("hidden");
-        } else if (isPaused()) {
-          sub.textContent = ""; // paused: the banner and the Next line already say it
-          sub.classList.add("hidden");
-        } else {
-          sub.textContent = "Ready";
-          sub.classList.remove("hidden");
-        }
-        const nextLabel = state.kioskNextReady ? kioskNextLabel() : globalNextLabel();
-        $("next-text").textContent = isPaused() ? "Schedules skip while paused" : nextLabel;
+        card.classList.add("is-next");
+        setEyebrow("next", "NEXT RUN");
+        const fire = upcomingFire();
+        $("phase").textContent = (fire && fire.name) || "Program";
+        $("when-line").textContent = fire ? friendlyWhen(fire.at) : "";
+        setHidden($("when-line"), false);
+        if (s.last_error) setQuiet(s.last_error, true);
+        else setQuiet(lastRanLine(), false);
+        $("next-text").textContent = state.kioskNextReady ? kioskNextLabel() : globalNextLabel();
       }
-      sub.classList.toggle("fault", !!s.last_error);
       paintPauseBanner();
       document.querySelectorAll("#stations .station-tile").forEach((el) => {
         const on = (s.stations_on || []).includes(el.dataset.id) || s.current_station === el.dataset.id;
         el.classList.toggle("on", on);
         const pill = el.querySelector(".tile-pill");
         if (pill) pill.textContent = on ? "On" : "Off";
+        const icon = el.querySelector(".tile-icon");
+        const st = (state.stations || []).find((x) => x.id === el.dataset.id);
+        if (icon && st) icon.innerHTML = ICONS[stationIconKey(st, on)] || ICONS.default;
       });
       if (wasWater && !watering()) {
         loadHistory();
-        // Writer appends just after Stop returns; one follow-up catches that.
         setTimeout(loadHistory, 700);
       }
       state.prevPhase = (s && s.phase) || "";
@@ -1194,13 +1052,13 @@
         b.type = "button";
         b.className = "station-tile";
         b.dataset.id = st.id;
-        const label = shortStation(st.id);
-        const icon = ICONS[stationIconKey(st)] || ICONS.default;
+        const on = (state.status.stations_on || []).includes(st.id) || state.status.current_station === st.id;
+        const icon = ICONS[stationIconKey(st, on)] || ICONS.default;
         b.innerHTML =
           `<span class="tile-icon" aria-hidden="true">${icon}</span>` +
-          `<span class="tile-name">${esc(label)}</span>` +
-          tileSoilHTML(st.id) +
-          `<span class="tile-pill">Off</span>`;
+          `<span class="tile-name">${esc(shortStation(st.id))}</span>` +
+          `<span class="tile-pill">${on ? "On" : "Off"}</span>`;
+        if (on) b.classList.add("on");
         b.addEventListener("click", () => openRun(st));
         $("stations").appendChild(b);
       });
@@ -1215,17 +1073,16 @@
         const el = document.createElement("article");
         el.className = "sched";
         const out = !inSeasonNow(sch, today);
-        const onBadge = sch.enabled
-          ? `<span class="badge">On</span>`
-          : `<span class="badge off">Off</span>`;
-        const seasonBadge = `<span class="badge season">${esc(seasonLabel(sch))}</span>`;
+        const onBadge = sch.enabled ? `<span class="badge">On</span>` : `<span class="badge off">Off</span>`;
+        const seasonBadge = `<span class="season-chip">${SUN_SVG}<span>${esc(seasonLabel(sch))}</span></span>`;
         const outBadge = out ? `<span class="badge out">Out of season</span>` : "";
+        const meta = sch.enabled ? ("Next: " + nextFireLabel(sch)) : "Off";
         el.innerHTML = `
           <div class="sched-head">
             <div class="sched-title">${esc(programName(sch))}</div>
             <button type="button" class="ghost" data-toggle>${sch.enabled ? "Disable" : "Enable"}</button>
           </div>
-          <div class="sched-meta">Next: ${esc(nextFireLabel(sch))}</div>
+          <div class="sched-meta">${esc(meta)}</div>
           <div class="badges">${onBadge}${seasonBadge}${outBadge}</div>
           <div class="row-actions">
             <button type="button" class="go edit" data-edit>Edit</button>
@@ -1237,7 +1094,7 @@
         box.appendChild(el);
       });
       if (!(state.schedules || []).length) {
-        box.innerHTML = `<p class="sub" style="color:var(--muted)">No programs yet. Tap + Add program to add one.</p>`;
+        box.innerHTML = `<p class="page-note">No programs yet. Tap + Add program to add one.</p>`;
       }
       paintCollide();
       paintStatus();
@@ -1259,13 +1116,14 @@
     function renderEdDays(selected) {
       const set = new Set((selected || []).map((d) => String(d).toLowerCase()));
       const allOn = set.size === 0;
-      $("ed-days").innerHTML = DAYS.map((d) =>
-        `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}">${d.slice(0,2)}</button>`
+      $("ed-days").innerHTML = DAYS.map((d, i) =>
+        `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}">${DAY_LABEL[i]}</button>`
       ).join("");
       $("ed-days").querySelectorAll("[data-day]").forEach((b) => {
         b.addEventListener("click", () => b.classList.toggle("on"));
       });
     }
+    function stepMinutesLabel(n) { return String(n) + " min"; }
     function renderEdSteps(steps) {
       const box = $("ed-steps");
       box.innerHTML = "";
@@ -1273,16 +1131,40 @@
       list.forEach((step) => {
         const row = document.createElement("div");
         row.className = "step-row";
+        const mins = Math.max(1, Math.min(180, Number(step.minutes) || 1));
         row.innerHTML = `
           <label>Station<select data-st>${stationOptions(step.station_id)}</select></label>
-          <label>Min<input data-min type="number" min="1" max="180" value="${esc(step.minutes || 5)}"></label>
-          <button type="button" class="ghost" data-rm title="Remove">×</button>`;
+          <div class="stepper">
+            <button type="button" data-minus aria-label="Fewer minutes">−</button>
+            <span data-min-label>${stepMinutesLabel(mins)}</span>
+            <input data-min type="hidden" value="${mins}">
+            <button type="button" data-plus aria-label="More minutes">+</button>
+          </div>
+          <button type="button" class="ghost" data-rm aria-label="Remove">×</button>`;
+        const sync = (delta) => {
+          const input = row.querySelector("[data-min]");
+          let n = Number(input.value) || 1;
+          n = Math.max(1, Math.min(180, n + delta));
+          input.value = String(n);
+          row.querySelector("[data-min-label]").textContent = stepMinutesLabel(n);
+          updateEdCollide();
+        };
+        row.querySelector("[data-minus]").addEventListener("click", () => sync(-1));
+        row.querySelector("[data-plus]").addEventListener("click", () => sync(1));
         row.querySelector("[data-rm]").addEventListener("click", () => {
           row.remove();
           if (!$("ed-steps").children.length) renderEdSteps([]);
+          updateEdCollide();
         });
         box.appendChild(row);
       });
+    }
+    function editorSeasonText() {
+      if (!$("ed-season-between").classList.contains("on")) return "All year";
+      const a = $("ed-starts-on").value;
+      const b = $("ed-ends-on").value;
+      if (!a && !b) return "Between dates";
+      return (a || "…") + "–" + (b || "…");
     }
     function setSeasonMode(mode) {
       const between = mode === "between";
@@ -1293,35 +1175,60 @@
         $("ed-starts-on").value = "";
         $("ed-ends-on").value = "";
       }
+      $("ed-season-chip-text").textContent = editorSeasonText();
+    }
+    function paintNameCount() {
+      const el = $("ed-name");
+      const n = runeCount(el.value);
+      const count = $("ed-name-count");
+      count.textContent = n + "/24";
+      const hot = n >= 22 && n <= 24;
+      count.classList.toggle("hot", hot);
+      el.classList.toggle("hot", hot);
+    }
+    function withCopy(name) {
+      const base = String(name || "").trim();
+      const next = base ? base + " copy" : "copy";
+      if (runeCount(next) <= NAME_MAX) return next;
+      return base;
     }
     function openEditor(sch, asDup) {
-      const src = sch || {
-        id: "", enabled: true, note: "", weekdays: [], start: "06:00",
-        steps: [], starts_on: "", ends_on: "",
-      };
-      const isNew = !sch || asDup;
+      const src = sch || { id: "", enabled: true, name: "", note: "", notes: "", weekdays: [], start: "06:00", steps: [], starts_on: "", ends_on: "" };
       let id = src.id;
-      if (asDup) {
-        id = mintId((src.note || src.id || "copy") + "-copy");
-      } else if (!sch) {
-        id = mintId("program");
-      }
-      state.edit = { id, isNew };
+      if (asDup) id = mintId((programName(src) || "copy") + "-copy");
+      else if (!sch) id = mintId("program");
+      state.edit = { id, isNew: !sch || asDup };
       $("sched-dlg-title").textContent = asDup ? "Duplicate program" : (sch ? "Edit program" : "New program");
-      $("ed-note").value = asDup ? `${programName(src)} copy` : (src.note || "");
+      const shown = asDup ? withCopy(programName(src)) : (String(src.name || "").trim() || String(src.note || "").trim());
+      $("ed-name").value = shown;
+      $("ed-name").dataset.last = shown;
+      paintNameCount();
+      $("ed-notes").value = src.notes || "";
       $("ed-start").value = src.start || "06:00";
-      $("ed-enabled").checked = !!src.enabled;
+      $("ed-enabled").checked = src.enabled !== false;
       renderEdDays(src.weekdays || []);
       const seasonal = !!(src.starts_on || src.ends_on);
       setSeasonMode(seasonal ? "between" : "all");
       if (seasonal) {
         $("ed-starts-on").value = src.starts_on || "";
         $("ed-ends-on").value = src.ends_on || "";
+        $("ed-season-chip-text").textContent = editorSeasonText();
       }
       const steps = (src.steps || []).map((s) => ({ station_id: s.station_id, minutes: s.minutes }));
       renderEdSteps(asDup || sch ? steps : []);
       updateEdCollide();
-      $("sched-dlg").showModal();
+      closeSheets();
+      $("page-home").classList.add("hidden");
+      $("page-schedules").classList.add("hidden");
+      $("page-history").classList.add("hidden");
+      $("sched-dlg").classList.remove("hidden");
+      $("tab-home").classList.remove("active");
+      $("tab-sched").classList.add("active");
+      window.scrollTo(0, 0);
+    }
+    function closeEditor() {
+      $("sched-dlg").classList.add("hidden");
+      showSchedules();
     }
     function readEditorDraft() {
       let weekdays = [...$("ed-days").querySelectorAll("[data-day].on")].map((b) => b.dataset.day);
@@ -1331,10 +1238,13 @@
         station_id: row.querySelector("[data-st]").value,
         minutes: Number(row.querySelector("[data-min]").value) || 1,
       })).filter((s) => s.station_id);
+      const name = $("ed-name").value.trim();
       return {
         id: state.edit.id,
         enabled: $("ed-enabled").checked,
-        note: $("ed-note").value.trim(),
+        name,
+        note: name,
+        notes: $("ed-notes").value.trim(),
         weekdays,
         start: $("ed-start").value || "06:00",
         steps,
@@ -1345,31 +1255,25 @@
     function updateEdCollide() {
       const draft = readEditorDraft();
       const others = (state.schedules || []).filter((s) => s.id !== draft.id);
-      const merged = [...others, draft];
-      const pairs = collidePairs(merged).filter(([a, b]) => a.id === draft.id || b.id === draft.id);
+      const pairs = collidePairs([...others, draft]).filter(([a, b]) => a.id === draft.id || b.id === draft.id);
       const box = $("ed-collide");
-      if (!draft.enabled || !pairs.length) {
-        box.classList.add("hidden");
-        box.textContent = "";
-        return;
-      }
+      if (!draft.enabled || !pairs.length) { box.classList.add("hidden"); box.textContent = ""; return; }
       box.textContent = "Soft warning: this start overlaps another enabled program on shared weekdays. Save still allowed.";
       box.classList.remove("hidden");
     }
     async function saveEditor() {
       const body = readEditorDraft();
-      if (!body.id) body.id = mintId(body.note);
-      if (!body.steps.length) {
-        alert("Add at least one itinerary step.");
-        return;
-      }
+      if (runeCount(body.name) > NAME_MAX) { alert("Name can be at most 24 characters."); return; }
+      if (!body.id) body.id = mintId(body.name || body.note);
+      if (!body.steps.length) { alert("Add at least one station."); return; }
       await j("/api/schedules/" + encodeURIComponent(body.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      $("sched-dlg").close();
+      $("sched-dlg").classList.add("hidden");
       await loadSchedules();
+      showSchedules();
     }
     async function toggleEnabled(sch) {
       await j("/api/schedules/" + encodeURIComponent(sch.id), {
@@ -1378,7 +1282,9 @@
         body: JSON.stringify({
           id: sch.id,
           enabled: !sch.enabled,
+          name: sch.name || "",
           note: sch.note || "",
+          notes: sch.notes || "",
           weekdays: sch.weekdays || [],
           start: sch.start || "06:00",
           steps: sch.steps || [],
@@ -1392,13 +1298,20 @@
       const s = state.status || {};
       return !!(isPaused() && s.pause_source === "auto" && s.reason === "rain" && st && st.rain_pause_exempt);
     }
-    function openRun(st) {
-      if (isPaused() && !rainPauseAllows(st)) {
-        $("paused-block-msg").textContent =
-          "Paused for rain — resume before running " + shortStation(st.id) + ".";
-        $("paused-block-dlg").showModal();
-        return;
+    function usualMinutes(st) {
+      const id = st && st.id;
+      const pools = [(state.schedules || []).filter((s) => s.enabled), state.schedules || []];
+      for (const pool of pools) {
+        for (const sch of pool) {
+          for (const step of sch.steps || []) {
+            if (step.station_id === id && Number(step.minutes) > 0) return Number(step.minutes);
+          }
+        }
       }
+      return 5;
+    }
+    function openRun(st) {
+      if (isPaused()) { openPausedRun(st); return; }
       state.pick = st;
       $("run-msg").textContent = "Run " + shortStation(st.id) + " for…";
       paintRunSoil(st);
@@ -1414,8 +1327,19 @@
       });
       $("run-dlg").showModal();
     }
+    function openPausedRun(st) {
+      state.pick = st;
+      const name = shortStation(st.id);
+      const n = usualMinutes(st);
+      const until = untilHeadline().replace(/^Until\s+/, "");
+      $("paused-run-title").textContent = `Run ${name} anyway?`;
+      $("paused-run-body").textContent = "Watering is paused for rain until " + until + ". This runs " + name + " once for its usual " + n + " min; the pause stays on.";
+      $("paused-run-go-label").textContent = "Run " + name;
+      showSheet("paused-run-sheet");
+    }
     function confirmRun(st, sec) {
-      $("run-dlg").close();
+      const dlg = $("run-dlg");
+      if (dlg.open) dlg.close();
       if (watering()) {
         $("warn-msg").textContent = shortStation(state.status.current_station || "A station") +
           " is watering. Stop it and run " + shortStation(st.id) + "?";
@@ -1433,235 +1357,64 @@
         body: JSON.stringify({ durationSec: sec, preempt }),
       });
       const mins = Math.max(1, Math.round(sec / 60));
-      state.runTrack = {
-        steps: [{ station_id: id, minutes: mins }],
-        startedAt: Date.now(),
-        endsAt: Date.now() + sec * 1000,
-        source: "manual",
-      };
-      // Prefer fresh status; fall back to run response (may be PascalCase)
+      state.runTrack = { steps: [{ station_id: id, minutes: mins }], startedAt: Date.now(), endsAt: Date.now() + sec * 1000, source: "manual" };
       try { state.status = normalizeStatus(await j("/api/status")); }
       catch { state.status = normalizeStatus(res || { phase: "StationOn", current_station: id, stations_on: [id] }); }
       paintStatus();
     }
-    $("run-cancel").addEventListener("click", () => $("run-dlg").close());
-    $("warn-no").addEventListener("click", () => $("warn-dlg").close());
-    $("warn-yes").addEventListener("click", () => {
-      const d = $("warn-dlg");
-      d.close();
-      startRun(d.dataset.id, Number(d.dataset.sec), true);
-    });
-    $("stop").addEventListener("click", () => {
-      // STOP: cancel live run only — never fold pause duration into STOP; does not Resume.
-      state.runTrack = null;
-      j("/api/run/cancel", { method: "POST" })
-        .then(() => loadStatus())
-        .catch((e) => alert(e.message));
-    });
-    function pauseDaysPhrase(n) {
-      return n === 1 ? "1 day" : n + " days";
+    function showSheet(id) {
+      $("run-sheet").hidden = true;
+      $("paused-run-sheet").hidden = true;
+      $("sheet-scrim").hidden = false;
+      $(id).hidden = false;
     }
-    /** "Sat" for the local calendar day N days from today (Phoenix has no DST). */
-    function pauseWeekdayIn(n) {
-      return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" })
-        .format(new Date(Date.now() + n * 24 * 60 * 60 * 1000));
+    function closeSheets() {
+      $("sheet-scrim").hidden = true;
+      $("run-sheet").hidden = true;
+      $("paused-run-sheet").hidden = true;
     }
-    function pauseResumeHint(n) {
-      if (n === 1) return "Resumes " + pauseWeekdayIn(1) + " morning, before the first program";
-      if (n === 7) return "Resumes next " + pauseWeekdayIn(7) + " morning";
-      return "Resumes " + pauseWeekdayIn(n) + " morning";
-    }
-    function syncPauseStepper() {
-      if (pauseDaysPicked < PAUSE_MIN_DAYS) pauseDaysPicked = PAUSE_MIN_DAYS;
-      if (pauseDaysPicked > PAUSE_MAX_DAYS) pauseDaysPicked = PAUSE_MAX_DAYS;
-      const phrase = pauseDaysPhrase(pauseDaysPicked);
-      $("pause-days-value").textContent = phrase;
-      $("pause-days-go").textContent = "Pause " + phrase;
-      $("pause-days-hint").textContent = pauseResumeHint(pauseDaysPicked);
-      $("pause-days-minus").disabled = pauseDaysPicked <= PAUSE_MIN_DAYS;
-      $("pause-days-plus").disabled = pauseDaysPicked >= PAUSE_MAX_DAYS;
-    }
-    function openPauseSheet() {
-      pauseDaysPicked = 3;
-      $("pause-stepper").classList.add("hidden");
-      $("pause-chips").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
-      $("pause-chips").querySelectorAll("[data-hint-days]").forEach((h) => {
-        h.textContent = pauseResumeHint(Number(h.dataset.hintDays));
-      });
-      syncPauseStepper();
-      $("pause-dlg").showModal();
-    }
-    async function setPause(body) {
-      $("pause-dlg").close();
-      await j("/api/pause", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      state.runTrack = null;
-      await loadStatus();
-    }
-    async function resumePause() {
-      await j("/api/pause", { method: "DELETE" });
-      await loadStatus();
-    }
-    $("pause-chips").addEventListener("click", (ev) => {
-      const b = ev.target.closest("button");
-      if (!b || !$("pause-chips").contains(b)) return;
-      const kind = b.dataset.pause;
-      if (kind === "pick") {
-        $("pause-chips").querySelectorAll("button").forEach((x) => x.classList.remove("active"));
-        b.classList.add("active");
-        $("pause-stepper").classList.remove("hidden");
-        return;
-      }
-      let body = null;
-      if (kind === "tomorrow") body = { until: "tomorrow_morning", reason: "rain" };
-      else if (kind === "days") body = { days: Number(b.dataset.days), reason: "rain" };
-      else if (kind === "indefinite") body = { indefinite: true, reason: "rain" };
-      if (body) setPause(body).catch((e) => alert(e.message));
-    });
-    $("pause-days-minus").addEventListener("click", () => {
-      pauseDaysPicked -= 1;
-      syncPauseStepper();
-    });
-    $("pause-days-plus").addEventListener("click", () => {
-      pauseDaysPicked += 1;
-      syncPauseStepper();
-    });
-    $("pause-days-go").addEventListener("click", () => {
-      setPause({ days: pauseDaysPicked, reason: "rain" }).catch((e) => alert(e.message));
-    });
-    $("pause-open").addEventListener("click", openPauseSheet);
-    $("pause-cancel").addEventListener("click", () => $("pause-dlg").close());
-    $("pause-resume").addEventListener("click", () => resumePause().catch((e) => alert(e.message)));
-    $("paused-block-ok").addEventListener("click", () => $("paused-block-dlg").close());
-    $("paused-block-resume").addEventListener("click", () => {
-      $("paused-block-dlg").close();
-      resumePause().catch((e) => alert(e.message));
-    });
-    function showHome() {
-      $("page-home").classList.remove("hidden");
-      $("page-schedules").classList.add("hidden");
-      $("page-history").classList.add("hidden");
-      $("tab-home").classList.add("active");
-      $("tab-sched").classList.remove("active");
-    }
-    $("tab-home").addEventListener("click", showHome);
-    $("tab-sched").addEventListener("click", () => {
-      $("page-home").classList.add("hidden");
-      $("page-schedules").classList.remove("hidden");
-      $("page-history").classList.add("hidden");
-      $("tab-home").classList.remove("active");
-      $("tab-sched").classList.add("active");
-    });
-    $("history-see-all").addEventListener("click", () => {
-      $("page-home").classList.add("hidden");
-      $("page-schedules").classList.add("hidden");
-      $("page-history").classList.remove("hidden");
-      $("tab-home").classList.remove("active");
-      $("tab-sched").classList.remove("active");
-      loadHistory();
-    });
-    $("history-back").addEventListener("click", showHome);
-    $("sched-new").addEventListener("click", () => openEditor(null, false));
-    $("ed-cancel").addEventListener("click", () => $("sched-dlg").close());
-    $("ed-save").addEventListener("click", () => saveEditor().catch((e) => alert(e.message)));
-    $("ed-add-step").addEventListener("click", () => {
-      const cur = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
-        station_id: row.querySelector("[data-st]").value,
-        minutes: Number(row.querySelector("[data-min]").value) || 5,
-      }));
-      cur.push({ station_id: (state.stations[0] || {}).id || "", minutes: 5 });
-      renderEdSteps(cur);
-    });
-    $("ed-season-all").addEventListener("click", () => setSeasonMode("all"));
-    $("ed-season-between").addEventListener("click", () => {
-      setSeasonMode("between");
-      if (!$("ed-starts-on").value) {
-        $("ed-starts-on").value = phoenixParts().ymd;
-      }
-    });
-    ["ed-start", "ed-enabled"].forEach((id) => {
-      $(id).addEventListener("change", updateEdCollide);
-      $(id).addEventListener("input", updateEdCollide);
-    });
-    $("ed-days").addEventListener("click", () => setTimeout(updateEdCollide, 0));
-    async function loadStations() {
-      const d = await j("/api/stations");
-      state.stations = d.stations || [];
-      paintStations();
-    }
-    async function loadSchedules() {
-      const d = await j("/api/schedules");
-      state.schedules = d.schedules || [];
-      paintSchedules();
-    }
-    function historyTZ() {
-      return (state.status && state.status.timezone) || TZ;
-    }
+    function historyTZ() { return (state.status && state.status.timezone) || TZ; }
     function tzParts(d) {
       const map = {};
       const fmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: historyTZ(),
-        year: "numeric", month: "short", day: "numeric",
-        weekday: "short",
-        hour: "numeric", minute: "2-digit",
-        hour12: true,
+        timeZone: historyTZ(), year: "numeric", month: "short", day: "numeric",
+        weekday: "short", hour: "numeric", minute: "2-digit", hour12: true,
       });
-      for (const p of fmt.formatToParts(d)) {
-        if (p.type !== "literal") map[p.type] = p.value;
-      }
+      for (const p of fmt.formatToParts(d)) if (p.type !== "literal") map[p.type] = p.value;
       return map;
     }
     function tzYMD(d) {
       const map = {};
-      const fmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: historyTZ(), year: "numeric", month: "2-digit", day: "2-digit",
-      });
-      for (const p of fmt.formatToParts(d)) {
-        if (p.type !== "literal") map[p.type] = p.value;
-      }
+      const fmt = new Intl.DateTimeFormat("en-US", { timeZone: historyTZ(), year: "numeric", month: "2-digit", day: "2-digit" });
+      for (const p of fmt.formatToParts(d)) if (p.type !== "literal") map[p.type] = p.value;
       return `${map.year}-${map.month}-${map.day}`;
     }
-    function prevYMD(ymd) {
+    function shiftYMD(ymd, delta) {
       const [y, m, d] = String(ymd || "").split("-").map(Number);
-      const dt = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) - 1));
-      const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
-      const dd = String(dt.getUTCDate()).padStart(2, "0");
-      return `${dt.getUTCFullYear()}-${mm}-${dd}`;
+      const dt = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + delta));
+      return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
     }
-    function tzHour(d) {
-      const map = {};
-      const fmt = new Intl.DateTimeFormat("en-US", {
-        timeZone: historyTZ(), hour: "2-digit", hourCycle: "h23",
-      });
-      for (const p of fmt.formatToParts(d)) {
-        if (p.type !== "literal") map[p.type] = p.value;
-      }
-      let h = Number(map.hour);
-      if (h === 24) h = 0;
-      return h;
-    }
-    function dayPhrase(d) {
-      if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "Earlier";
-      const ymd = tzYMD(d);
-      const today = tzYMD(new Date());
-      if (ymd === today) {
-        const h = tzHour(d);
-        if (h < 12) return "This morning";
-        if (h < 17) return "This afternoon";
-        return "This evening";
-      }
-      if (ymd === prevYMD(today)) return "Yesterday";
-      const map = tzParts(d);
-      return `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim();
-    }
+    function prevYMD(ymd) { return shiftYMD(ymd, -1); }
+    function nextYMD(ymd) { return shiftYMD(ymd, 1); }
     function clockPhrase(d) {
       if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
       const map = tzParts(d);
-      const ap = String(map.dayPeriod || "").toLowerCase();
+      const ap = String(map.dayPeriod || "").toUpperCase();
       return ap ? `${map.hour}:${map.minute} ${ap}` : `${map.hour}:${map.minute}`;
+    }
+    function friendlyWhen(d) {
+      if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
+      const ymd = tzYMD(d);
+      const today = tzYMD(new Date());
+      let day;
+      if (ymd === today) day = "Today";
+      else if (ymd === nextYMD(today)) day = "Tomorrow";
+      else {
+        const map = tzParts(d);
+        day = `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim();
+      }
+      const time = clockPhrase(d);
+      return time ? `${day} ${time}` : day;
     }
     function stampPhrase(d) {
       const time = clockPhrase(d);
@@ -1679,6 +1432,28 @@
       if (m === 1) return "1 min";
       return `${m} min`;
     }
+    function statusDuration(sec) {
+      sec = Number(sec) || 0;
+      if (sec < 60) return "under a minute";
+      return formatRunMins(sec);
+    }
+    function lastRanLine() {
+      const e = (state.history || []).find((x) => x.outcome === "completed" || x.outcome === "stopped");
+      if (!e || !e.started_at) return "";
+      const d = new Date(e.started_at);
+      if (Number.isNaN(d.getTime())) return "";
+      const ymd = tzYMD(d);
+      const today = tzYMD(new Date());
+      let day = "earlier";
+      if (ymd === today) day = "today";
+      else if (ymd === prevYMD(today)) day = "yesterday";
+      else {
+        const map = tzParts(d);
+        day = `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim();
+      }
+      const actual = (e.stations || []).reduce((n, st) => n + (Number(st.actual_sec) || 0), 0);
+      return `Last ran ${day} ${clockPhrase(d)} · ${statusDuration(actual)}`;
+    }
     function historyProgramLabel(entry) {
       if (entry.kind === "manual") {
         const names = [];
@@ -1692,27 +1467,60 @@
       if (p) return p;
       return String(entry.program_id || "").trim() || "Program";
     }
-    function historyOutcome(entry) {
-      const actual = (entry.stations || []).reduce((n, s) => n + (Number(s.actual_sec) || 0), 0);
-      const mins = formatRunMins(actual);
-      if (entry.outcome === "completed") return `${mins} · finished`;
+    function historyActual(entry) {
+      return (entry.stations || []).reduce((n, s) => n + (Number(s.actual_sec) || 0), 0);
+    }
+    function historyStatus(entry) {
+      const actual = historyActual(entry);
+      if (entry.outcome === "completed") return { text: "finished · " + statusDuration(actual), cls: "" };
       if (entry.outcome === "stopped") {
-        if (actual < 60) return "Stopped after under a minute";
-        return `Stopped after ${mins}`;
+        if (actual < 60) return { text: "stopped early · under a minute", cls: "muted" };
+        return { text: "stopped early · " + statusDuration(actual), cls: "muted" };
       }
-      if (entry.outcome === "refused") return "Refused (lockout mode)";
+      if (entry.outcome === "refused") return { text: "failed · Refused (lockout mode)", cls: "bad" };
       if (entry.outcome === "skipped") {
         const reason = String(entry.reason || "").trim().toLowerCase();
-        if (reason === "rain") return "Skipped, paused for rain";
-        return "Skipped, paused";
+        if (reason === "rain") return { text: "skipped · rain", cls: "muted" };
+        return { text: "skipped · " + (reason || "paused"), cls: "muted" };
       }
-      if (entry.outcome === "error") return `Error: ${entry.error || "unknown"}`;
+      if (entry.outcome === "error") return { text: "failed · " + (entry.error || "unknown"), cls: "bad" };
+      return { text: entry.outcome || "", cls: "" };
+    }
+    function historyHow(entry) {
+      if (entry.outcome === "completed") return "Finished on schedule";
+      if (entry.outcome === "stopped") return "Stopped early with STOP";
+      if (entry.outcome === "skipped") {
+        const reason = String(entry.reason || "").trim().toLowerCase();
+        if (reason === "rain") return "Skipped: paused for rain";
+        return "Skipped: paused";
+      }
+      if (entry.outcome === "error" || entry.outcome === "refused") return "Failed: " + (entry.error || entry.reason || "unknown");
       return entry.outcome || "";
     }
-    function historyHeadline(entry) {
+    function historyDay(d) {
+      const ymd = tzYMD(d);
+      const today = tzYMD(new Date());
+      if (ymd === today) return "Today";
+      if (ymd === nextYMD(today)) return "Tomorrow";
+      if (ymd === prevYMD(today)) return "Yesterday";
+      const map = tzParts(d);
+      return `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim() || "Earlier";
+    }
+    function historyWhen(entry) {
       const d = new Date(entry.started_at);
-      const when = Number.isNaN(d.getTime()) ? "Earlier" : `${dayPhrase(d)} ${clockPhrase(d)}`.trim();
-      return `${esc(when)} · ${esc(historyProgramLabel(entry))} · ${esc(historyOutcome(entry))}`;
+      if (Number.isNaN(d.getTime())) return "Earlier";
+      return friendlyWhen(d);
+    }
+    function historySpan(entry) {
+      const start = new Date(entry.started_at);
+      const end = new Date(entry.ended_at);
+      if (Number.isNaN(start.getTime())) return "Earlier";
+      const day = historyDay(start);
+      const a = clockPhrase(start);
+      const b = !Number.isNaN(end.getTime()) ? clockPhrase(end) : "";
+      if (a && b) return `${day} · ${a} – ${b}`;
+      if (a) return `${day} · ${a}`;
+      return day;
     }
     function historyDetail(entry) {
       const skipped = entry.outcome === "skipped";
@@ -1725,11 +1533,20 @@
       }
       return parts.join(" · ");
     }
-    function historyItemHTML(entry) {
+    function historyItemHTML(entry, idx) {
+      const st = historyStatus(entry);
       const detail = historyDetail(entry);
-      return `<div class="history-item"><div class="history-line">${historyHeadline(entry)}</div>` +
-        (detail ? `<div class="history-detail">${esc(detail)}</div>` : "") +
-        `</div>`;
+      return `<button type="button" class="run-row" data-run="${idx}">` +
+        `<span class="run-primary"><span class="run-when">${esc(historyWhen(entry))}</span><span class="run-sep"> · </span><span class="run-name">${esc(historyProgramLabel(entry))}</span></span>` +
+        `<span class="run-status ${st.cls}">${esc(st.text)}</span>` +
+        (detail ? `<span class="run-detail">${esc(detail)}</span>` : "") +
+        `</button>`;
+    }
+    function bindHistory(root) {
+      if (!root) return;
+      root.querySelectorAll("[data-run]").forEach((b) => {
+        b.addEventListener("click", () => openRunDetail(Number(b.dataset.run)));
+      });
     }
     function paintHistory() {
       const home = $("history-home");
@@ -1737,20 +1554,54 @@
       if (!home || !all) return;
       const entries = state.history || [];
       const note = state.historyError ? `<p class="history-note">${esc(state.historyError)}</p>` : "";
-      const homeItems = entries.slice(0, 5).map(historyItemHTML).join("");
-      const allItems = entries.map(historyItemHTML).join("");
       if (!entries.length && !state.historyError) {
         home.innerHTML = `<p class="history-note">No runs yet.</p>`;
         all.innerHTML = `<p class="history-note">No runs yet.</p>`;
         return;
       }
-      if (!entries.length) {
-        home.innerHTML = note;
-        all.innerHTML = note;
-        return;
-      }
-      home.innerHTML = note + homeItems;
-      all.innerHTML = note + allItems;
+      if (!entries.length) { home.innerHTML = note; all.innerHTML = note; return; }
+      home.innerHTML = note + entries.slice(0, 5).map(historyItemHTML).join("");
+      all.innerHTML = note + entries.map(historyItemHTML).join("");
+      bindHistory(home);
+      bindHistory(all);
+    }
+    function programNotes(entry) {
+      const id = String(entry.program_id || "").trim();
+      if (!id) return "";
+      const sch = (state.schedules || []).find((s) => s.id === id);
+      return sch && String(sch.notes || "").trim() ? String(sch.notes).trim() : "";
+    }
+    function openRunDetail(idx) {
+      const entry = (state.history || [])[idx];
+      if (!entry) return;
+      const st = historyStatus(entry);
+      $("run-sheet-title").textContent = historyProgramLabel(entry);
+      $("run-sheet-sub").textContent = historySpan(entry);
+      const chip = $("run-sheet-chip");
+      const chipText = st.text ? st.text.charAt(0).toUpperCase() + st.text.slice(1) : "";
+      chip.textContent = chipText;
+      chip.classList.toggle("bad", st.cls === "bad");
+      const skipped = entry.outcome === "skipped";
+      $("run-sheet-stations").innerHTML = (entry.stations || []).map((s) => {
+        const sec = skipped ? (Number(s.planned_sec) || 0) : (Number(s.actual_sec) || 0);
+        const name = shortStation(s.station_id) || s.station_id || "Station";
+        return `<div class="sheet-row"><span>${esc(name)}</span><span>${esc(formatRunMins(sec))}</span></div>`;
+      }).join("") || `<div class="sheet-row"><span>No stations</span><span></span></div>`;
+      const started = new Date(entry.started_at);
+      const ended = new Date(entry.ended_at);
+      $("run-sheet-started").textContent = stampPhrase(started) || "—";
+      $("run-sheet-ended").textContent = stampPhrase(ended) || "—";
+      $("run-sheet-how").textContent = historyHow(entry);
+      const notes = programNotes(entry);
+      $("run-sheet-notes").textContent = notes;
+      setHidden($("run-sheet-notes-block"), !notes);
+      $("run-sheet-edit").onclick = () => {
+        closeSheets();
+        const sch = (state.schedules || []).find((s) => s.id === entry.program_id);
+        if (sch) openEditor(sch, false);
+        else showSchedules();
+      };
+      showSheet("run-sheet");
     }
     function loadHistory() {
       if (historyInFlight) return historyInFlight;
@@ -1798,9 +1649,7 @@
       const days = Number(d && d.window_days);
       let s = "Rain " + soilInches(z.rain_total_inches) + " in";
       if (withET) s += " · ET (plant-adjusted) " + soilInches(z.et_total_inches) + " in";
-      if (Number.isFinite(days) && days > 0) {
-        s += ", last " + days + " " + (days === 1 ? "day" : "days");
-      }
+      if (Number.isFinite(days) && days > 0) s += ", last " + days + " " + (days === 1 ? "day" : "days");
       return s;
     }
     function soilUpdatedStamp(d) {
@@ -1808,6 +1657,34 @@
       if (d.et && d.et.last_ok_at) return d.et.last_ok_at;
       if (d.et_known && d.updated_at) return d.updated_at;
       return "";
+    }
+    function soilDialogText(z, d) {
+      const known = !!(d && d.et_known === true);
+      const stale = !!(d && d.et_stale === true);
+      const measured = !!(z && z.rate_measured === true);
+      const pctN = Number(z && z.percent);
+      const havePct = !!(z && z.percent != null && Number.isFinite(pctN));
+      const bits = [];
+      if (stale) bits.push("ET data is stale");
+      else if (!known || (measured && !havePct)) bits.push("No ET data yet");
+      else if (measured) bits.push(Math.round(pctN) + "% of " + (Number(z.capacity_inches) || 0).toFixed(2) + " in");
+      if (!measured) bits.push("Measure sprinkler output to enable");
+      if (known || d.rain_known) bits.push(soilWindowLine(z, d, known));
+      if (d.et && d.et.unavailable) {
+        const since = d.et.since ? stampPhrase(new Date(d.et.since)) : "";
+        bits.push("ET unavailable since " + since);
+      }
+      const stamp = soilUpdatedStamp(d);
+      if (stamp) bits.push("Updated " + stampPhrase(new Date(stamp)));
+      return "Soil estimate: " + bits.join(" · ");
+    }
+    function paintSoilNote() {
+      const el = $("soil-note");
+      if (!el) return;
+      const bad = !!(state.soil && state.soil.reason === "soil.local.json invalid");
+      el.hidden = !bad;
+      el.classList.toggle("hidden", !bad);
+      el.textContent = bad ? "Soil estimate off: settings file has an error (see log)" : "";
     }
     function soilTilePercent(id) {
       const d = state.soil;
@@ -1824,45 +1701,8 @@
       return `<span class="tile-soil" role="img" aria-label="Soil about ${pct}%"><span aria-hidden="true" style="width:${pct}%"></span></span>`;
     }
     function paintTileSoil() {
-      document.querySelectorAll("#stations .station-tile").forEach((el) => {
-        const html = tileSoilHTML(el.dataset.id);
-        const cur = el.querySelector(".tile-soil");
-        if (cur) cur.remove();
-        if (!html) return;
-        const name = el.querySelector(".tile-name");
-        if (name) name.insertAdjacentHTML("afterend", html);
-      });
-    }
-    function paintSoilNote() {
-      const el = $("soil-note");
-      if (!el) return;
-      const bad = !!(state.soil && state.soil.reason === "soil.local.json invalid");
-      el.hidden = !bad;
-      el.classList.toggle("hidden", !bad);
-      el.textContent = bad ? "Soil estimate off: settings file has an error (see log)" : "";
-    }
-    function soilDialogText(z, d) {
-      const known = !!(d && d.et_known === true);
-      const stale = !!(d && d.et_stale === true);
-      const measured = !!(z && z.rate_measured === true);
-      const pctN = Number(z && z.percent);
-      const havePct = !!(z && z.percent != null && Number.isFinite(pctN));
-      const bits = [];
-      if (stale) bits.push("ET data is stale");
-      else if (!known || (measured && !havePct)) bits.push("No ET data yet");
-      else if (measured) {
-        const cap = (Number(z.capacity_inches) || 0).toFixed(2);
-        bits.push(Math.round(pctN) + "% of " + cap + " in");
-      }
-      if (!measured) bits.push("Measure sprinkler output to enable");
-      if (known || d.rain_known) bits.push(soilWindowLine(z, d, known));
-      if (d.et && d.et.unavailable) {
-        const since = d.et.since ? stampPhrase(new Date(d.et.since)) : "";
-        bits.push("ET unavailable since " + since);
-      }
-      const stamp = soilUpdatedStamp(d);
-      if (stamp) bits.push("Updated " + stampPhrase(new Date(stamp)));
-      return "Soil estimate: " + bits.join(" · ");
+      // Home tiles do not draw the soil bar. Remove one if an older paint left it.
+      document.querySelectorAll("#stations .tile-soil").forEach((el) => el.remove());
     }
     function paintSoil() {
       paintSoilNote();
@@ -1875,21 +1715,13 @@
       if (!el) return;
       const d = state.soil;
       if (!st || !d || d.reason === "no soil.local.json" || (d.enabled !== true && d.reason !== "soil.local.json invalid")) {
-        el.hidden = true;
-        el.textContent = "";
-        return;
+        el.hidden = true; el.textContent = ""; return;
       }
       if (d.reason === "soil.local.json invalid") {
-        el.hidden = false;
-        el.textContent = "Soil settings file has an error (see log)";
-        return;
+        el.hidden = false; el.textContent = "Soil settings file has an error (see log)"; return;
       }
       const z = (d.zones || []).find((x) => x.station_id === st.id);
-      if (!z) {
-        el.hidden = true;
-        el.textContent = "";
-        return;
-      }
+      if (!z) { el.hidden = true; el.textContent = ""; return; }
       el.hidden = false;
       el.textContent = soilDialogText(z, d);
     }
@@ -1902,6 +1734,189 @@
         if (!state.soil) paintSoil();
       }
     }
+    async function loadStations() {
+      const d = await j("/api/stations");
+      state.stations = d.stations || [];
+      paintStations();
+    }
+    async function loadSchedules() {
+      const d = await j("/api/schedules");
+      state.schedules = d.schedules || [];
+      paintSchedules();
+    }
+    function pauseDaysPhrase(n) { return n === 1 ? "1 day" : n + " days"; }
+    function pauseWeekdayIn(n) {
+      return new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" })
+        .format(new Date(Date.now() + n * 24 * 60 * 60 * 1000));
+    }
+    function pauseResumeHint(n) {
+      if (n === 1) return "Resumes " + pauseWeekdayIn(1) + " morning, before the first program";
+      if (n === 7) return "Resumes next " + pauseWeekdayIn(7) + " morning";
+      return "Resumes " + pauseWeekdayIn(n) + " morning";
+    }
+    function syncPauseStepper() {
+      if (pauseDaysPicked < PAUSE_MIN_DAYS) pauseDaysPicked = PAUSE_MIN_DAYS;
+      if (pauseDaysPicked > PAUSE_MAX_DAYS) pauseDaysPicked = PAUSE_MAX_DAYS;
+      const phrase = pauseDaysPhrase(pauseDaysPicked);
+      $("pause-days-value").textContent = phrase;
+      $("pause-days-go").textContent = "Pause " + phrase;
+      $("pause-days-hint").textContent = pauseResumeHint(pauseDaysPicked);
+      $("pause-days-minus").disabled = pauseDaysPicked <= PAUSE_MIN_DAYS;
+      $("pause-days-plus").disabled = pauseDaysPicked >= PAUSE_MAX_DAYS;
+    }
+    function openPauseSheet() {
+      pauseDaysPicked = 3;
+      $("pause-stepper").classList.add("hidden");
+      $("pause-chips").querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+      $("pause-chips").querySelectorAll("[data-hint-days]").forEach((h) => {
+        h.textContent = pauseResumeHint(Number(h.dataset.hintDays));
+      });
+      syncPauseStepper();
+      $("pause-dlg").showModal();
+    }
+    async function setPause(body) {
+      $("pause-dlg").close();
+      await j("/api/pause", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      state.runTrack = null;
+      await loadStatus();
+    }
+    async function resumePause() {
+      await j("/api/pause", { method: "DELETE" });
+      await loadStatus();
+    }
+    function showHome() {
+      $("page-home").classList.remove("hidden");
+      $("page-schedules").classList.add("hidden");
+      $("page-history").classList.add("hidden");
+      $("sched-dlg").classList.add("hidden");
+      $("tab-home").classList.add("active");
+      $("tab-sched").classList.remove("active");
+    }
+    function showSchedules() {
+      $("page-home").classList.add("hidden");
+      $("page-schedules").classList.remove("hidden");
+      $("page-history").classList.add("hidden");
+      $("sched-dlg").classList.add("hidden");
+      $("tab-home").classList.remove("active");
+      $("tab-sched").classList.add("active");
+    }
+    function bindNameLimit() {
+      const el = $("ed-name");
+      el.dataset.last = el.value || "";
+      el.addEventListener("beforeinput", (ev) => {
+        if (ev.inputType && ev.inputType.startsWith("delete")) return;
+        if (ev.data == null) return;
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? start;
+        const next = el.value.slice(0, start) + ev.data + el.value.slice(end);
+        if (runeCount(next) > NAME_MAX) ev.preventDefault();
+      });
+      el.addEventListener("paste", (ev) => {
+        const text = (ev.clipboardData && ev.clipboardData.getData("text")) || "";
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? start;
+        const next = el.value.slice(0, start) + text + el.value.slice(end);
+        if (runeCount(next) > NAME_MAX) ev.preventDefault();
+      });
+      el.addEventListener("input", () => {
+        if (runeCount(el.value) > NAME_MAX) el.value = el.dataset.last || "";
+        else el.dataset.last = el.value;
+        paintNameCount();
+      });
+    }
+    $("run-cancel").addEventListener("click", () => $("run-dlg").close());
+    $("warn-no").addEventListener("click", () => $("warn-dlg").close());
+    $("warn-yes").addEventListener("click", () => {
+      const d = $("warn-dlg");
+      d.close();
+      startRun(d.dataset.id, Number(d.dataset.sec), true);
+    });
+    $("stop").addEventListener("click", () => {
+      state.runTrack = null;
+      j("/api/run/cancel", { method: "POST" }).then(() => loadStatus()).catch((e) => alert(e.message));
+    });
+    $("pause-chips").addEventListener("click", (ev) => {
+      const b = ev.target.closest("button");
+      if (!b || !$("pause-chips").contains(b)) return;
+      const kind = b.dataset.pause;
+      if (kind === "pick") {
+        $("pause-chips").querySelectorAll("button").forEach((x) => x.classList.remove("active"));
+        b.classList.add("active");
+        $("pause-stepper").classList.remove("hidden");
+        return;
+      }
+      let body = null;
+      if (kind === "tomorrow") body = { until: "tomorrow_morning", reason: "rain" };
+      else if (kind === "days") body = { days: Number(b.dataset.days), reason: "rain" };
+      else if (kind === "indefinite") body = { indefinite: true, reason: "rain" };
+      if (body) setPause(body).catch((e) => alert(e.message));
+    });
+    $("pause-days-minus").addEventListener("click", () => { pauseDaysPicked -= 1; syncPauseStepper(); });
+    $("pause-days-plus").addEventListener("click", () => { pauseDaysPicked += 1; syncPauseStepper(); });
+    $("pause-days-go").addEventListener("click", () => {
+      setPause({ days: pauseDaysPicked, reason: "rain" }).catch((e) => alert(e.message));
+    });
+    $("pause-open").addEventListener("click", openPauseSheet);
+    $("change-end").addEventListener("click", openPauseSheet);
+    $("pause-cancel").addEventListener("click", () => $("pause-dlg").close());
+    $("pause-resume").addEventListener("click", () => resumePause().catch((e) => alert(e.message)));
+    $("paused-block-ok").addEventListener("click", () => $("paused-block-dlg").close());
+    $("paused-block-resume").addEventListener("click", () => {
+      $("paused-block-dlg").close();
+      resumePause().catch((e) => alert(e.message));
+    });
+    $("tab-home").addEventListener("click", showHome);
+    $("tab-sched").addEventListener("click", showSchedules);
+    $("hero-add").addEventListener("click", showSchedules);
+    $("history-see-all").addEventListener("click", () => {
+      $("page-home").classList.add("hidden");
+      $("page-schedules").classList.add("hidden");
+      $("sched-dlg").classList.add("hidden");
+      $("page-history").classList.remove("hidden");
+      $("tab-home").classList.remove("active");
+      $("tab-sched").classList.remove("active");
+      loadHistory();
+    });
+    $("history-back").addEventListener("click", showHome);
+    $("sched-new").addEventListener("click", () => openEditor(null, false));
+    $("ed-cancel").addEventListener("click", closeEditor);
+    $("ed-save").addEventListener("click", () => saveEditor().catch((e) => alert(e.message)));
+    $("ed-add-step").addEventListener("click", () => {
+      const cur = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
+        station_id: row.querySelector("[data-st]").value,
+        minutes: Number(row.querySelector("[data-min]").value) || 1,
+      }));
+      cur.push({ station_id: (state.stations[0] || {}).id || "", minutes: 5 });
+      renderEdSteps(cur);
+    });
+    $("ed-season-all").addEventListener("click", () => setSeasonMode("all"));
+    $("ed-season-between").addEventListener("click", () => {
+      setSeasonMode("between");
+      if (!$("ed-starts-on").value) $("ed-starts-on").value = phoenixParts().ymd;
+      $("ed-season-chip-text").textContent = editorSeasonText();
+    });
+    ["ed-starts-on", "ed-ends-on"].forEach((id) => {
+      $(id).addEventListener("change", () => { $("ed-season-chip-text").textContent = editorSeasonText(); });
+    });
+    ["ed-start", "ed-enabled"].forEach((id) => {
+      $(id).addEventListener("change", updateEdCollide);
+      $(id).addEventListener("input", updateEdCollide);
+    });
+    $("ed-days").addEventListener("click", () => setTimeout(updateEdCollide, 0));
+    $("sheet-scrim").addEventListener("click", closeSheets);
+    $("run-sheet-x").addEventListener("click", closeSheets);
+    $("paused-run-x").addEventListener("click", closeSheets);
+    $("paused-run-cancel").addEventListener("click", closeSheets);
+    $("paused-run-go").addEventListener("click", () => {
+      const st = state.pick;
+      if (!st) return;
+      closeSheets();
+      confirmRun(st, usualMinutes(st) * 60);
+    });
+    document.querySelectorAll("dialog").forEach((d) => {
+      d.addEventListener("click", (ev) => { if (ev.target === d) d.close(); });
+    });
+    bindNameLimit();
     loadStatus();
     loadStations();
     loadSchedules();
@@ -1910,7 +1925,6 @@
     hookSSE();
     setInterval(loadStatus, 4000);
     setInterval(loadSoil, 5 * 60 * 1000);
-    // Tick relative timer while watering
     setInterval(() => { if (watering()) paintStatus(); }, 1000);
   </script>
 </body>

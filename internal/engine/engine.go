@@ -426,7 +426,10 @@ func (e *Engine) runTagged(ctx context.Context, programID, program, kind string,
 		e.mu.Unlock()
 		return ErrFaulted
 	}
-	if e.isPausedLocked(time.Now()) && !e.exemptRunLocked(steps) {
+	// A manual run is allowed while paused and does not clear the pause.
+	// A scheduled program still waits, except an automatic rain pause whose
+	// every step is rain-pause exempt.
+	if kind != KindManual && e.isPausedLocked(time.Now()) && !e.exemptRunLocked(steps) {
 		e.mu.Unlock()
 		return ErrPaused
 	}

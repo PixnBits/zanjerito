@@ -90,9 +90,13 @@ func TestAutoRainPauseExemptStationRun(t *testing.T) {
 	s.Eng.SetPauseMeta(&until, "rain", engine.PauseMeta{Source: engine.PauseSourceAuto, RainInches: 0.4})
 
 	rr := doJSON(t, s, http.MethodPost, "/api/stations/front-south/run", map[string]any{"durationSec": 1})
-	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "resume before running") {
-		t.Fatalf("non-exempt %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("manual while auto-paused %d %s", rr.Code, rr.Body.String())
 	}
+	if !s.Eng.IsPaused(time.Now()) {
+		t.Fatal("manual run cleared auto rain pause")
+	}
+	_ = s.Eng.Stop()
 	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("exempt %d %s", rr.Code, rr.Body.String())
@@ -101,8 +105,11 @@ func TestAutoRainPauseExemptStationRun(t *testing.T) {
 
 	s.Eng.SetPause(&until, "rain")
 	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("manual exempt %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("manual pause run %d %s", rr.Code, rr.Body.String())
+	}
+	if !s.Eng.IsPaused(time.Now()) {
+		t.Fatal("manual run cleared manual pause")
 	}
 }
 

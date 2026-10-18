@@ -160,6 +160,7 @@ typedef struct {
 
 typedef struct {
     char id[ZK_ID_MAX];
+    char name[ZK_NOTE_MAX]; /* display name; notes are never stored */
     char note[ZK_NOTE_MAX];
     int enabled;
     unsigned weekdays; /* bitmask; 0 = every day */

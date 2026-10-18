@@ -40,6 +40,13 @@ void zk_fmt_relative_day(zk_wall_t at, zk_wall_t now, char *out, size_t cap);
 void zk_fmt_fire_when(const zk_kiosk_fire_t *fire, zk_wall_t now, char *out, size_t cap);
 void zk_fmt_name_upper(const char *name, char *out, size_t cap);
 
+/* "NEXT RUN · " plus the display name, uppercased to match the header.
+ * The prefix is kept whole. Only the name is end-cut, with U+2026, so the
+ * line fits in max_px. width_px NULL or max_px < 1 copies the full line.
+ * The time line is not passed through this function. */
+void zk_fmt_next_run_kicker(const char *name, char *out, size_t cap, int max_px,
+                            int (*width_px)(const char *text, size_t nbytes, void *user), void *user);
+
 const zk_kiosk_station_t *zk_kiosk_station(const zk_kiosk_t *k, const char *id);
 int zk_kiosk_station_index(const zk_kiosk_t *k, const char *id);
 

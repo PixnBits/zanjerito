@@ -79,6 +79,8 @@ func mountUI(mux *http.ServeMux) {
 	h := http.FileServer(http.FS(sub))
 	mux.Handle("GET /{$}", h)
 	mux.Handle("GET /index.html", h)
+	mux.Handle("GET /Literata-SemiBold.woff2", h)
+	mux.Handle("GET /OFL-Literata.txt", h)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -477,13 +479,7 @@ func (s *Server) handleStationRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, fmt.Errorf("station %s not found", id))
 		return
 	}
-	if s.Eng.IsPaused(time.Now()) {
-		d := s.Eng.PauseDetail(time.Now())
-		if !(d.AutoRain() && s.Eng.StationRainExempt(id)) {
-			writeErr(w, http.StatusConflict, fmt.Errorf("%w: pause for rain — resume before running a station", engine.ErrPaused))
-			return
-		}
-	}
+	// Manual runs are allowed while paused. The pause and its end time stay.
 	st := s.Eng.Status()
 	if st.Phase != engine.PhaseIdle && !body.Preempt {
 		writeErr(w, http.StatusConflict, fmt.Errorf("%w: already watering", engine.ErrBusy))
@@ -594,6 +590,10 @@ func (s *Server) handleSchedulePut(w http.ResponseWriter, r *http.Request) {
 	sch.ID = r.PathValue("id")
 	if sch.ID == "" {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("schedule id required"))
+		return
+	}
+	if err := sch.ValidateName(); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	f, err := s.load()

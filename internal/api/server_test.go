@@ -322,10 +322,22 @@ func TestPauseTimedIndefiniteResumeAndStatus(t *testing.T) {
 		t.Fatalf("reason %v", st["reason"])
 	}
 
+	untilBefore, _ := st["paused_until"].(string)
 	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
-	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "paused") {
-		t.Fatalf("manual run while paused want 409, got %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("manual run while paused want 202, got %d %s", rr.Code, rr.Body.String())
 	}
+	rr = doJSON(t, s, http.MethodGet, "/api/status", nil)
+	if err := json.Unmarshal(rr.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st["paused"] != true {
+		t.Fatal("manual run cleared pause")
+	}
+	if st["paused_until"] != untilBefore {
+		t.Fatalf("paused_until changed %v → %v", untilBefore, st["paused_until"])
+	}
+	_ = s.Eng.Stop()
 
 	rr = doJSON(t, s, http.MethodDelete, "/api/pause", nil)
 	if rr.Code != 200 {

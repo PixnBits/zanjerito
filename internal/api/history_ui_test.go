@@ -14,12 +14,12 @@ func TestUIHistoryHooks(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, need := range []string{
-		"Recent runs", "See all", "page-history", "loadHistory",
+		"Recent runs", "Show older runs", "page-history", "loadHistory",
 		"historyLoaded", "historyInFlight", "No runs yet.",
 		"Refused (lockout mode)", "under a minute",
 		"AbortController", "setTimeout(() => ac.abort(), 5000)",
 		"if (sec <= 0) continue",
-		"Stopped after under a minute",
+		"stopped early · under a minute",
 	} {
 		if !strings.Contains(body, need) {
 			t.Fatalf("ui missing %q", need)

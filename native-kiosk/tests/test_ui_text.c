@@ -257,12 +257,56 @@ static void test_home_long(void)
         char id[32];
         char full[128];
         const zk_ui_label_box_t *t;
+        const zk_ui_label_box_t *st;
         snprintf(id, sizeof id, "tile_title%d", i);
         make_title(full, i + 1);
         t = find_box(b, n, id);
         TCHECK(t != NULL, "missing %s", id);
         if (t) {
             TCHECK(prefix_ellipsis(t->text, full), "%s text %s", id, t->text);
+        }
+        snprintf(id, sizeof id, "tile_state%d", i);
+        st = find_box(b, n, id);
+        TCHECK(st != NULL, "missing %s", id);
+        if (st) {
+            TEQ_S(st->text, "Off");
+        }
+    }
+}
+
+static void test_home_onoff(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int i;
+    const zk_ui_label_box_t *kicker;
+    const zk_ui_label_box_t *big;
+    const char *full = "NEXT RUN \xC2\xB7 MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
+    TCHECK(load_fix("home-onoff", ZK_SCREEN_HOME) == 0, "load home-onoff");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    check_geometry(b, n, "home-onoff");
+    kicker = find_box(b, n, "hdr_kicker");
+    big = find_box(b, n, "hdr_big");
+    TCHECK(kicker && big, "onoff header");
+    if (kicker) {
+        TCHECK(strncmp(kicker->text, "NEXT RUN \xC2\xB7 ", 12) == 0, "prefix %s", kicker->text);
+        TCHECK(prefix_ellipsis(kicker->text, full), "name not end-cut: %s", kicker->text);
+    }
+    if (big) {
+        TEQ_S(big->text, "Today 8:23 AM");
+        TCHECK(!ends_ellipsis(big->text), "time ellipsized");
+    }
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        const zk_ui_label_box_t *st;
+        snprintf(id, sizeof id, "tile_state%d", i);
+        st = find_box(b, n, id);
+        TCHECK(st != NULL, "missing %s", id);
+        if (st) {
+            TEQ_S(st->text, i == 0 ? "On" : "Off");
         }
     }
 }
@@ -379,6 +423,7 @@ int main(void)
     test_paused_short();
     test_paused_long();
     test_home_long();
+    test_home_onoff();
     test_running_long();
     test_station_sheet_and_needs_update();
     zk_data_stop();

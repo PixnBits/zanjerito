@@ -11,8 +11,8 @@ import (
 // The embedded UI uses the same 400-day window.
 const nextRunHorizon = 400
 
-// NextRunInfo is one scheduled fire. Name is the schedule note, or the id
-// when the note is blank (same as programName). EndsAt is At plus TotalMin.
+// NextRunInfo is one scheduled fire. Name is the display name (Name, else
+// the legacy note, else the id). EndsAt is At plus TotalMin.
 type NextRunInfo struct {
 	ScheduleID string
 	Name       string

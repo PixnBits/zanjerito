@@ -67,6 +67,7 @@ typedef struct {
     lv_obj_t *tile_pct[8];
     lv_obj_t *tile_fill[8];
     lv_obj_t *tile_pill[8];
+    lv_obj_t *tile_state[8];
     int tile_bar_w[8];
     int n_tiles;
     lv_obj_t *run_title;
@@ -310,6 +311,34 @@ static void set_lab_fit(lv_obj_t *lb, const char *text)
     set_lab_fit_px(lb, text, w);
 }
 
+/* Header kicker: "NEXT RUN · " stays whole. Only the name is end-cut. */
+static void set_next_kicker(const char *name)
+{
+    char buf[ZK_NOTE_MAX + 32];
+    fit_ctx_t u;
+    const lv_font_t *font;
+    int max_px;
+    if (!g_w.hdr_kicker) {
+        return;
+    }
+    font = lv_obj_get_style_text_font(g_w.hdr_kicker, LV_PART_MAIN);
+    u.font = font;
+    u.letter_space = lv_obj_get_style_text_letter_space(g_w.hdr_kicker, LV_PART_MAIN);
+    max_px = slot_px(g_w.hdr_kicker);
+    zk_fmt_next_run_kicker(name, buf, sizeof buf, max_px, (font && max_px > 0) ? fit_width_cb : NULL, &u);
+    set_lab(g_w.hdr_kicker, buf);
+    lv_label_set_long_mode(g_w.hdr_kicker, LV_LABEL_LONG_CLIP);
+}
+
+/* Time line is stored whole. A narrow slot may clip pixels; it must not ellipsize. */
+static void set_time_line(lv_obj_t *lb, const char *text)
+{
+    set_lab(lb, text);
+    if (lb) {
+        lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
+    }
+}
+
 static lv_obj_t *box_at(lv_obj_t *parent, int x, int y, int w, int h, uint32_t bg, int radius)
 {
     lv_obj_t *o = lv_obj_create(parent);
@@ -529,7 +558,10 @@ static const char *station_title(const zk_snapshot_t *s, const char *id)
 static void name_upper(const zk_schedule_t *sch, char *out, size_t cap)
 {
     char tmp[ZK_NOTE_MAX];
-    zk_str_trim_copy(tmp, sizeof tmp, sch->note);
+    zk_str_trim_copy(tmp, sizeof tmp, sch->name);
+    if (!tmp[0]) {
+        zk_str_trim_copy(tmp, sizeof tmp, sch->note);
+    }
     if (!tmp[0]) {
         zk_str_trim_copy(tmp, sizeof tmp, sch->id);
     }
@@ -930,9 +962,32 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
         int soil = (k->soil_mask & (1 << i)) != 0;
         lv_obj_t *tile = target(scr, tr, ZK_TARGET_TILE0 + i, COL_CARD, 22, 1);
         int title_y = soil ? 10 : (tr.h - 36) / 2;
-        mark_lab_n("tile_title", i, 1);
-        g_w.tile_title[i] = lab(tile, "", &zk_font_xb_32, COL_INK, 14, title_y);
-        lab_width(g_w.tile_title[i], tr.w - 28, LV_TEXT_ALIGN_LEFT);
+        {
+            /* Small On/Off pill on the right. Title stops short of it. */
+            int pill_w = (tr.w < 170) ? 56 : 64;
+            int pill_h = 32;
+            int pill_x = tr.w - 8 - pill_w;
+            int pill_y = soil ? 6 : title_y + (33 - pill_h) / 2;
+            int title_w;
+            if (pill_x < 36) {
+                pill_x = 36;
+            }
+            if (pill_y < 4) {
+                pill_y = 4;
+            }
+            title_w = pill_x - 8 - 14;
+            if (title_w < 24) {
+                title_w = 24;
+            }
+            mark_lab_n("tile_title", i, 1);
+            g_w.tile_title[i] = lab(tile, "", &zk_font_xb_32, COL_INK, 14, title_y);
+            lab_width(g_w.tile_title[i], title_w, LV_TEXT_ALIGN_LEFT);
+            g_w.tile_pill[i] = box_at(tile, pill_x, pill_y, pill_w, pill_h, COL_TRACK, 16);
+            mark_lab_n("tile_state", i, 1);
+            g_w.tile_state[i] = lab(g_w.tile_pill[i], "Off", &zk_font_b_26, COL_INK, 0, 2);
+            lab_width(g_w.tile_state[i], pill_w, LV_TEXT_ALIGN_CENTER);
+            lv_obj_set_height(g_w.tile_state[i], 27);
+        }
         if (!soil) {
             continue;
         }
@@ -961,12 +1016,6 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
             }
             g_w.tile_pct[i] = lab(tile, "", &zk_font_xb_44, COL_INK, tr.w - 12 - pct_w, bar_y + (bar_h - 45) / 2);
             lab_width(g_w.tile_pct[i], pct_w, LV_TEXT_ALIGN_RIGHT);
-            g_w.tile_pill[i] = box_at(tile, tr.w - 14 - 132, 8, 132, 32, COL_TEAL, 16);
-            {
-                lv_obj_t *pl = lab(g_w.tile_pill[i], "WATERING", &zk_font_b_26, COL_WHITE, 0, 2);
-                lab_width(pl, 132, LV_TEXT_ALIGN_CENTER);
-            }
-            lv_obj_add_flag(g_w.tile_pill[i], LV_OBJ_FLAG_HIDDEN);
             (void)s;
         }
     }
@@ -1436,19 +1485,15 @@ static void apply_content(const zk_snapshot_t *s)
 
     if (g_key.content == ZK_SCREEN_HOME) {
         if (!s->have_kiosk) {
-            snprintf(a, sizeof a, "NEXT RUN " MIDDOT " --");
-            set_lab_fit(g_w.hdr_kicker, a);
-            set_lab_fit(g_w.hdr_big, "Connecting" ELLIPSIS);
+            set_next_kicker("--");
+            set_time_line(g_w.hdr_big, "Connecting" ELLIPSIS);
         } else if (!s->kiosk.has_next_run) {
-            snprintf(a, sizeof a, "NEXT RUN " MIDDOT " --");
-            set_lab_fit(g_w.hdr_kicker, a);
-            set_lab_fit(g_w.hdr_big, "--");
+            set_next_kicker("--");
+            set_time_line(g_w.hdr_big, "--");
         } else {
-            zk_fmt_name_upper(s->kiosk.next_run.name, c, sizeof c);
-            snprintf(a, sizeof a, "NEXT RUN " MIDDOT " %s", c[0] ? c : "--");
-            set_lab_fit(g_w.hdr_kicker, a);
+            set_next_kicker(s->kiosk.next_run.name);
             zk_fmt_fire_when(&s->kiosk.next_run, s->wall, b, sizeof b);
-            set_lab_fit(g_w.hdr_big, b[0] ? b : "--");
+            set_time_line(g_w.hdr_big, b[0] ? b : "--");
         }
         if (g_w.fault_lbl) {
             const char *err = (s->have_kiosk && s->kiosk.last_error[0]) ? s->kiosk.last_error : "check controller";
@@ -1484,13 +1529,20 @@ static void apply_content(const zk_snapshot_t *s)
                     lv_obj_set_style_bg_color(g_w.tile_fill[i], hex(low ? COL_LOW : COL_FILL), 0);
                 }
             }
-            if (g_w.tile_pill[i]) {
+            if (g_w.tile_pill[i] && g_w.tile_state[i]) {
                 int on = stn->on || strcmp(stn->state, "running") == 0;
-                if (on) {
-                    lv_obj_remove_flag(g_w.tile_pill[i], LV_OBJ_FLAG_HIDDEN);
-                } else {
-                    lv_obj_add_flag(g_w.tile_pill[i], LV_OBJ_FLAG_HIDDEN);
+                int j;
+                if (!on && s->kiosk.current_station[0] && strcmp(s->kiosk.current_station, stn->id) == 0) {
+                    on = 1;
                 }
+                for (j = 0; !on && j < s->kiosk.n_on; j++) {
+                    if (strcmp(s->kiosk.stations_on[j], stn->id) == 0) {
+                        on = 1;
+                    }
+                }
+                lv_obj_set_style_bg_color(g_w.tile_pill[i], hex(on ? COL_TEAL : COL_TRACK), 0);
+                lv_obj_set_style_text_color(g_w.tile_state[i], hex(on ? COL_WHITE : COL_INK), 0);
+                set_lab(g_w.tile_state[i], on ? "On" : "Off");
             }
         }
     } else if (g_key.content == ZK_SCREEN_RUNNING) {

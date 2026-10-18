@@ -223,6 +223,22 @@ static void test_show_bars_false(void)
     TEQ_I(zk_station_soil_percent(&k, 0), -1);
 }
 
+static void test_schedule_name_ignores_notes(void)
+{
+    zk_schedules_t sch;
+    const char *json =
+        "{\"schedules\":[{\"id\":\"lawn\",\"name\":\"Lawn \\u00b7 Morning\",\"note\":\"legacy note\","
+        "\"notes\":\"SECRET-NOTES\",\"enabled\":true,\"start\":\"06:10\",\"weekdays\":[\"mon\"]}]}";
+    TEQ_I(zk_parse_schedules(json, &sch), ZK_OK);
+    TEQ_I(sch.n, 1);
+    TEQ_S(sch.items[0].name, "Lawn \xC2\xB7 Morning");
+    TEQ_S(sch.items[0].note, "legacy note");
+    TCHECK(strstr(sch.items[0].name, "SECRET") == NULL, "notes leaked into name");
+    TCHECK(strstr(sch.items[0].note, "SECRET") == NULL, "notes leaked into note");
+    TEQ_I(zk_parse_schedules("{\"schedules\":[{\"id\":\"\",\"note\":\"\",\"name\":\"\",\"notes\":\"SECRET-NOTES\"}]}", &sch), ZK_OK);
+    TEQ_I(sch.n, 0);
+}
+
 static void test_garbage(void)
 {
     zk_kiosk_t k;
@@ -377,6 +393,7 @@ int main(void)
     test_full_and_nulls();
     test_show_vs_totals();
     test_show_bars_false();
+    test_schedule_name_ignores_notes();
     test_garbage();
     test_defaults();
     test_huge();
