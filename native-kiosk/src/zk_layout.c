@@ -30,7 +30,8 @@
 #define HOLD_H      114
 #define SCHED_HDR_H 72
 #define SCHED_ROW_H 50
-#define SCHED_BTN_W 120
+/* Wide enough for "Schedules" at 26 px with 12 px of label inset on each side. */
+#define SCHED_BTN_W 134
 #define SCHED_BTN_H 108
 
 #define MODAL_W     620

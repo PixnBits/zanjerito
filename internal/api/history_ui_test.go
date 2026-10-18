@@ -18,7 +18,8 @@ func TestUIHistoryHooks(t *testing.T) {
 		"historyLoaded", "historyInFlight", "No runs yet.",
 		"Refused (lockout mode)", "under a minute",
 		"AbortController", "setTimeout(() => ac.abort(), 5000)",
-		"if (sec <= 0) continue",
+		"historyDetailText",
+		"No stations ran · paused for rain",
 		"stopped early · under a minute",
 	} {
 		if !strings.Contains(body, need) {

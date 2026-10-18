@@ -50,7 +50,7 @@
     .hidden, [hidden] { display: none !important; }
     body {
       margin: 0 auto; max-width: 480px;
-      padding: 12px 16px var(--bar-space);
+      padding: max(12px, env(safe-area-inset-top, 0px)) 16px var(--bar-space);
       font-family: var(--sans); font-size: 16px; color: var(--text);
       background: var(--sand);
     }
@@ -70,7 +70,7 @@
     }
     .eyebrow { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
     .eyebrow .ico { width: 16px; height: 16px; }
-    .status.is-next .eyebrow { color: var(--terracotta); }
+    .status.is-next .eyebrow { color: var(--terra-ink); }
     .status.is-water .eyebrow { color: var(--teal); }
     .status.is-empty .eyebrow { color: var(--label); }
     .status {
@@ -84,7 +84,8 @@
     .status.is-paused .phase, .status.is-paused .hero-body, .status.is-paused .eyebrow { color: var(--plum-ink); }
     .hero-copy { position: relative; z-index: 2; max-width: 78%; }
     .phase {
-      font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.15;
+      font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.2;
+      padding-bottom: .08em;
       max-width: 262px; margin: 0;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
@@ -116,7 +117,7 @@
     .btn-outline svg { width: 18px; height: 18px; }
     .text-link {
       display: inline-flex; align-items: center; margin-top: 8px; padding: 8px 0;
-      background: none; border: 0; color: var(--terracotta); font-size: 16px;
+      background: none; border: 0; color: var(--terra-ink); font-size: 16px;
     }
     .desert-art {
       position: absolute; right: -4px; top: -2px; width: 170px; height: 190px;
@@ -145,12 +146,12 @@
     .station-tile .tile-icon svg { width: 26px; height: 26px; }
     .station-tile .tile-name { font-family: var(--serif); font-size: 18px; font-weight: 600; line-height: 1.15; }
     .station-tile .tile-pill {
-      justify-self: start; font-size: 14px; font-weight: 600; line-height: 1;
-      padding: 4px 10px; border-radius: 999px; background: var(--sand-deep); color: var(--ink);
+      justify-self: start; font-size: 14px; font-weight: 500; line-height: 1;
+      padding: 5px 12px; border-radius: 999px; background: var(--sand-deep); color: var(--muted);
     }
     .station-tile.on { background: var(--teal-tile); border-color: #8FBFB5; }
     .station-tile.on .tile-icon { background: var(--teal-soft); color: var(--teal-ink); }
-    .station-tile.on .tile-pill { background: var(--teal); color: #fff; }
+    .station-tile.on .tile-pill { background: var(--teal-soft); color: var(--teal-ink); font-weight: 600; }
     .history-card {
       background: var(--cream); border-radius: 20px; padding: 0;
       border: 1px solid var(--cream-edge); box-shadow: 0 2px 10px rgba(110, 70, 25, .09);
@@ -262,8 +263,12 @@
       width: min(480px, 100%); bottom: var(--bar-space); z-index: 45;
       max-height: calc(100% - var(--bar-space) - 12px); overflow: auto;
       background: var(--cream); color: var(--text);
-      border-radius: 24px 24px 0 0; padding: 12px 20px 20px;
+      border-radius: 24px 24px 0 0; padding: 8px 20px 20px;
       box-shadow: 0 -8px 24px rgba(58, 42, 31, .12);
+    }
+    .grab {
+      width: 40px; height: 4px; border-radius: 2px; background: var(--line);
+      margin: 4px auto 6px;
     }
     .sheet-x {
       position: absolute; top: 8px; right: 8px; width: 48px; height: 48px;
@@ -276,22 +281,44 @@
     }
     .sheet .eyebrow { margin-bottom: 4px; }
     .chip-status {
-      display: inline-flex; align-items: center; min-height: 32px; padding: 4px 12px;
+      display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 6px 12px;
       border-radius: 999px; background: var(--sand-deep); font-size: 14px; font-weight: 600;
     }
+    .chip-status.ok { background: var(--teal-soft); color: var(--teal-ink); }
+    .chip-status.ok svg { width: 16px; height: 16px; flex: 0 0 auto; }
     .chip-status.bad { color: #A8432A; background: #F8E0D2; }
     .sheet-block { margin-top: 16px; }
-    .sheet-row, .time-row {
+    .sheet-row {
+      display: flex; align-items: center; gap: 12px;
+      min-height: 44px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 15px;
+    }
+    .sheet-row:first-child { border-top: 0; }
+    .sheet-disc {
+      width: 32px; height: 32px; border-radius: 50%; flex: 0 0 32px;
+      display: grid; place-items: center; background: var(--sand-deep); color: var(--ink);
+    }
+    .sheet-disc svg { width: 18px; height: 18px; }
+    .sheet-st { flex: 1 1 auto; min-width: 0; }
+    .sheet-min { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .time-row {
       display: flex; justify-content: space-between; gap: 12px;
       padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px;
     }
     .time-row span:last-child { text-align: right; }
-    .sheet-notes { font-size: 15px; white-space: pre-wrap; margin: 6px 0 0; }
+    .sheet-notes {
+      font-size: 15px; white-space: pre-wrap; margin: 8px 0 0;
+      background: var(--sand); border-radius: 12px; padding: 10px 12px;
+    }
     .sheet-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 18px; }
     .sheet-actions .text-btn { min-width: 85px; min-height: 52px; font-size: 16px; }
     .sheet-actions .go { min-width: 155px; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
     #sched-dlg { padding-bottom: 24px; }
-    .editor-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .editor-bar {
+      position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      margin: 0 -16px 8px; padding: 4px 16px 8px;
+      background: var(--sand); box-shadow: 0 1px 0 var(--line);
+    }
     .editor-bar button { min-height: 48px; padding: 8px 12px; }
     #ed-save { min-width: 72px; }
     .editor-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -301,19 +328,29 @@
     .label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 20px; }
     .label-row .field-label { margin: 0 0 10px; }
     #ed-name-count { font-size: 14px; font-weight: 600; color: var(--muted); white-space: nowrap; margin: 0 0 10px; }
-    #ed-name-count.hot { color: var(--terracotta); }
-    input.hot { border-color: var(--terracotta); }
+    #ed-name-count.hot { color: var(--terra-ink); }
+    input.hot, #ed-name[aria-invalid="true"] { border-color: var(--terra-ink); }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+      outline: 0; border-color: #2A7A74; box-shadow: 0 0 0 3px #D7ECE7;
+    }
+    #ed-name.hot:focus-visible, #ed-name[aria-invalid="true"]:focus-visible {
+      border-color: var(--terra-ink); box-shadow: 0 0 0 3px #D7ECE7;
+    }
     .field-error { font-size: 14px; font-weight: 600; color: var(--error); margin: 6px 0 0; }
     .time-pill {
+      position: relative;
       display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%;
       height: 52px; margin-top: 0; padding: 0 16px; border-radius: 12px;
       background: var(--cream); border: 1.5px solid var(--cream-edge); color: var(--text);
     }
+    .time-pill:focus-within { outline: 0; border-color: #2A7A74; box-shadow: 0 0 0 3px #D7ECE7; }
     .time-pill svg { width: 20px; height: 20px; flex: 0 0 auto; }
+    .time-face { font-size: 17px; font-weight: 600; line-height: 1.2; pointer-events: none; min-width: 5.5em; }
     .time-pill input[type="time"] {
-      width: auto; min-width: 120px; height: 48px; min-height: 48px;
-      border: 0; background: transparent; padding: 0; font-size: 17px; font-weight: 600;
+      position: absolute; left: 0; top: 0; width: 100%; height: 100%; min-width: 48px; min-height: 48px;
+      margin: 0; opacity: 0; cursor: pointer; border: 0; background: transparent; padding: 0;
     }
+    .time-pill input[type="time"]:focus-visible { outline: 0; box-shadow: none; border: 0; }
     .time-pill input[type="time"]::-webkit-calendar-picker-indicator { display: none; }
     input[type="text"], input[type="time"], input[type="date"], textarea, select {
       width: 100%; min-height: 48px; border-radius: 12px; border: 1.5px solid var(--line);
@@ -332,16 +369,53 @@
       padding: 0 12px; margin-top: 6px;
     }
     #ed-steps:empty { display: none; }
+    #ed-steps { padding: 0 10px; }
     .step-row {
-      display: flex; align-items: center; gap: 10px; min-height: 56px; margin: 0;
-      border-top: 1px solid var(--line);
+      display: flex; align-items: center; gap: 6px; min-height: 60px; margin: 0;
+      border-top: 1px solid var(--line); flex-wrap: nowrap;
     }
     .step-row:first-child { border-top: 0; }
-    .step-name { flex: 1 1 auto; min-width: 0; font-size: 16px; }
-    .step-row .stepper { flex: 0 0 auto; }
-    #ed-steps .stepper button { background: var(--sand); border-color: var(--cream-edge); color: var(--ink); }
-    .step-mins, .stepper span { min-width: 64px; width: 64px; text-align: center; font-size: 16px; font-weight: 600; }
-    #ed-add-step { min-width: 48px; margin-top: 8px; }
+    .st-pick {
+      flex: 1 1 138px; min-width: 132px; height: 48px; min-height: 48px;
+      display: flex; align-items: center; justify-content: space-between; gap: 4px;
+      padding: 0 8px 0 12px; border-radius: 12px; border: 1.5px solid var(--cream-edge);
+      background: var(--cream); color: var(--text); font-size: 16px; font-weight: 600; text-align: left;
+    }
+    .st-pick .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .st-pick .chev { flex: 0 0 auto; color: var(--muted); font-size: 16px; }
+    .step-row [data-minus], .step-row [data-plus], .step-row [data-rm] {
+      flex: 0 0 48px; width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0;
+      border-radius: 12px; border: 1.5px solid var(--cream-edge); background: var(--sand);
+      color: var(--ink); font-size: 22px; line-height: 1;
+    }
+    .step-row [data-minus]:disabled, .step-row [data-minus].lo { opacity: .4; }
+    .step-row [data-rm] { background: transparent; border-color: transparent; color: var(--muted); }
+    .step-mins { flex: 0 0 auto; min-width: 52px; text-align: center; font-size: 16px; font-weight: 600; }
+    .stepper span { min-width: 64px; width: 64px; text-align: center; font-size: 16px; font-weight: 600; }
+    #ed-add-step { min-width: 48px; min-height: 48px; margin-top: 6px; color: var(--terra-ink); font-weight: 600; }
+    #ed-add-step:disabled { color: var(--muted); }
+    .plist { margin-top: 6px; }
+    .prow {
+      display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px;
+      padding: 4px 4px; border: 0; border-top: 1px solid var(--line);
+      background: transparent; text-align: left; color: var(--text); cursor: pointer;
+    }
+    .prow:first-child { border-top: 0; }
+    .prow:disabled { opacity: 1; cursor: default; }
+    .prow-disc {
+      width: 36px; height: 36px; border-radius: 50%; flex: 0 0 36px;
+      display: grid; place-items: center; background: var(--sand-deep); color: var(--ink);
+    }
+    .prow-disc svg { width: 22px; height: 22px; }
+    .prow-txt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .prow-name { font-size: 16px; font-weight: 600; }
+    .prow-sub { font-size: 14px; font-weight: 400; color: var(--muted); }
+    .prow.cur .prow-name { color: var(--teal-ink); }
+    .prow.cur .prow-disc { background: var(--teal-soft); color: var(--teal-ink); }
+    .prow.dis .prow-name { color: var(--muted); font-weight: 500; }
+    .prow.dis .prow-disc { opacity: .55; }
+    .prow-ck { color: var(--teal); display: flex; }
+    .prow-ck svg { width: 22px; height: 22px; }
     .season-modes { display: flex; flex-wrap: wrap; gap: 8px; }
     .season-modes button { min-height: 48px; padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream); font-size: 16px; font-weight: 600; }
     .season-modes button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
@@ -435,7 +509,6 @@
   </section>
   <section id="page-schedules" class="hidden" hidden>
     <h1 class="strip-label" style="margin-top:0">Schedules</h1>
-    <p class="page-note">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
     <button type="button" class="edit add-program" id="sched-new">+ Add program</button>
@@ -469,13 +542,15 @@
     <label class="field-label" for="ed-start">Start time</label>
     <label class="time-pill">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      <input id="ed-start" type="time" value="06:00">
+      <span class="time-face" id="ed-start-face">6:00 AM</span>
+      <input id="ed-start" type="time" value="06:00" aria-label="Start time">
     </label>
     <label class="field-label">Days</label>
     <div class="days" id="ed-days"></div>
     <label class="field-label">Stations</label>
     <div id="ed-steps"></div>
-    <button type="button" class="ghost" id="ed-add-step">Add station</button>
+    <button type="button" class="ghost" id="ed-add-step">+ Add station</button>
+    <p class="helper" id="ed-add-note" hidden>All stations added</p>
     <label class="field-label">Season</label>
     <div class="season-modes">
       <button type="button" id="ed-season-all" data-mode="all">All year</button>
@@ -564,6 +639,7 @@
   </dialog>
   <div id="sheet-scrim" class="sheet-scrim" hidden></div>
   <div id="run-sheet" class="sheet" hidden role="dialog" aria-labelledby="run-sheet-title">
+    <div class="grab" aria-hidden="true"></div>
     <button type="button" class="sheet-x" id="run-sheet-x" aria-label="Close">×</button>
     <div class="eyebrow">Run detail</div>
     <h2 id="run-sheet-title"></h2>
@@ -586,6 +662,7 @@
     <button type="button" class="text-link" id="run-sheet-edit">Edit in Schedules ›</button>
   </div>
   <div id="paused-run-sheet" class="sheet" hidden role="dialog" aria-labelledby="paused-run-title">
+    <div class="grab" aria-hidden="true"></div>
     <button type="button" class="sheet-x" id="paused-run-x" aria-label="Close">×</button>
     <div class="eyebrow">Paused for rain</div>
     <h2 id="paused-run-title"></h2>
@@ -598,8 +675,136 @@
       </button>
     </div>
   </div>
+  <div id="pick-sheet" class="sheet" hidden role="dialog" aria-labelledby="pick-sheet-title">
+    <div class="grab" aria-hidden="true"></div>
+    <button type="button" class="sheet-x" id="pick-sheet-x" aria-label="Close">×</button>
+    <div class="eyebrow" id="pick-sheet-label">Row 1 · Station</div>
+    <h2 id="pick-sheet-title">Choose a station</h2>
+    <div id="pick-sheet-list" class="plist"></div>
+  </div>
   <script>
+    /* zan-pure:start */
     const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
+    function clampStepMinutes(minutes) {
+      let n = Number(minutes);
+      if (!Number.isFinite(n)) n = 1;
+      n = Math.round(n);
+      if (n < 1) n = 1;
+      if (n > 180) n = 180;
+      return n;
+    }
+    function stepMinutes(minutes, delta) {
+      const cur = clampStepMinutes(minutes);
+      if (delta < 0 && cur <= 1) return { minutes: 1, removed: false };
+      let next = cur + Number(delta || 0);
+      if (!Number.isFinite(next) || next < 1) next = 1;
+      if (next > 180) next = 180;
+      return { minutes: next, removed: false };
+    }
+    function unusedStationIds(allIds, usedIds) {
+      const used = {};
+      (usedIds || []).forEach((id) => { if (id) used[id] = true; });
+      const out = [];
+      (allIds || []).forEach((id) => { if (id && !used[id]) out.push(id); });
+      return out;
+    }
+    function addStationRow(rows, allIds) {
+      const cur = rows || [];
+      const unused = unusedStationIds(allIds, cur.map((r) => r.station_id));
+      if (!unused.length) return { rows: cur.slice(), added: false };
+      return { rows: cur.concat([{ station_id: unused[0], minutes: 6 }]), added: true };
+    }
+    function stationsForPicker(all, rows, rowIndex) {
+      const used = {};
+      const list = rows || [];
+      for (let i = 0; i < list.length; i++) {
+        if (i === rowIndex) continue;
+        const id = list[i] && list[i].station_id;
+        if (id) used[id] = true;
+      }
+      const current = (list[rowIndex] && list[rowIndex].station_id) || "";
+      const out = [];
+      (all || []).forEach((item) => {
+        const id = (item && typeof item === "object") ? (item.id || "") : String(item || "");
+        const name = (item && typeof item === "object") ? (item.name || item.title || id) : id;
+        if (id && id === current) out.push({ id: id, name: name, state: "current", note: "Current" });
+        else if (id && used[id]) out.push({ id: id, name: name, state: "disabled", note: "In this program" });
+        else out.push({ id: id, name: name, state: "open", note: "" });
+      });
+      return out;
+    }
+    function weekDisplayOrder(firstDay) {
+      let fd = Number(firstDay);
+      if (!(fd >= 1 && fd <= 7)) fd = 7;
+      const start = (fd + 6) % 7;
+      const order = [];
+      for (let i = 0; i < 7; i++) order.push((start + i) % 7);
+      return order;
+    }
+    function canonicalWeekdays(selected) {
+      const set = {};
+      (selected || []).forEach((d) => { set[String(d || "").toLowerCase()] = true; });
+      const ordered = DAYS.filter((d) => set[d]);
+      if (ordered.length === DAYS.length) return [];
+      return ordered;
+    }
+    function formatStartLabel(hhmm) {
+      const m = String(hhmm || "").trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return "";
+      let h = Number(m[1]);
+      const min = m[2];
+      if (h > 23 || Number(min) > 59) return "";
+      const ap = h >= 12 ? "PM" : "AM";
+      let h12 = h % 12;
+      if (h12 === 0) h12 = 12;
+      return h12 + ":" + min + " " + ap;
+    }
+    function formatSeasonRange(starts, ends) {
+      const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      function one(iso) {
+        const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!m) return "";
+        const mo = Number(m[2]);
+        const day = Number(m[3]);
+        if (mo < 1 || mo > 12 || day < 1 || day > 31) return "";
+        return months[mo - 1] + " " + String(day);
+      }
+      const a = one(starts);
+      const b = one(ends);
+      const hasA = String(starts || "").trim() !== "";
+      const hasB = String(ends || "").trim() !== "";
+      if (!hasA && !hasB) return "All year";
+      if (a && b) return a + "\u2013" + b;
+      if (a) return a + "\u2013\u2026";
+      if (b) return "\u2026\u2013" + b;
+      return "All year";
+    }
+    function formatRunMins(sec) {
+      sec = Number(sec) || 0;
+      if (sec > 0 && sec < 60) return "<1 min";
+      const m = Math.round(sec / 60);
+      if (m === 1) return "1 min";
+      return m + " min";
+    }
+    function historyDetailText(outcome, reason, stations) {
+      const list = stations || [];
+      if (!list.length) return "";
+      if (outcome === "skipped") {
+        const why = String(reason || "").trim();
+        if (why.toLowerCase() === "rain") return "No stations ran · paused for rain";
+        return "No stations ran · " + (why || "paused");
+      }
+      const parts = [];
+      for (let i = 0; i < list.length; i++) {
+        const s = list[i] || {};
+        const name = s.name || s.station_id || "Station";
+        let shown = Number(s.sec);
+        if (!Number.isFinite(shown)) shown = 0;
+        parts.push(name + " " + formatRunMins(shown));
+      }
+      return parts.join(" · ");
+    }
+    /* zan-pure:end */
     const DAY_LETTER = ["M","T","W","T","F","S","S"];
     const DAY_NAME = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
     const TZ = "America/Phoenix";
@@ -789,8 +994,20 @@
       return true;
     }
     function seasonLabel(sch) {
-      if (sch.starts_on || sch.ends_on) return `${sch.starts_on || "…"}–${sch.ends_on || "…"}`;
-      return "All year";
+      return formatSeasonRange(sch && sch.starts_on, sch && sch.ends_on);
+    }
+    function weekFirstDay() {
+      try {
+        const fd = new Intl.Locale(navigator.language).getWeekInfo?.().firstDay ?? 7;
+        if (fd >= 1 && fd <= 7) return fd;
+      } catch (e) {}
+      return 7;
+    }
+    function syncStartFace() {
+      const el = $("ed-start");
+      const face = $("ed-start-face");
+      if (!el || !face) return;
+      face.textContent = formatStartLabel(el.value || "06:00") || "6:00 AM";
     }
     function weekdayMatches(sch, wd) {
       const days = sch.weekdays || [];
@@ -906,7 +1123,7 @@
       const box = $("collide-warn");
       const pairs = collidePairs(state.schedules);
       if (!pairs.length) { box.classList.add("hidden"); box.textContent = ""; return; }
-      const bits = pairs.map(([a, b]) => `${programName(a)} and ${programName(b)} both at ${a.start}`);
+      const bits = pairs.map(([a, b]) => programName(a) + " and " + programName(b) + " both at " + (formatStartLabel(a.start) || a.start));
       box.textContent = "Soft warning: enabled programs share a start time on overlapping days — " +
         bits.join("; ") + ". Engine skips if already watering (D13). Save is still allowed.";
       box.classList.remove("hidden");
@@ -1248,64 +1465,137 @@
       while (ids.has(`${base}-${n}`)) n++;
       return `${base}-${n}`;
     }
-    function stationOptions(selected) {
-      return (state.stations || []).map((st) =>
-        `<option value="${esc(st.id)}" ${st.id === selected ? "selected" : ""}>${esc(shortStation(st.id))}</option>`
-      ).join("");
-    }
     function renderEdDays(selected) {
       const set = new Set((selected || []).map((d) => String(d).toLowerCase()));
       const allOn = set.size === 0;
-      $("ed-days").innerHTML = DAYS.map((d, i) =>
-        `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}" aria-label="${DAY_NAME[i]}">${DAY_LETTER[i]}</button>`
-      ).join("");
+      const order = weekDisplayOrder(weekFirstDay());
+      $("ed-days").innerHTML = order.map((i) => {
+        const d = DAYS[i];
+        return `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}" aria-label="${DAY_NAME[i]}">${DAY_LETTER[i]}</button>`;
+      }).join("");
       $("ed-days").querySelectorAll("[data-day]").forEach((b) => {
         b.addEventListener("click", () => b.classList.toggle("on"));
       });
     }
     function stepMinutesLabel(n) { return String(n) + " min"; }
-    function renderEdSteps(steps) {
+    function readStepRows() {
+      return [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
+        station_id: row.querySelector("[data-st]").value,
+        minutes: Number(row.querySelector("[data-min]").value) || 1,
+      }));
+    }
+    function updateAddStation() {
+      const rows = readStepRows();
+      const ids = (state.stations || []).map((st) => st.id).filter(Boolean);
+      const unused = unusedStationIds(ids, rows.map((r) => r.station_id));
+      const btn = $("ed-add-step");
+      const note = $("ed-add-note");
+      const full = ids.length > 0 && unused.length === 0;
+      if (btn) {
+        btn.disabled = full;
+        if (full) btn.setAttribute("aria-disabled", "true");
+        else btn.removeAttribute("aria-disabled");
+      }
+      if (note) setHidden(note, !full);
+    }
+    function renderEdSteps(steps, opt) {
       const box = $("ed-steps");
       box.innerHTML = "";
-      const list = (steps && steps.length) ? steps : [{ station_id: (state.stations[0] || {}).id || "", minutes: 6 }];
-      list.forEach((step) => {
+      const allowEmpty = !!(opt && opt.allowEmpty);
+      let list = (steps || []).map((s) => ({ station_id: s.station_id || "", minutes: s.minutes }));
+      if (!list.length && !allowEmpty) {
+        list = [{ station_id: (state.stations[0] || {}).id || "", minutes: 6 }];
+      }
+      list.forEach((step, idx) => {
         const row = document.createElement("div");
         row.className = "step-row";
-        const mins = Math.max(1, Math.min(180, Number(step.minutes) || 1));
+        const mins = clampStepMinutes(step.minutes);
         const sid = step.station_id || "";
-        row.innerHTML = `
-          <span class="step-name">${esc(shortStation(sid) || "Station")}</span>
-          <div class="stepper">
-            <button type="button" data-minus aria-label="Fewer minutes">−</button>
-            <span class="step-mins" data-min-label>${stepMinutesLabel(mins)}</span>
-            <input data-min type="hidden" value="${mins}">
-            <input data-st type="hidden" value="${esc(sid)}">
-            <button type="button" data-plus aria-label="More minutes">+</button>
-          </div>`;
+        const name = shortStation(sid) || "Station";
+        row.innerHTML =
+          `<button type="button" class="st-pick" data-st-pick aria-label="Station for row ${idx + 1}: ${esc(name)}">` +
+          `<span class="pn">${esc(name)}</span><span class="chev" aria-hidden="true">\u25BE</span></button>` +
+          `<button type="button" data-minus aria-label="Fewer minutes">\u2212</button>` +
+          `<span class="step-mins" data-min-label>${esc(stepMinutesLabel(mins))}</span>` +
+          `<input data-min type="hidden" value="${mins}">` +
+          `<input data-st type="hidden" value="${esc(sid)}">` +
+          `<button type="button" data-plus aria-label="More minutes">+</button>` +
+          `<button type="button" data-rm aria-label="Remove ${esc(name)} from this program">\u00D7</button>`;
+        const minus = row.querySelector("[data-minus]");
+        const applyMin = (n) => {
+          const held = clampStepMinutes(n);
+          row.querySelector("[data-min]").value = String(held);
+          row.querySelector("[data-min-label]").textContent = stepMinutesLabel(held);
+          const atMin = held <= 1;
+          minus.disabled = atMin;
+          minus.classList.toggle("lo", atMin);
+          if (atMin) minus.setAttribute("aria-disabled", "true");
+          else minus.removeAttribute("aria-disabled");
+        };
+        applyMin(mins);
         const sync = (delta) => {
           const input = row.querySelector("[data-min]");
-          let n = Number(input.value) || 1;
-          n = Math.max(0, Math.min(180, n + delta));
-          if (n < 1) {
-            row.remove();
-            updateEdCollide();
-            return;
-          }
-          input.value = String(n);
-          row.querySelector("[data-min-label]").textContent = stepMinutesLabel(n);
+          const next = stepMinutes(Number(input.value) || 1, delta);
+          applyMin(next.minutes);
           updateEdCollide();
         };
-        row.querySelector("[data-minus]").addEventListener("click", () => sync(-1));
+        minus.addEventListener("click", () => sync(-1));
         row.querySelector("[data-plus]").addEventListener("click", () => sync(1));
+        row.querySelector("[data-st-pick]").addEventListener("click", () => openPicker(idx));
+        row.querySelector("[data-rm]").addEventListener("click", () => {
+          const left = readStepRows().filter((_, i) => i !== idx);
+          renderEdSteps(left, { allowEmpty: true });
+          updateEdCollide();
+        });
         box.appendChild(row);
       });
+      updateAddStation();
+    }
+    function openPicker(rowIndex) {
+      const rows = readStepRows();
+      const all = (state.stations || []).map((st) => ({
+        id: st.id,
+        name: shortStation(st.id) || st.title || st.id,
+      }));
+      const items = stationsForPicker(all, rows, rowIndex);
+      const label = $("pick-sheet-label");
+      if (label) label.textContent = "Row " + (rowIndex + 1) + " · Station";
+      const list = $("pick-sheet-list");
+      list.innerHTML = "";
+      items.forEach((item) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "prow" + (item.state === "current" ? " cur" : "") + (item.state === "disabled" ? " dis" : "");
+        if (item.state === "disabled") {
+          b.disabled = true;
+          b.setAttribute("aria-disabled", "true");
+        }
+        const st = (state.stations || []).find((s) => s.id === item.id) || { id: item.id, title: item.name };
+        const icon = ICONS[stationIconKey(st, false)] || ICONS.default;
+        const sub = item.note ? `<span class="prow-sub">${esc(item.note)}</span>` : "";
+        const ck = item.state === "current" ? `<span class="prow-ck" aria-hidden="true">${CHECK_SVG}</span>` : `<span class="prow-ck"></span>`;
+        b.innerHTML =
+          `<span class="prow-disc" aria-hidden="true">${icon}</span>` +
+          `<span class="prow-txt"><span class="prow-name">${esc(item.name)}</span>${sub}</span>` +
+          ck;
+        b.addEventListener("click", () => {
+          if (item.state === "disabled") return;
+          const fresh = readStepRows();
+          if (!fresh[rowIndex]) return;
+          fresh[rowIndex] = { station_id: item.id, minutes: fresh[rowIndex].minutes };
+          renderEdSteps(fresh);
+          closeSheets();
+        });
+        list.appendChild(b);
+      });
+      showSheet("pick-sheet");
     }
     function editorSeasonText() {
       if (!$("ed-season-between").classList.contains("on")) return "All year";
       const a = $("ed-starts-on").value;
       const b = $("ed-ends-on").value;
       if (!a && !b) return "Between dates";
-      return (a || "…") + "–" + (b || "…");
+      return formatSeasonRange(a, b);
     }
     function setSeasonMode(mode) {
       const between = mode === "between";
@@ -1355,6 +1645,7 @@
       $("ed-name").removeAttribute("aria-invalid");
       $("ed-notes").value = src.notes || "";
       $("ed-start").value = src.start || "06:00";
+      syncStartFace();
       $("ed-enabled").checked = src.enabled !== false;
       renderEdDays(src.weekdays || []);
       const seasonal = !!(src.starts_on || src.ends_on);
@@ -1375,8 +1666,7 @@
       showSchedules();
     }
     function readEditorDraft() {
-      let weekdays = [...$("ed-days").querySelectorAll("[data-day].on")].map((b) => b.dataset.day);
-      if (weekdays.length === DAYS.length) weekdays = [];
+      let weekdays = canonicalWeekdays([...$("ed-days").querySelectorAll("[data-day].on")].map((b) => b.dataset.day));
       const between = $("ed-season-between").classList.contains("on");
       const steps = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
         station_id: row.querySelector("[data-st]").value,
@@ -1522,6 +1812,7 @@
     function showSheet(id) {
       $("run-sheet").hidden = true;
       $("paused-run-sheet").hidden = true;
+      $("pick-sheet").hidden = true;
       $("sheet-scrim").hidden = false;
       $(id).hidden = false;
     }
@@ -1529,6 +1820,7 @@
       $("sheet-scrim").hidden = true;
       $("run-sheet").hidden = true;
       $("paused-run-sheet").hidden = true;
+      $("pick-sheet").hidden = true;
     }
     function historyTZ() { return (state.status && state.status.timezone) || TZ; }
     function tzParts(d) {
@@ -1591,13 +1883,6 @@
       if (ymd === today) return time;
       const map = tzParts(d);
       return `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}, ${time}`.trim();
-    }
-    function formatRunMins(sec) {
-      sec = Number(sec) || 0;
-      if (sec > 0 && sec < 60) return "<1 min";
-      const m = Math.round(sec / 60);
-      if (m === 1) return "1 min";
-      return `${m} min`;
     }
     function statusDuration(sec) {
       sec = Number(sec) || 0;
@@ -1708,14 +1993,11 @@
     }
     function historyDetail(entry) {
       const skipped = entry.outcome === "skipped";
-      const parts = [];
-      for (const s of entry.stations || []) {
-        const sec = skipped ? (Number(s.planned_sec) || 0) : (Number(s.actual_sec) || 0);
-        if (sec <= 0) continue;
-        const name = shortStation(s.station_id) || s.station_id || "Station";
-        parts.push(`${name} ${formatRunMins(sec)}${skipped ? " planned" : ""}`);
-      }
-      return parts.join(" · ");
+      const stations = (entry.stations || []).map((s) => ({
+        name: shortStation(s.station_id) || s.station_id || "Station",
+        sec: skipped ? (Number(s.planned_sec) || 0) : (Number(s.actual_sec) || 0),
+      }));
+      return historyDetailText(entry.outcome, entry.reason, stations);
     }
     function historyItemHTML(entry, idx) {
       const st = historyStatus(entry);
@@ -1766,14 +2048,22 @@
       $("run-sheet-sub").textContent = historySpan(entry);
       const chip = $("run-sheet-chip");
       const chipText = st.text ? st.text.charAt(0).toUpperCase() + st.text.slice(1) : "";
-      chip.textContent = chipText;
-      chip.classList.toggle("bad", st.cls === "bad");
+      chip.classList.remove("ok", "bad");
+      if (entry.outcome === "completed") {
+        chip.classList.add("ok");
+        chip.innerHTML = CHECK_SVG + esc(chipText);
+      } else {
+        chip.classList.toggle("bad", st.cls === "bad");
+        chip.textContent = chipText;
+      }
       const skipped = entry.outcome === "skipped";
       $("run-sheet-stations").innerHTML = (entry.stations || []).map((s) => {
         const sec = skipped ? (Number(s.planned_sec) || 0) : (Number(s.actual_sec) || 0);
         const name = shortStation(s.station_id) || s.station_id || "Station";
-        return `<div class="sheet-row"><span>${esc(name)}</span><span>${esc(formatRunMins(sec))}</span></div>`;
-      }).join("") || `<div class="sheet-row"><span>No stations</span><span></span></div>`;
+        const stn = (state.stations || []).find((x) => x.id === s.station_id) || { id: s.station_id, title: name };
+        const icon = ICONS[stationIconKey(stn, false)] || ICONS.default;
+        return `<div class="sheet-row"><span class="sheet-disc" aria-hidden="true">${icon}</span><span class="sheet-st">${esc(name)}</span><span class="sheet-min">${esc(formatRunMins(sec))}</span></div>`;
+      }).join("") || `<div class="sheet-row"><span class="sheet-st">No stations</span><span class="sheet-min"></span></div>`;
       const started = new Date(entry.started_at);
       const ended = new Date(entry.ended_at);
       $("run-sheet-started").textContent = stampPhrase(started) || "—";
@@ -2064,14 +2354,12 @@
     $("ed-cancel").addEventListener("click", closeEditor);
     $("ed-save").addEventListener("click", () => saveEditor().catch((e) => alert(e.message)));
     $("ed-add-step").addEventListener("click", () => {
-      const cur = [...$("ed-steps").querySelectorAll(".step-row")].map((row) => ({
-        station_id: row.querySelector("[data-st]").value,
-        minutes: Number(row.querySelector("[data-min]").value) || 1,
-      }));
-      const used = new Set(cur.map((s) => s.station_id));
-      const next = (state.stations || []).find((st) => st.id && !used.has(st.id)) || (state.stations || [])[0];
-      cur.push({ station_id: (next && next.id) || "", minutes: 6 });
-      renderEdSteps(cur);
+      const cur = readStepRows();
+      const ids = (state.stations || []).map((st) => st.id).filter(Boolean);
+      const next = addStationRow(cur, ids);
+      if (!next.added) { updateAddStation(); return; }
+      renderEdSteps(next.rows);
+      updateEdCollide();
     });
     $("ed-season-all").addEventListener("click", () => setSeasonMode("all"));
     $("ed-season-between").addEventListener("click", () => {
@@ -2083,11 +2371,12 @@
       $(id).addEventListener("change", () => { $("ed-season-chip-text").textContent = editorSeasonText(); });
     });
     ["ed-start", "ed-enabled"].forEach((id) => {
-      $(id).addEventListener("change", updateEdCollide);
-      $(id).addEventListener("input", updateEdCollide);
+      $(id).addEventListener("change", () => { if (id === "ed-start") syncStartFace(); updateEdCollide(); });
+      $(id).addEventListener("input", () => { if (id === "ed-start") syncStartFace(); updateEdCollide(); });
     });
     $("ed-days").addEventListener("click", () => setTimeout(updateEdCollide, 0));
     $("sheet-scrim").addEventListener("click", closeSheets);
+    $("pick-sheet-x").addEventListener("click", closeSheets);
     $("run-sheet-x").addEventListener("click", closeSheets);
     $("paused-run-x").addEventListener("click", closeSheets);
     $("paused-run-cancel").addEventListener("click", closeSheets);

@@ -138,7 +138,7 @@ static void test_home_tiles(void)
 }
 
 /* Home station titles use main's inset: tile.w - 28. Rain (the soil-tile
- * height) and no-rain share that width. The On/Off pill must not shrink it. */
+ * height) and no-rain share that width. On/Off styling must not shrink it. */
 static void test_home_title_slot(void)
 {
     zk_layout_in in;
@@ -171,7 +171,7 @@ static void test_schedules_button(void)
     n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
     s = find_id(t, n, ZK_TARGET_SCHEDULES);
     TCHECK(s, "home schedules");
-    TCHECK(s && s->rect.w >= ZK_MIN_TAP && s->rect.h >= ZK_MIN_TAP, "home schedules %dx%d",
+    TCHECK(s && s->rect.w >= 132 && s->rect.h >= ZK_MIN_TAP, "home schedules %dx%d",
            s ? s->rect.w : 0, s ? s->rect.h : 0);
     n = zk_layout_targets(ZK_SCREEN_PAUSED, &in, t, 32);
     s = find_id(t, n, ZK_TARGET_SCHEDULES);

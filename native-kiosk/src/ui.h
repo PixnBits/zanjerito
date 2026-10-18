@@ -39,4 +39,20 @@ typedef struct {
  * or -1 if the tracker overflowed or cap is too small. */
 int zk_ui_debug_label_boxes(zk_ui_label_box_t *out, int cap);
 
+/* Home station tile after layout. bg and border are 0xRRGGBB. title_w is the
+ * name widget width (same slot as main: tile width minus 28). */
+typedef struct {
+    int present;
+    int on;
+    uint32_t bg;
+    int border_w;
+    uint32_t border;
+    int drop_visible;
+    int title_w;
+    int tile_w;
+} zk_ui_tile_dbg_t;
+
+/* Fills out for home tile index. Returns 1 when that tile exists. */
+int zk_ui_debug_tile(int index, zk_ui_tile_dbg_t *out);
+
 #endif
