@@ -981,7 +981,9 @@ static void parse_one_schedule(const cJSON *it, zk_schedule_t *sch)
     int i, n, wd;
     memset(sch, 0, sizeof(*sch));
     jstr(it, "id", sch->id, sizeof(sch->id));
+    jstr(it, "name", sch->name, sizeof(sch->name));
     jstr(it, "note", sch->note, sizeof(sch->note));
+    /* "notes" is phone-only. It is not copied into name or note. */
     sch->enabled = jbool(it, "enabled", 0);
     start = jobj(it, "start");
     if (start && cJSON_IsString(start) && start->valuestring) {
@@ -1070,7 +1072,7 @@ int zk_parse_schedules(const char *json, zk_schedules_t *out)
             continue;
         }
         parse_one_schedule(it, &out->items[out->n]);
-        if (!out->items[out->n].id[0] && !out->items[out->n].note[0]) {
+        if (!out->items[out->n].id[0] && !out->items[out->n].note[0] && !out->items[out->n].name[0]) {
             continue;
         }
         out->n++;

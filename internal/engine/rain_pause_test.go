@@ -36,19 +36,28 @@ func TestAutoRainPauseExemptOnly(t *testing.T) {
 	rec := &capture{}
 	e.SetRecorder(rec)
 
-	err = e.RunItinerary(context.Background(), []Step{{StationID: "front-north", Duration: 30 * time.Millisecond}})
+	err = e.RunProgram(context.Background(), "p", "Program", []Step{{StationID: "front-north", Duration: 30 * time.Millisecond}})
 	if !errors.Is(err, ErrPaused) {
-		t.Fatalf("non-exempt want ErrPaused, got %v", err)
+		t.Fatalf("non-exempt schedule want ErrPaused, got %v", err)
 	}
-	err = e.RunItinerary(context.Background(), []Step{
+	err = e.RunProgram(context.Background(), "p", "Program", []Step{
 		{StationID: "drip", Duration: 20 * time.Millisecond},
 		{StationID: "front-north", Duration: 20 * time.Millisecond},
 	})
 	if !errors.Is(err, ErrPaused) {
-		t.Fatalf("mixed want ErrPaused, got %v", err)
+		t.Fatalf("mixed schedule want ErrPaused, got %v", err)
 	}
 	if len(rec.snapshot()) != 0 {
 		t.Fatalf("rejections recorded %+v", rec.snapshot())
+	}
+
+	// A manual run of a non-exempt station is allowed and leaves the pause.
+	err = e.RunItinerary(context.Background(), []Step{{StationID: "front-north", Duration: 30 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.IsPaused(time.Now()) {
+		t.Fatal("manual run cleared auto rain pause")
 	}
 
 	err = e.RunItinerary(context.Background(), []Step{{StationID: "drip", Duration: 40 * time.Millisecond}})
@@ -56,16 +65,23 @@ func TestAutoRainPauseExemptOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := rec.snapshot()
-	if len(got) != 1 || got[0].Outcome != OutcomeCompleted || got[0].Kind != KindManual {
+	if len(got) != 2 || got[1].Outcome != OutcomeCompleted || got[1].Kind != KindManual {
 		t.Fatalf("exempt record %+v", got)
 	}
-	if len(got[0].Stations) != 1 || got[0].Stations[0].StationID != "drip" || got[0].Stations[0].ActualSec < 0 {
-		t.Fatalf("stations %+v", got[0].Stations)
+	if len(got[1].Stations) != 1 || got[1].Stations[0].StationID != "drip" || got[1].Stations[0].ActualSec < 0 {
+		t.Fatalf("stations %+v", got[1].Stations)
 	}
 
 	e.SetPause(&until, "rain") // manual, even with reason rain
-	err = e.RunItinerary(context.Background(), []Step{{StationID: "drip", Duration: 20 * time.Millisecond}})
+	err = e.RunProgram(context.Background(), "p", "Program", []Step{{StationID: "drip", Duration: 20 * time.Millisecond}})
 	if !errors.Is(err, ErrPaused) {
-		t.Fatalf("manual pause must block exempt, got %v", err)
+		t.Fatalf("manual pause must block scheduled exempt, got %v", err)
+	}
+	err = e.RunItinerary(context.Background(), []Step{{StationID: "drip", Duration: 20 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.IsPaused(time.Now()) {
+		t.Fatal("manual run cleared manual pause")
 	}
 }

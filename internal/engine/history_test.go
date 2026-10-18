@@ -373,8 +373,8 @@ func TestRejectionsNotRecorded(t *testing.T) {
 		t.Fatal("expected too long")
 	}
 	e.SetPause(nil, "rain")
-	if err := e.RunItinerary(context.Background(), []Step{{StationID: "front-west", Duration: time.Second}}); !errors.Is(err, ErrPaused) {
-		t.Fatalf("got %v", err)
+	if err := e.RunProgram(context.Background(), "dawn", "Dawn", []Step{{StationID: "front-west", Duration: time.Second}}); !errors.Is(err, ErrPaused) {
+		t.Fatalf("scheduled run while paused got %v", err)
 	}
 	e.ClearPause()
 	if len(rec.snapshot()) != 0 {

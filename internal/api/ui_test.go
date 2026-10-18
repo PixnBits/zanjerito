@@ -19,7 +19,7 @@ func TestUIHomeEmbedded(t *testing.T) {
 	body := rr.Body.String()
 	for _, need := range []string{
 		"STOP", "Stations", "Schedules", "[1, 5, 10]", "America/Phoenix", "Start anyway", "esc(",
-		"Out of season", "Year-round", "starts_on", "ends_on", "Duplicate", "sched-dlg", "collide-warn",
+		"Out of season", "All year", "starts_on", "ends_on", "Duplicate", "sched-dlg", "collide-warn",
 		// Polish v1 Style A chrome
 		"wordmark", "--sand", "--terracotta", "--teal", "station-tile", "desert-art", "+ Add program", "stop-bar",
 		"Pause for rain", "pause-dlg", "pause-resume", "--plum",
@@ -107,5 +107,62 @@ func TestUIKioskNextGuards(t *testing.T) {
 	}
 	if strings.Contains(body, "state.kioskNext = d ? d.next_run : null") {
 		t.Fatal("unguarded kiosk next assignment must be gone")
+	}
+}
+
+func TestUIHomeRedesignCopy(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/", nil)
+	body := rr.Body.String()
+	for _, need := range []string{
+		"Show older runs",
+		"Change end time",
+		"Run ${name} anyway?",
+		"#B5361A",
+		"#7C2411",
+		"+ Add program",
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("ui missing %q", need)
+		}
+	}
+	if strings.Contains(body, ">Idle<") || strings.Contains(body, `return "Idle"`) {
+		t.Fatal("hero must not render Idle")
+	}
+	i := strings.Index(body, `<footer class="stop-bar"`)
+	j := strings.Index(body, `</footer>`)
+	if i < 0 || j < i {
+		t.Fatal("stop bar missing")
+	}
+	if strings.Contains(body[i:j], "+ Add program") {
+		t.Fatal("+ Add program must not sit in the bottom bar")
+	}
+}
+
+func TestUINameRequiredAndRunDay(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/", nil)
+	body := rr.Body.String()
+	for _, need := range []string{
+		"Name is required.",
+		"ed-name-error",
+		"function editorName(",
+		"note: state.edit.note",
+		`aria-label="${DAY_NAME[i]}"`,
+		"const day = historyDay(d)",
+		"Add station",
+		"art-dune",
+		"art-waves",
+		"timer-text",
+		"Show older runs ›",
+		"run-chev",
+		"time-pill",
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("ui missing %q", need)
+		}
+	}
+	if strings.Contains(body, "note: name") {
+		t.Fatal("editor must not copy the name into the legacy note")
 	}
 }

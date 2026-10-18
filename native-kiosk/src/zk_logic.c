@@ -1,5 +1,7 @@
 #include "zk_logic.h"
 
+#include "zk_text.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -147,6 +149,61 @@ void zk_fmt_name_upper(const char *name, char *out, size_t cap)
     zk_str_trim_copy(tmp, sizeof tmp, name ? name : "");
     zk_str_upper(tmp);
     zk_str_copy(out, cap, tmp);
+}
+
+void zk_fmt_next_run_kicker(const char *name, char *out, size_t cap, int max_px,
+                            int (*width_px)(const char *text, size_t nbytes, void *user), void *user)
+{
+    static const char prefix[] = "NEXT RUN \xC2\xB7 ";
+    char upper[ZK_NOTE_MAX];
+    char fitted[ZK_NOTE_MAX];
+    char full[ZK_NOTE_MAX + 32];
+    size_t plen;
+    size_t nlen;
+    int full_w;
+    int prefix_w;
+    int remain;
+    if (!out || cap == 0) {
+        return;
+    }
+    out[0] = 0;
+    zk_fmt_name_upper(name && name[0] ? name : "--", upper, sizeof upper);
+    if (!upper[0]) {
+        zk_str_copy(upper, sizeof upper, "--");
+    }
+    plen = sizeof prefix - 1;
+    nlen = strlen(upper);
+    if (plen + nlen + 1 > sizeof full) {
+        nlen = sizeof full - plen - 1;
+    }
+    memcpy(full, prefix, plen);
+    memcpy(full + plen, upper, nlen);
+    full[plen + nlen] = 0;
+    if (!width_px || max_px < 1) {
+        zk_str_copy(out, cap, full);
+        return;
+    }
+    full_w = width_px(full, plen + nlen, user);
+    if (full_w >= 0 && full_w <= max_px) {
+        zk_str_copy(out, cap, full);
+        return;
+    }
+    prefix_w = width_px(prefix, plen, user);
+    if (prefix_w < 0) {
+        prefix_w = 0;
+    }
+    remain = max_px - prefix_w;
+    if (remain < 1 || zk_text_fit(fitted, sizeof fitted, upper, remain, width_px, user) != 0 || !fitted[0]) {
+        zk_str_copy(out, cap, prefix);
+        return;
+    }
+    nlen = strlen(fitted);
+    if (plen + nlen + 1 > cap) {
+        zk_str_copy(out, cap, prefix);
+        return;
+    }
+    memcpy(out, prefix, plen);
+    memcpy(out + plen, fitted, nlen + 1);
 }
 
 int zk_rain_strip_visible(const zk_kiosk_t *k)

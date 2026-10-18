@@ -1,6 +1,7 @@
 #include "zk_test.h"
 
 #include "data.h"
+#include "generated/zk_fonts.h"
 #include "platform.h"
 #include "ui.h"
 #include "zk_layout.h"
@@ -257,6 +258,7 @@ static void test_home_long(void)
         char id[32];
         char full[128];
         const zk_ui_label_box_t *t;
+        const zk_ui_label_box_t *st;
         snprintf(id, sizeof id, "tile_title%d", i);
         make_title(full, i + 1);
         t = find_box(b, n, id);
@@ -264,7 +266,151 @@ static void test_home_long(void)
         if (t) {
             TCHECK(prefix_ellipsis(t->text, full), "%s text %s", id, t->text);
         }
+        {
+            zk_ui_tile_dbg_t tile;
+            TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
+            TEQ_I(tile.on, 0);
+            TEQ_I(tile.bg, 0xFCF5E6);
+            TEQ_I(tile.border_w, 3);
+            TEQ_I(tile.border, 0xD2B78A);
+            TEQ_I(tile.drop_visible, 0);
+            TEQ_I(tile.title_w, tile.tile_w - 28);
+        }
+        snprintf(id, sizeof id, "tile_state%d", i);
+        st = find_box(b, n, id);
+        TCHECK(st == NULL, "pill %s still present", id);
     }
+}
+
+static int white_px(const uint8_t *p)
+{
+    int b = p[0];
+    int g = p[1];
+    int r = p[2];
+    return r > 220 && g > 220 && b > 220;
+}
+
+/* Visual gap between the STOP octagon and the word, in the center of the button. */
+static void check_stop_gap(const zk_ui_label_box_t *b, int n)
+{
+    const zk_ui_label_box_t *word = find_box(b, n, "stop_word");
+    const uint8_t *frame;
+    int fw, fh, stride;
+    int x0, x1, x;
+    int best = 1000;
+    int seen = 0;
+    TCHECK(word != NULL, "stop word");
+    if (!word) {
+        return;
+    }
+    frame = zk_platform_frame(&fw, &fh, &stride);
+    TCHECK(frame != NULL, "stop frame");
+    if (!frame) {
+        return;
+    }
+    x0 = word->x + word->w / 2 - 20;
+    x1 = word->x + word->w / 2 + 20;
+    if (x0 < 0) {
+        x0 = 0;
+    }
+    if (x1 > fw) {
+        x1 = fw;
+    }
+    for (x = x0; x < x1; x++) {
+        int y;
+        int text_top = -1;
+        int icon_bot = -1;
+        int y_hi = word->y + word->h;
+        if (y_hi > fh) {
+            y_hi = fh;
+        }
+        for (y = word->y; y < y_hi; y++) {
+            const uint8_t *p = frame + (size_t)y * (size_t)stride + (size_t)x * 4u;
+            if (white_px(p)) {
+                text_top = y;
+                break;
+            }
+        }
+        if (text_top < 0) {
+            continue;
+        }
+        for (y = text_top - 1; y >= 0 && y >= text_top - 80; y--) {
+            const uint8_t *p = frame + (size_t)y * (size_t)stride + (size_t)x * 4u;
+            if (white_px(p)) {
+                icon_bot = y;
+                break;
+            }
+        }
+        if (icon_bot < 0) {
+            continue;
+        }
+        {
+            int gap = text_top - icon_bot - 1;
+            if (gap < best) {
+                best = gap;
+            }
+            seen++;
+        }
+    }
+    TCHECK(seen > 0, "stop icon and word ink");
+    TCHECK(best >= 8, "stop gap %d px", best);
+}
+
+static void test_home_onoff(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int i;
+    const zk_ui_label_box_t *kicker;
+    const zk_ui_label_box_t *big;
+    const char *full = "NEXT RUN \xC2\xB7 MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
+    TCHECK(load_fix("home-onoff", ZK_SCREEN_HOME) == 0, "load home-onoff");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    check_geometry(b, n, "home-onoff");
+    kicker = find_box(b, n, "hdr_kicker");
+    big = find_box(b, n, "hdr_big");
+    TCHECK(kicker && big, "onoff header");
+    if (kicker) {
+        TCHECK(strncmp(kicker->text, "NEXT RUN \xC2\xB7 ", 12) == 0, "prefix %s", kicker->text);
+        TCHECK(prefix_ellipsis(kicker->text, full), "name not end-cut: %s", kicker->text);
+    }
+    if (big) {
+        TEQ_S(big->text, "Today 6:10 AM");
+        TCHECK(!ends_ellipsis(big->text), "time ellipsized");
+    }
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        zk_ui_tile_dbg_t tile;
+        snprintf(id, sizeof id, "tile_state%d", i);
+        TCHECK(find_box(b, n, id) == NULL, "pill %s still present", id);
+        TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
+        if (i == 0) {
+            TEQ_I(tile.on, 1);
+            TEQ_I(tile.bg, 0x0F6E6C);
+            TEQ_I(tile.border_w, 4);
+            TEQ_I(tile.border, 0x0F6E6C);
+            TEQ_I(tile.drop_visible, 1);
+        } else {
+            TEQ_I(tile.on, 0);
+            TEQ_I(tile.bg, 0xFCF5E6);
+            TEQ_I(tile.border_w, 3);
+            TEQ_I(tile.drop_visible, 0);
+        }
+        TEQ_I(tile.title_w, tile.tile_w - 28);
+    }
+    for (i = 0; i < n; i++) {
+        TCHECK(strcmp(b[i].text, "On") != 0 && strcmp(b[i].text, "Off") != 0, "pill text %s", b[i].text);
+    }
+    {
+        int32_t timew = lv_text_get_width("Tomorrow 6:10 AM", (uint32_t)strlen("Tomorrow 6:10 AM"), &zk_font_xb_50, 0);
+        if (big) {
+            TCHECK(big->w >= timew, "time slot %d holds %d", big->w, (int)timew);
+        }
+    }
+    check_stop_gap(b, n);
 }
 
 static void test_running_long(void)
@@ -300,6 +446,46 @@ static void test_running_long(void)
     if (step) {
         TEQ_S(step->text, "Step 2 of 3");
     }
+    check_stop_gap(b, n);
+}
+
+/* Main's station title slot is tile width minus 14 px insets (parent_w - 28).
+ * Soil and no-soil must both keep that width. "Test Station N" fit on main. */
+static void test_home_title_width(const char *fix)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int i;
+    TCHECK(load_fix(fix, ZK_SCREEN_HOME) == 0, "load %s", fix);
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    check_geometry(b, n, fix);
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        char want[32];
+        const zk_ui_label_box_t *t;
+        const zk_ui_label_box_t *st;
+        snprintf(id, sizeof id, "tile_title%d", i);
+        t = find_box(b, n, id);
+        TCHECK(t != NULL, "%s missing %s", fix, id);
+        if (t) {
+            TEQ_I(t->w, t->parent_w - 28);
+            snprintf(want, sizeof want, "Test Station %d", i + 1);
+            TEQ_S(t->text, want);
+        }
+        snprintf(id, sizeof id, "tile_state%d", i);
+        st = find_box(b, n, id);
+        TCHECK(st == NULL, "%s pill %s still present", fix, id);
+        {
+            zk_ui_tile_dbg_t tile;
+            TCHECK(zk_ui_debug_tile(i, &tile) == 1, "%s tile %d", fix, i);
+            TEQ_I(tile.drop_visible, 0);
+            TEQ_I(tile.bg, 0xFCF5E6);
+            TEQ_I(tile.title_w, tile.tile_w - 28);
+        }
+    }
 }
 
 static void test_station_sheet_and_needs_update(void)
@@ -317,8 +503,12 @@ static void test_station_sheet_and_needs_update(void)
     sched = find_box(b, n, "sched_btn");
     TCHECK(sched != NULL, "schedules label");
     if (sched) {
+        int32_t tw = lv_text_get_width("Schedules", (uint32_t)strlen("Schedules"), &zk_font_b_26, 0);
         TEQ_S(sched->text, "Schedules");
         TCHECK(inside_parent(sched), "schedules box");
+        TCHECK(sched->parent_w >= tw + 24, "schedules pad parent %d text %d", sched->parent_w, (int)tw);
+        TCHECK(sched->x >= sched->parent_x + 12, "schedules left inset %d", sched->x - sched->parent_x);
+        TCHECK(sched->x + sched->w <= sched->parent_x + sched->parent_w - 12, "schedules right inset");
     }
     zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 0);
     zk_ui_refresh();
@@ -379,6 +569,9 @@ int main(void)
     test_paused_short();
     test_paused_long();
     test_home_long();
+    test_home_onoff();
+    test_home_title_width("home-rain");
+    test_home_title_width("home-nosoil");
     test_running_long();
     test_station_sheet_and_needs_update();
     zk_data_stop();

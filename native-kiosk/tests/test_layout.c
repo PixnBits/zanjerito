@@ -137,6 +137,28 @@ static void test_home_tiles(void)
            "8-tile min");
 }
 
+/* Home station titles use main's inset: tile.w - 28. Rain (the soil-tile
+ * height) and no-rain share that width. On/Off styling must not shrink it. */
+static void test_home_title_slot(void)
+{
+    zk_layout_in in;
+    zk_target t[32];
+    int n;
+    int rain;
+    memset(&in, 0, sizeof in);
+    in.n_stations = 4;
+    for (rain = 0; rain <= 1; rain++) {
+        const zk_target *tile;
+        in.rain_visible = rain;
+        n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+        tile = find_id(t, n, ZK_TARGET_TILE0);
+        TCHECK(tile != NULL, "title slot tile rain=%d", rain);
+        if (tile) {
+            TEQ_I(tile->rect.w - 28, 228);
+        }
+    }
+}
+
 static void test_schedules_button(void)
 {
     zk_layout_in in;
@@ -149,7 +171,7 @@ static void test_schedules_button(void)
     n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
     s = find_id(t, n, ZK_TARGET_SCHEDULES);
     TCHECK(s, "home schedules");
-    TCHECK(s && s->rect.w >= ZK_MIN_TAP && s->rect.h >= ZK_MIN_TAP, "home schedules %dx%d",
+    TCHECK(s && s->rect.w >= 132 && s->rect.h >= ZK_MIN_TAP, "home schedules %dx%d",
            s ? s->rect.w : 0, s ? s->rect.h : 0);
     n = zk_layout_targets(ZK_SCREEN_PAUSED, &in, t, 32);
     s = find_id(t, n, ZK_TARGET_SCHEDULES);
@@ -269,6 +291,7 @@ int main(void)
         }
     }
     test_home_tiles();
+    test_home_title_slot();
     test_picker_schedules();
     test_schedules_button();
     test_station_sheet();

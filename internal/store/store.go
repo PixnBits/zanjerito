@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"unicode/utf8"
 
 	"github.com/PixnBits/zanjerito/internal/engine"
 )
@@ -25,16 +27,45 @@ type Step struct {
 	Minutes   int    `json:"minutes"`
 }
 
+// NameMaxRunes is the display-name limit. The count is Unicode code points,
+// so "·" counts as one. Notes have no limit.
+const NameMaxRunes = 24
+
 // Schedule is a wall-clock program (America/Phoenix). Seasonal windows optional.
+// Name is the display title. Note is the legacy title, used when Name is empty.
+// Notes is free text shown only in Schedules edit and a run's details.
 type Schedule struct {
 	ID       string   `json:"id"`
 	Enabled  bool     `json:"enabled"`
+	Name     string   `json:"name,omitempty"`
 	Note     string   `json:"note,omitempty"`
+	Notes    string   `json:"notes,omitempty"`
 	Weekdays []string `json:"weekdays,omitempty"` // mon..sun; empty = every day
 	Start    string   `json:"start,omitempty"`    // HH:MM local
 	Steps    []Step   `json:"steps,omitempty"`
 	StartsOn string   `json:"starts_on,omitempty"` // YYYY-MM-DD optional
 	EndsOn   string   `json:"ends_on,omitempty"`
+}
+
+// DisplayName is the title shown on Home, the kiosk, and history: Name,
+// otherwise the legacy Note, otherwise ID. Notes is never part of it.
+func (s Schedule) DisplayName() string {
+	if name := strings.TrimSpace(s.Name); name != "" {
+		return name
+	}
+	if note := strings.TrimSpace(s.Note); note != "" {
+		return note
+	}
+	return s.ID
+}
+
+// ValidateName reports an error when Name is longer than NameMaxRunes.
+// An empty name is valid. The count is Unicode code points.
+func (s Schedule) ValidateName() error {
+	if n := utf8.RuneCountInString(s.Name); n > NameMaxRunes {
+		return fmt.Errorf("name must be at most %d characters", NameMaxRunes)
+	}
+	return nil
 }
 
 // Load reads path, validates via engine (active_low required and true).

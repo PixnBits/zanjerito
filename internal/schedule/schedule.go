@@ -151,10 +151,7 @@ func (r *Runner) markFired(id string, now time.Time) {
 }
 
 func programName(sch store.Schedule) string {
-	if note := strings.TrimSpace(sch.Note); note != "" {
-		return note
-	}
-	return sch.ID
+	return sch.DisplayName()
 }
 
 // Tick loads schedules and starts any that are due. Busy engine → skip+log (D13).

@@ -106,6 +106,8 @@ The Node/React stack that lived on `fancy-vibes` (trunk until 2026-09-27; its hi
 
 ### Home — Style A (hero status)
 
+Designer FINAL v1.0: the hero never says Idle. It leads with Next run, Paused for rain, Nothing scheduled, or Watering. A program `name` (max 24 characters) is the display title; an empty `name` falls back to the legacy note, then the id. `notes` appear only in Schedules edit and a run's detail sheet — not on Home, Recent runs, the wall screen, `/api/kiosk`, `/api/ha`, or notifications.
+
 - Large **cream** status hero card:
   - Season tag + sun accent
   - Title: **Idle** / **Watering • {station}** / **Paused**

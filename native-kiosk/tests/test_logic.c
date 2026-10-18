@@ -26,6 +26,29 @@ static void load_home(zk_kiosk_t *k, zk_schedules_t *sch)
     free(c);
 }
 
+static int byte_width(const char *text, size_t nbytes, void *user)
+{
+    (void)text;
+    (void)user;
+    return (int)nbytes;
+}
+
+static void test_next_run_kicker(void)
+{
+    char out[160];
+    const char *full = "NEXT RUN \xC2\xB7 MORNING CYCLE";
+    zk_fmt_next_run_kicker("Morning cycle", out, sizeof out, 0, NULL, NULL);
+    TEQ_S(out, full);
+    zk_fmt_next_run_kicker("", out, sizeof out, 0, NULL, NULL);
+    TEQ_S(out, "NEXT RUN \xC2\xB7 --");
+    zk_fmt_next_run_kicker("Morning cycle", out, sizeof out, 20, byte_width, NULL);
+    TCHECK(strncmp(out, "NEXT RUN \xC2\xB7 ", 12) == 0, "prefix kept %s", out);
+    TCHECK(strlen(out) >= 3 && memcmp(out + strlen(out) - 3, "\xE2\x80\xA6", 3) == 0, "end cut %s", out);
+    TCHECK(strlen(out) < strlen(full), "shorter %s", out);
+    zk_fmt_next_run_kicker("Morning cycle", out, sizeof out, 5, byte_width, NULL);
+    TEQ_S(out, "NEXT RUN \xC2\xB7 ");
+}
+
 static void test_fmt_fire(void)
 {
     zk_kiosk_t k;
@@ -266,6 +289,7 @@ static void test_pause_text(void)
 int main(void)
 {
     test_fmt_fire();
+    test_next_run_kicker();
     test_rain_strip();
     test_inches_extreme();
     test_soil();

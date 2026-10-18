@@ -149,7 +149,7 @@ Example zone entry after a 0.20 in catch in 15 minutes:
 
 `next_run` is the next enabled fire strictly after the current local minute, or null when nothing qualifies in 400 local dates (no schedules, or none enabled). It ignores an active pause. `skipped_by_pause` is true when a pause is active and that pause is indefinite or this fire's `at` is before `until`. A fire exactly at `until` is not skipped: pause-until is exclusive, matching the scheduler. `next_effective_run` is the first fire that still runs. It is the same instant as `next_run` when nothing is paused, null when the pause is indefinite, and otherwise the first fire at or after `until`. On that object `skipped_by_pause` is false.
 
-Eligibility matches the scheduler's calendar rules, not its "this minute is due" check: enabled, a valid `HH:MM`, at least one step, weekday (an empty list means every day), and `starts_on` / `ends_on`. The earliest instant wins. Equal instants keep schedule list order. A same-day start is included only when its `HH:MM` is later than now's `HH:MM`, so a fire in the current minute has already passed. Each fire is `schedule_id`, `name` (the note, or the id), `at`, `ends_at` (`at` plus the sum of step minutes), `total_min`, and `skipped_by_pause`.
+Eligibility matches the scheduler's calendar rules, not its "this minute is due" check: enabled, a valid `HH:MM`, at least one step, weekday (an empty list means every day), and `starts_on` / `ends_on`. The earliest instant wins. Equal instants keep schedule list order. A same-day start is included only when its `HH:MM` is later than now's `HH:MM`, so a fire in the current minute has already passed. Each fire is `schedule_id`, `name` (the program display name: `name` if set, otherwise the legacy note, otherwise the id), `at`, `ends_at` (`at` plus the sum of step minutes), `total_min`, and `skipped_by_pause`. Program `notes` are not on this payload.
 
 Instants are built with `time.Date` in the config zone. A skipped civil time is not a fire: America/Denver 2026-03-08 02:00–02:59 does not occur, and `time.Date` normalizes 02:30 to 01:30 MST, which is not used. A repeated civil time (America/Denver 2026-11-01 01:00–01:59) keeps both real occurrences, earliest first. The scan assumes a one-hour fold. America/Phoenix has no fold.
 
@@ -159,7 +159,7 @@ Instants are built with `time.Date` in the config zone. A skipped civil time is 
 
 `GET /api/events` status events keep `Phase`, `CurrentStation`, `StationsOn`, and `LastError`, and also send `phase`, `current_station`, `stations_on`, and `last_error`.
 
-Home's Next line uses `next_run` from this endpoint when that fetch succeeds, and otherwise keeps the in-page scan. While paused, the line still says "Schedules skip while paused" rather than `next_effective_run`. Each schedule card still computes its own next fire in the page. The in-run countdown on Home is still that page's guess, not `run`.
+Home's next-run hero uses `next_run` from this endpoint when that fetch succeeds, and otherwise keeps the in-page scan. While paused, the hero says "Until …" and lists the programs on hold. Resume is the bottom-bar button, and a manual station run does not clear the pause. Each schedule card still computes its own next fire in the page. A disabled card says Off instead of that next fire. The in-run countdown on Home is still that page's guess, not `run`. Program `notes` are shown only when editing a program and in a run's detail sheet.
 
 ## Native kiosk client (experimental)
 
