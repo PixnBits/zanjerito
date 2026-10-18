@@ -84,12 +84,12 @@
     .status.is-paused .phase, .status.is-paused .hero-body, .status.is-paused .eyebrow { color: var(--plum-ink); }
     .hero-copy { position: relative; z-index: 2; max-width: 78%; }
     .phase {
-      font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.2;
+      font-family: var(--serif); font-size: 28px; font-weight: 600; line-height: 1.2; color: var(--ink);
       padding-bottom: .08em;
       max-width: 262px; margin: 0;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
-    .phase .dot { color: var(--terracotta); }
+    .phase .dot { color: var(--terra-ink); }
     .when-line { font-size: 20px; font-weight: 600; white-space: nowrap; margin: 6px 0 0; }
     .timer {
       display: flex; align-items: center; gap: 6px;
@@ -1430,7 +1430,7 @@
         const el = document.createElement("article");
         el.className = "sched";
         const out = !inSeasonNow(sch, today);
-        const onBadge = sch.enabled ? `<span class="badge">On</span>` : `<span class="badge off">Off</span>`;
+        const onBadge = sch.enabled ? `<span class="badge">On</span>` : "";
         const seasonBadge = `<span class="season-chip">${SUN_SVG}<span>${esc(seasonLabel(sch))}</span></span>`;
         const outBadge = out ? `<span class="badge out">Out of season</span>` : "";
         const meta = sch.enabled ? ("Next: " + nextFireLabel(sch)) : "Off";
