@@ -30,7 +30,7 @@ The framebuffer is 800×480. Hit targets use **267 px/in** (`ZK_PX_PER_INCH`). `
 | Screen | 800×480 | — |
 | STOP (home, paused, picker, schedules, station, needs-update) | 236×264 | height 0.99 in |
 | STOP while running | 236×304 | height 1.14 in |
-| Schedules button (Home idle, Paused) | 120×108 | at least 0.4 in |
+| Schedules button (Home idle, Paused) | 134×108 | at least 0.4 in |
 | Every other hit target | at least 107×107 | at least 0.4 in |
 
 ## Build
