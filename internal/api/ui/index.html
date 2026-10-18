@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="icon" href="data:,">
   <title>Zanjerito</title>
   <style>
     /* Literata SemiBold, SIL OFL. License: OFL-Literata.txt. Static face, not the variable font. */
@@ -44,14 +45,14 @@
     .kiosk { font-size: 22px; }
     .kiosk .edit, .kiosk #page-schedules, .kiosk #sched-dlg { display: none; }
     * { box-sizing: border-box; }
-    [hidden] { display: none !important; }
+    .hidden, [hidden] { display: none !important; }
     body {
       margin: 0 auto; max-width: 480px;
       padding: 12px 16px var(--bar-space);
       font-family: var(--sans); font-size: 16px; color: var(--text);
       background: var(--sand);
     }
-    button, input, select, textarea { font-family: inherit; color: inherit; }
+    button, input, select, textarea { font: inherit; color: inherit; }
     .chrome { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 16px; }
     .wordmark { font-family: var(--serif); font-size: 30px; font-weight: 600; color: var(--ink); margin: 0; line-height: 1.1; }
     .nav { display: flex; gap: 4px; }
@@ -94,6 +95,7 @@
       margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line);
       font-size: 14px; color: var(--muted); line-height: 1.35;
     }
+    .sub.plain { border-top: 0; padding-top: 0; margin-top: 8px; }
     .status.is-paused .sub { border-top-color: rgba(243, 238, 248, .35); }
     .sub.fault { color: var(--error); font-weight: 500; }
     .sub svg { width: 16px; height: 16px; flex: 0 0 auto; margin-top: 1px; }
@@ -152,9 +154,9 @@
       text-align: left; color: inherit; cursor: pointer;
     }
     .run-row:first-child { border-top: 0; }
-    .run-primary { display: flex; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
+    .run-primary { display: flex; align-items: baseline; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
     .run-when, .run-sep { flex: 0 0 auto; white-space: nowrap; }
-    .run-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .run-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .run-status, .run-detail { display: block; font-size: 14px; line-height: 1.35; }
     .run-status.muted, .run-detail, .history-note { color: var(--muted); }
     .run-status.bad { color: #A8432A; font-weight: 500; }
@@ -207,7 +209,7 @@
       border: 1.5px solid var(--line); background: var(--cream); color: var(--ink); font-size: 17px; font-weight: 500;
     }
     #pause-resume { background: var(--teal); color: #fff; border-color: var(--teal); }
-    #pause-resume svg, #paused-run-go svg { width: 18px; height: 18px; }
+    #pause-open svg, #pause-resume svg, #paused-run-go svg { width: 18px; height: 18px; flex: 0 0 auto; }
     .stop {
       flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
       background: #B5361A; color: #fff; border: 0;
@@ -297,14 +299,16 @@
       background: var(--cream); font-size: 14px; font-weight: 600;
     }
     .days button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
-    .step-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
-    .step-row select { min-width: 120px; flex: 1; }
+    .step-row { display: flex; flex-wrap: nowrap; gap: 8px; align-items: flex-end; margin: 8px 0; }
+    .step-row > label { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+    .step-row select { width: 100%; min-width: 0; }
+    .step-row .stepper, .step-row [data-rm] { flex: 0 0 auto; }
     .stepper span { min-width: 64px; text-align: center; font-size: 16px; font-weight: 600; }
     #ed-add-step { width: 100%; margin-top: 8px; }
     .season-modes { display: flex; flex-wrap: wrap; gap: 8px; }
-    .season-modes button { min-height: 48px; padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream); }
+    .season-modes button { min-height: 48px; padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream); font-size: 16px; font-weight: 600; }
     .season-modes button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
-    #ed-enabled { width: auto; min-height: 0; margin-right: 8px; }
+    #ed-enabled { width: 48px; height: 48px; min-width: 48px; min-height: 48px; margin: 0 8px 0 0; accent-color: var(--teal); }
     .enable-row { display: flex; align-items: center; min-height: 48px; font-size: 16px; margin-top: 8px; }
   </style>
 </head>
@@ -326,6 +330,7 @@
         <div class="eyebrow" id="hero-label">
           <svg class="ico" data-kind="next" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2.2" y="3.2" width="11.6" height="10.6" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 2v2.2M11 2v2.2M2.2 6.4h11.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <svg class="ico" data-kind="water" viewBox="0 0 16 16" fill="none" aria-hidden="true" hidden><path d="M8 1.8C8 1.8 3.2 7.2 3.2 10a4.8 4.8 0 0 0 9.6 0C12.8 7.2 8 1.8 8 1.8Z" stroke="currentColor" stroke-width="1.4"/></svg>
+          <svg class="ico" data-kind="pause" viewBox="0 0 16 16" fill="none" aria-hidden="true" hidden><path d="M4.3 12.4h7.2a2.5 2.5 0 0 0 .3-5 3.2 3.2 0 0 0-6.2.8 2.2 2.2 0 0 0-1.3 4.2Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
           <span id="hero-label-text">NEXT RUN</span>
         </div>
         <div class="phase" id="phase">…</div>
@@ -371,21 +376,21 @@
       <button type="button" class="history-more" id="history-see-all">Show older runs</button>
     </div>
   </section>
-  <section id="page-schedules" class="hidden">
+  <section id="page-schedules" class="hidden" hidden>
     <h1 class="strip-label" style="margin-top:0">Schedules</h1>
     <p class="page-note">Programs · America/Phoenix · seasonal windows supported</p>
     <div id="collide-warn" class="collide hidden" role="status"></div>
     <div id="schedules"></div>
     <button type="button" class="edit add-program" id="sched-new">+ Add program</button>
   </section>
-  <section id="page-history" class="hidden">
+  <section id="page-history" class="hidden" hidden>
     <button type="button" class="history-back" id="history-back">‹ Home</button>
     <h1 class="strip-label">Recent runs</h1>
     <div class="history-card">
       <div id="history-all"><p class="history-note">No runs yet.</p></div>
     </div>
   </section>
-  <section id="sched-dlg" class="hidden">
+  <section id="sched-dlg" class="hidden" hidden>
     <div class="editor-bar">
       <button type="button" class="ghost" id="ed-cancel">‹ Schedules</button>
       <button type="button" class="go" id="ed-save">Save</button>
@@ -423,7 +428,10 @@
     <div id="ed-collide" class="ed-warn hidden" role="status"></div>
   </section>
   <footer class="stop-bar" aria-label="Emergency stop">
-    <button type="button" id="pause-open">Pause for rain</button>
+    <button type="button" id="pause-open">
+      <svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4.6 13.8h8.4a2.9 2.9 0 0 0 .4-5.8 3.6 3.6 0 0 0-7 1 2.6 2.6 0 0 0-1.8 4.8Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      Pause for rain
+    </button>
     <button type="button" id="pause-resume" hidden>
       <svg viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><path d="M6 3.5v11l9-5.5-9-5.5Z"/></svg>
       <span>Resume</span>
@@ -805,6 +813,7 @@
         if (k.ok) {
           state.kioskNext = k.next;
           state.kioskRun = d.run || null;
+          state.kioskRunAt = Date.now();
           state.kioskNextReady = true;
           paintStatus();
         }
@@ -955,6 +964,69 @@
       if (m === 1) return "1 min left";
       return `${m} min left`;
     }
+    function finiteSec(v) {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    function kioskRemainingSec() {
+      const run = state.kioskRun;
+      if (!run) return null;
+      let base = finiteSec(run.run_remaining_sec);
+      if (base == null) base = finiteSec(run.remaining_sec);
+      if (base == null) base = finiteSec(run.step_remaining_sec);
+      if (base == null && Array.isArray(run.steps)) {
+        let sum = 0;
+        let any = false;
+        for (const st of run.steps) {
+          const r = finiteSec(st.remaining_sec);
+          if (r != null) { sum += r; any = true; }
+        }
+        if (any) base = sum;
+      }
+      if (base == null) return null;
+      const at = state.kioskRunAt || Date.now();
+      return Math.max(0, base - (Date.now() - at) / 1000);
+    }
+    function isManualWatering(run) {
+      if (run && (run.kind === "manual" || String(run.program || "").toLowerCase() === "manual")) return true;
+      return !run && !!(state.runTrack && state.runTrack.source === "manual");
+    }
+    function nextStationTitle(run, info) {
+      if (run) {
+        const steps = run.steps || [];
+        const idx = Number(run.step_index);
+        if (Number.isFinite(idx) && steps[idx + 1]) {
+          const nxt = steps[idx + 1];
+          const title = String(nxt.title || "").trim();
+          return title || stationTitle(nxt.station_id);
+        }
+        if (run.next_station) return stationTitle(run.next_station);
+        return "";
+      }
+      return (info && nextWhileWatering(info)) || "";
+    }
+    function wateringProgramName(run, info) {
+      if (run) {
+        const p = String(run.program || "").trim();
+        if (p && p.toLowerCase() !== "manual") return p;
+        const id = String(run.program_id || "").trim();
+        if (id) {
+          const sch = (state.schedules || []).find((s) => s.id === id);
+          if (sch) return programName(sch);
+        }
+      }
+      const fromInfo = info && String(info.program || "").trim();
+      if (fromInfo && fromInfo.toLowerCase() !== "manual") return fromInfo;
+      return "";
+    }
+    function wateringQuiet(run, info) {
+      if (isManualWatering(run)) return "Manual run";
+      const prog = wateringProgramName(run, info);
+      const nxt = nextStationTitle(run, info);
+      const next = nxt ? shortStation(nxt) : "";
+      if (prog && next) return prog + " · Next: " + next;
+      return prog || (next ? "Next: " + next : "");
+    }
     function nextWhileWatering(info) {
       if (!info || !info.steps) return null;
       const next = info.steps[info.index + 1];
@@ -963,14 +1035,18 @@
     }
     function setEyebrow(kind, text) {
       $("hero-label-text").textContent = text;
-      document.querySelectorAll("#hero-label .ico").forEach((el) => { el.hidden = el.dataset.kind !== kind; });
+      const show = (kind === "empty" || kind === "next") ? "next" : kind;
+      document.querySelectorAll("#hero-label .ico").forEach((el) => {
+        el.toggleAttribute("hidden", el.dataset.kind !== show);
+      });
     }
-    function setQuiet(text, fault) {
+    function setQuiet(text, fault, plain) {
       const sub = $("sub");
       sub.classList.toggle("fault", !!fault);
+      sub.classList.toggle("plain", !!plain && !fault);
       if (!text) { sub.textContent = ""; setHidden(sub, true); return; }
       setHidden(sub, false);
-      if (fault) { sub.textContent = text; return; }
+      if (fault || plain) { sub.textContent = text; return; }
       sub.innerHTML = CHECK_SVG + `<span>${esc(text)}</span>`;
     }
     function paintStatus() {
@@ -990,14 +1066,16 @@
         card.classList.add("is-water");
         setEyebrow("water", "WATERING NOW");
         const info = activeRunInfo();
+        const run = state.kioskRun;
         const name = shortStation(s.current_station);
         $("phase").innerHTML = name ? `Watering <span class="dot">•</span> ${esc(name)}` : "Watering";
-        $("timer").textContent = formatMinLeft(info && info.remainingSec) || "In progress";
+        let sec = kioskRemainingSec();
+        if (sec == null && info && info.remainingSec != null) sec = info.remainingSec;
+        $("timer").textContent = formatMinLeft(sec) || "under 1 min left";
         setHidden($("timer"), false);
-        const prog = (info && info.program) || "";
-        const nxt = nextWhileWatering(info);
-        setQuiet((prog ? prog + " · " : "") + "Next: " + (nxt || "—"), false);
-        $("next-text").textContent = nxt || "—";
+        const nxt = nextStationTitle(run, info);
+        setQuiet(wateringQuiet(run, info), false, true);
+        $("next-text").textContent = nxt ? shortStation(nxt) : "";
       } else if (paused) {
         card.classList.add("is-paused");
         setEyebrow("pause", "PAUSED FOR RAIN");
@@ -1218,13 +1296,7 @@
       renderEdSteps(asDup || sch ? steps : []);
       updateEdCollide();
       closeSheets();
-      $("page-home").classList.add("hidden");
-      $("page-schedules").classList.add("hidden");
-      $("page-history").classList.add("hidden");
-      $("sched-dlg").classList.remove("hidden");
-      $("tab-home").classList.remove("active");
-      $("tab-sched").classList.add("active");
-      window.scrollTo(0, 0);
+      showOnly("editor");
     }
     function closeEditor() {
       $("sched-dlg").classList.add("hidden");
@@ -1271,7 +1343,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      $("sched-dlg").classList.add("hidden");
+      setHidden($("sched-dlg"), true);
       await loadSchedules();
       showSchedules();
     }
@@ -1402,19 +1474,29 @@
       const ap = String(map.dayPeriod || "").toUpperCase();
       return ap ? `${map.hour}:${map.minute} ${ap}` : `${map.hour}:${map.minute}`;
     }
+    function dayDelta(d) {
+      const parse = (s) => {
+        const [y, m, day] = String(s || "").split("-").map(Number);
+        return Date.UTC(y || 1970, (m || 1) - 1, day || 1);
+      };
+      return Math.round((parse(tzYMD(d)) - parse(tzYMD(new Date()))) / 86400000);
+    }
     function friendlyWhen(d) {
       if (!(d instanceof Date) || Number.isNaN(d.getTime())) return "";
-      const ymd = tzYMD(d);
-      const today = tzYMD(new Date());
-      let day;
-      if (ymd === today) day = "Today";
-      else if (ymd === nextYMD(today)) day = "Tomorrow";
-      else {
-        const map = tzParts(d);
-        day = `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim();
-      }
+      const delta = dayDelta(d);
       const time = clockPhrase(d);
-      return time ? `${day} ${time}` : day;
+      const map = tzParts(d);
+      let day;
+      let withDate = false;
+      if (delta === 0) day = "Today";
+      else if (delta === 1) day = "Tomorrow";
+      else if (delta > 1 && delta <= 6) day = String(map.weekday || "").trim();
+      else {
+        day = `${map.weekday || ""} ${map.month || ""} ${Number(map.day)}`.trim();
+        withDate = delta > 6;
+      }
+      if (!time) return day;
+      return withDate ? `${day}, ${time}` : `${day} ${time}`;
     }
     function stampPhrase(d) {
       const time = clockPhrase(d);
@@ -1470,31 +1552,45 @@
     function historyActual(entry) {
       return (entry.stations || []).reduce((n, s) => n + (Number(s.actual_sec) || 0), 0);
     }
+    function historyErrorText(entry) {
+      return String((entry && entry.error) || "").trim();
+    }
     function historyStatus(entry) {
       const actual = historyActual(entry);
+      const err = historyErrorText(entry);
+      const reason = String(entry.reason || "").trim().toLowerCase();
       if (entry.outcome === "completed") return { text: "finished · " + statusDuration(actual), cls: "" };
       if (entry.outcome === "stopped") {
         if (actual < 60) return { text: "stopped early · under a minute", cls: "muted" };
         return { text: "stopped early · " + statusDuration(actual), cls: "muted" };
       }
-      if (entry.outcome === "refused") return { text: "failed · Refused (lockout mode)", cls: "bad" };
       if (entry.outcome === "skipped") {
-        const reason = String(entry.reason || "").trim().toLowerCase();
         if (reason === "rain") return { text: "skipped · rain", cls: "muted" };
         return { text: "skipped · " + (reason || "paused"), cls: "muted" };
       }
-      if (entry.outcome === "error") return { text: "failed · " + (entry.error || "unknown"), cls: "bad" };
+      if (entry.outcome === "refused" || entry.outcome === "error" || entry.outcome === "failed") {
+        if (err) return { text: "failed · " + err, cls: "bad" };
+        if (entry.outcome === "refused" && reason === "lockout") return { text: "Refused (lockout mode)", cls: "bad" };
+        return { text: "failed · " + (err || entry.reason || "unknown"), cls: "bad" };
+      }
       return { text: entry.outcome || "", cls: "" };
     }
     function historyHow(entry) {
+      const err = historyErrorText(entry);
+      const reason = String(entry.reason || "").trim().toLowerCase();
       if (entry.outcome === "completed") return "Finished on schedule";
       if (entry.outcome === "stopped") return "Stopped early with STOP";
       if (entry.outcome === "skipped") {
-        const reason = String(entry.reason || "").trim().toLowerCase();
         if (reason === "rain") return "Skipped: paused for rain";
         return "Skipped: paused";
       }
-      if (entry.outcome === "error" || entry.outcome === "refused") return "Failed: " + (entry.error || entry.reason || "unknown");
+      if (err && (entry.outcome === "error" || entry.outcome === "refused" || entry.outcome === "failed")) {
+        return "Failed: " + err;
+      }
+      if (entry.outcome === "refused" && reason === "lockout") return "Refused (lockout mode)";
+      if (entry.outcome === "error" || entry.outcome === "refused" || entry.outcome === "failed") {
+        return "Failed: " + (err || entry.reason || "unknown");
+      }
       return entry.outcome || "";
     }
     function historyDay(d) {
@@ -1537,7 +1633,7 @@
       const st = historyStatus(entry);
       const detail = historyDetail(entry);
       return `<button type="button" class="run-row" data-run="${idx}">` +
-        `<span class="run-primary"><span class="run-when">${esc(historyWhen(entry))}</span><span class="run-sep"> · </span><span class="run-name">${esc(historyProgramLabel(entry))}</span></span>` +
+        `<span class="run-primary"><span class="run-when">${esc(historyWhen(entry))}</span><span class="run-sep">\u00A0·\u00A0</span><span class="run-name">${esc(historyProgramLabel(entry))}</span></span>` +
         `<span class="run-status ${st.cls}">${esc(st.text)}</span>` +
         (detail ? `<span class="run-detail">${esc(detail)}</span>` : "") +
         `</button>`;
@@ -1784,22 +1880,17 @@
       await j("/api/pause", { method: "DELETE" });
       await loadStatus();
     }
-    function showHome() {
-      $("page-home").classList.remove("hidden");
-      $("page-schedules").classList.add("hidden");
-      $("page-history").classList.add("hidden");
-      $("sched-dlg").classList.add("hidden");
-      $("tab-home").classList.add("active");
-      $("tab-sched").classList.remove("active");
+    function showOnly(which) {
+      setHidden($("page-home"), which !== "home");
+      setHidden($("page-schedules"), which !== "schedules");
+      setHidden($("page-history"), which !== "history");
+      setHidden($("sched-dlg"), which !== "editor");
+      $("tab-home").classList.toggle("active", which === "home");
+      $("tab-sched").classList.toggle("active", which === "schedules" || which === "editor");
+      window.scrollTo(0, 0);
     }
-    function showSchedules() {
-      $("page-home").classList.add("hidden");
-      $("page-schedules").classList.remove("hidden");
-      $("page-history").classList.add("hidden");
-      $("sched-dlg").classList.add("hidden");
-      $("tab-home").classList.remove("active");
-      $("tab-sched").classList.add("active");
-    }
+    function showHome() { showOnly("home"); }
+    function showSchedules() { showOnly("schedules"); }
     function bindNameLimit() {
       const el = $("ed-name");
       el.dataset.last = el.value || "";
@@ -1869,12 +1960,7 @@
     $("tab-sched").addEventListener("click", showSchedules);
     $("hero-add").addEventListener("click", showSchedules);
     $("history-see-all").addEventListener("click", () => {
-      $("page-home").classList.add("hidden");
-      $("page-schedules").classList.add("hidden");
-      $("sched-dlg").classList.add("hidden");
-      $("page-history").classList.remove("hidden");
-      $("tab-home").classList.remove("active");
-      $("tab-sched").classList.remove("active");
+      showOnly("history");
       loadHistory();
     });
     $("history-back").addEventListener("click", showHome);

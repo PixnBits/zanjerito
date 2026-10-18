@@ -32,16 +32,16 @@
  "next_run": {
   "schedule_id": "morning",
   "name": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
-  "at": "2026-09-29T08:23:00-06:00",
-  "ends_at": "2026-09-29T08:31:00-06:00",
+  "at": "2026-09-29T06:10:00-06:00",
+  "ends_at": "2026-09-29T06:18:00-06:00",
   "total_min": 8,
   "skipped_by_pause": false
  },
  "next_effective_run": {
   "schedule_id": "morning",
   "name": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM",
-  "at": "2026-09-29T08:23:00-06:00",
-  "ends_at": "2026-09-29T08:31:00-06:00",
+  "at": "2026-09-29T06:10:00-06:00",
+  "ends_at": "2026-09-29T06:18:00-06:00",
   "total_min": 8,
   "skipped_by_pause": false
  },

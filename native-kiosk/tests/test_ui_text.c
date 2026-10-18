@@ -296,7 +296,7 @@ static void test_home_onoff(void)
         TCHECK(prefix_ellipsis(kicker->text, full), "name not end-cut: %s", kicker->text);
     }
     if (big) {
-        TEQ_S(big->text, "Today 8:23 AM");
+        TEQ_S(big->text, "Today 6:10 AM");
         TCHECK(!ends_ellipsis(big->text), "time ellipsized");
     }
     for (i = 0; i < 4; i++) {

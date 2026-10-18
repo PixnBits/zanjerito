@@ -963,10 +963,12 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
         lv_obj_t *tile = target(scr, tr, ZK_TARGET_TILE0 + i, COL_CARD, 22, 1);
         int title_y = soil ? 10 : (tr.h - 36) / 2;
         {
-            /* Small On/Off pill on the right. Title stops short of it. */
+            /* On/Off pill sits 14px from the tile's inner edge, same inset as the title.
+               Child x is inside the 3px border, so the content box is tr.w - 6 wide. */
             int pill_w = (tr.w < 170) ? 56 : 64;
             int pill_h = 32;
-            int pill_x = tr.w - 8 - pill_w;
+            int inner_w = tr.w - 6;
+            int pill_x = inner_w - 14 - pill_w;
             int pill_y = soil ? 6 : title_y + (33 - pill_h) / 2;
             int title_w;
             if (pill_x < 36) {

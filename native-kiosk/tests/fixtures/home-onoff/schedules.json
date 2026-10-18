@@ -4,7 +4,7 @@
    "enabled": true,
    "id": "morning",
    "note": "Morning cycle",
-   "start": "08:23",
+   "start": "06:10",
    "steps": [
     {
      "minutes": 2,
