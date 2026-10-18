@@ -137,6 +137,28 @@ static void test_home_tiles(void)
            "8-tile min");
 }
 
+/* Home station titles use main's inset: tile.w - 28. Rain (the soil-tile
+ * height) and no-rain share that width. The On/Off pill must not shrink it. */
+static void test_home_title_slot(void)
+{
+    zk_layout_in in;
+    zk_target t[32];
+    int n;
+    int rain;
+    memset(&in, 0, sizeof in);
+    in.n_stations = 4;
+    for (rain = 0; rain <= 1; rain++) {
+        const zk_target *tile;
+        in.rain_visible = rain;
+        n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+        tile = find_id(t, n, ZK_TARGET_TILE0);
+        TCHECK(tile != NULL, "title slot tile rain=%d", rain);
+        if (tile) {
+            TEQ_I(tile->rect.w - 28, 228);
+        }
+    }
+}
+
 static void test_schedules_button(void)
 {
     zk_layout_in in;
@@ -269,6 +291,7 @@ int main(void)
         }
     }
     test_home_tiles();
+    test_home_title_slot();
     test_picker_schedules();
     test_schedules_button();
     test_station_sheet();

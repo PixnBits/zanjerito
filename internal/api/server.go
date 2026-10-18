@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/PixnBits/zanjerito/internal/engine"
@@ -577,13 +578,39 @@ func (s *Server) handleScheduleGet(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, http.StatusNotFound, fmt.Errorf("schedule %s not found", id))
 }
 
+// scheduleNameField reads a present "name" value.
+// empty is true for null, "", or whitespace-only. A non-string is an error.
+func scheduleNameField(raw json.RawMessage) (name string, empty bool, err error) {
+	if strings.TrimSpace(string(raw)) == "" || string(raw) == "null" {
+		return "", true, nil
+	}
+	if err = json.Unmarshal(raw, &name); err != nil {
+		return "", false, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", true, nil
+	}
+	return name, false, nil
+}
+
 func (s *Server) handleSchedulePut(w http.ResponseWriter, r *http.Request) {
 	if s.Eng.Status().Phase != engine.PhaseIdle {
 		writeErr(w, http.StatusConflict, fmt.Errorf("%w: schedule writes deferred until Idle", engine.ErrBusy))
 		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	var sch store.Schedule
-	if err := json.NewDecoder(r.Body).Decode(&sch); err != nil {
+	if err := json.Unmarshal(body, &sch); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -592,13 +619,39 @@ func (s *Server) handleSchedulePut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("schedule id required"))
 		return
 	}
-	if err := sch.ValidateName(); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
+	// A present name must be non-empty after trim. A missing name is a legacy
+	// program: keep the stored name and, when note is also omitted, the stored note.
+	if raw, ok := fields["name"]; ok {
+		name, empty, err := scheduleNameField(raw)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		if empty {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("name is required"))
+			return
+		}
+		sch.Name = name
 	}
 	f, err := s.load()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if _, nameSent := fields["name"]; !nameSent {
+		for i := range f.Schedules {
+			if f.Schedules[i].ID != sch.ID {
+				continue
+			}
+			sch.Name = f.Schedules[i].Name
+			if _, noteSent := fields["note"]; !noteSent {
+				sch.Note = f.Schedules[i].Note
+			}
+			break
+		}
+	}
+	if err := sch.ValidateName(); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	replaced := false

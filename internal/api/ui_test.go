@@ -138,3 +138,31 @@ func TestUIHomeRedesignCopy(t *testing.T) {
 		t.Fatal("+ Add program must not sit in the bottom bar")
 	}
 }
+
+func TestUINameRequiredAndRunDay(t *testing.T) {
+	s := newTestServer(t)
+	rr := doJSON(t, s, http.MethodGet, "/", nil)
+	body := rr.Body.String()
+	for _, need := range []string{
+		"Name is required.",
+		"ed-name-error",
+		"function editorName(",
+		"note: state.edit.note",
+		`aria-label="${DAY_NAME[i]}"`,
+		"const day = historyDay(d)",
+		"Add station",
+		"art-dune",
+		"art-waves",
+		"timer-text",
+		"Show older runs ›",
+		"run-chev",
+		"time-pill",
+	} {
+		if !strings.Contains(body, need) {
+			t.Fatalf("ui missing %q", need)
+		}
+	}
+	if strings.Contains(body, "note: name") {
+		t.Fatal("editor must not copy the name into the legacy note")
+	}
+}

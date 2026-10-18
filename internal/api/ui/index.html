@@ -6,7 +6,9 @@
   <link rel="icon" href="data:,">
   <title>Zanjerito</title>
   <style>
-    /* Literata SemiBold, SIL OFL. License: OFL-Literata.txt. Static face, not the variable font. */
+    /* Literata SemiBold, SIL OFL. License: OFL-Literata.txt. Static face, not the variable font.
+       Subset: U+0020-007E, U+00A0-017F, U+2013, U+2014, U+2018, U+2019, U+201C, U+201D,
+       U+2022, U+2026, U+2039, U+203A, U+2212. Layout: kern, liga, calt. */
     @font-face {
       font-family: "Literata";
       src: url("Literata-SemiBold.woff2") format("woff2");
@@ -88,7 +90,11 @@
     }
     .phase .dot { color: var(--terracotta); }
     .when-line { font-size: 20px; font-weight: 600; white-space: nowrap; margin: 6px 0 0; }
-    .timer { font-size: 20px; font-weight: 500; color: var(--teal); margin: 6px 0 0; }
+    .timer {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 20px; font-weight: 500; color: var(--teal-ink); margin: 6px 0 0;
+    }
+    .timer svg { width: 20px; height: 20px; flex: 0 0 auto; }
     .hero-body { font-size: 15px; line-height: 1.4; margin: 8px 0 0; }
     .sub {
       display: flex; align-items: flex-start; gap: 6px;
@@ -113,12 +119,13 @@
       background: none; border: 0; color: var(--terracotta); font-size: 16px;
     }
     .desert-art {
-      position: absolute; right: 0; top: 8px; bottom: 8px; width: 46%; max-width: 190px;
+      position: absolute; right: -4px; top: -2px; width: 170px; height: 190px;
       pointer-events: none; z-index: 1;
     }
-    .desert-art svg { width: 100%; height: 100%; display: block; }
+    .desert-art svg { width: 170px; height: 190px; display: block; }
     .status.is-paused .desert-art { opacity: .35; }
-    .status.is-paused .art-waves { display: none; }
+    .status.is-paused .art-waves,
+    .status.is-empty .art-waves { display: none; }
     .rain-hint, .soil-note { font-size: 14px; color: var(--muted); margin: 8px 0; }
     .rain-strip { margin: 12px 0 0; font-size: 14px; color: var(--muted); }
     .rain-meter { display: block; height: 8px; background: var(--sand-deep); border-radius: 999px; overflow: hidden; margin-bottom: 6px; }
@@ -145,26 +152,33 @@
     .station-tile.on .tile-icon { background: var(--teal-soft); color: var(--teal-ink); }
     .station-tile.on .tile-pill { background: var(--teal); color: #fff; }
     .history-card {
-      background: var(--cream); border-radius: 20px; padding: 0 16px 8px;
+      background: var(--cream); border-radius: 20px; padding: 0;
       border: 1px solid var(--cream-edge); box-shadow: 0 2px 10px rgba(110, 70, 25, .09);
     }
     .run-row {
-      display: block; width: 100%; min-height: 48px; padding: 12px 0;
+      display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px;
+      padding: 12px 12px 12px 16px;
       border: 0; border-top: 1px solid var(--line); background: transparent;
       text-align: left; color: inherit; cursor: pointer;
     }
     .run-row:first-child { border-top: 0; }
+    .run-copy { flex: 1 1 auto; min-width: 0; }
+    .run-chev { flex: 0 0 auto; color: var(--muted); font-size: 20px; line-height: 1; }
     .run-primary { display: flex; align-items: baseline; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.3; }
     .run-when, .run-sep { flex: 0 0 auto; white-space: nowrap; }
     .run-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .run-status, .run-detail { display: block; font-size: 14px; line-height: 1.35; }
     .run-status.muted, .run-detail, .history-note { color: var(--muted); }
     .run-status.bad { color: #A8432A; font-weight: 500; }
-    .history-note { margin: 12px 0; font-size: 14px; }
+    .history-note { margin: 0; padding: 12px 16px; font-size: 14px; }
     .history-more, .history-back {
       display: flex; align-items: center; width: 100%; min-height: 48px;
-      background: transparent; border: 0; color: var(--teal-ink); font-size: 16px; font-weight: 600;
-      cursor: pointer; padding: 0;
+      background: transparent; border: 0; font-weight: 600; cursor: pointer;
+    }
+    .history-back { justify-content: flex-start; padding: 0 16px; color: var(--ink); font-size: 16px; }
+    .history-more {
+      justify-content: center; height: 48px; padding: 0;
+      color: var(--terra-ink); font-size: 15px; border-top: 1px solid var(--line);
     }
     .sched {
       background: var(--cream); border: 1px solid var(--cream-edge); border-radius: 20px;
@@ -282,30 +296,52 @@
     #ed-save { min-width: 72px; }
     .editor-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .editor-title h1 { font-family: var(--serif); font-size: 24px; font-weight: 600; margin: 0; }
-    .editor label.field-label { display: block; }
+    label.field-label { display: block; }
     .helper { font-size: 14px; color: var(--muted); margin: 6px 0 0; }
-    .name-meta { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-    .name-meta .helper { margin: 6px 0 0; }
-    #ed-name-count { font-size: 14px; font-weight: 600; color: var(--muted); white-space: nowrap; margin-top: 6px; }
-    #ed-name-count.hot, input.hot { color: var(--terracotta); }
+    .label-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 20px; }
+    .label-row .field-label { margin: 0 0 10px; }
+    #ed-name-count { font-size: 14px; font-weight: 600; color: var(--muted); white-space: nowrap; margin: 0 0 10px; }
+    #ed-name-count.hot { color: var(--terracotta); }
     input.hot { border-color: var(--terracotta); }
+    .field-error { font-size: 14px; font-weight: 600; color: var(--error); margin: 6px 0 0; }
+    .time-pill {
+      display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%;
+      height: 52px; margin-top: 0; padding: 0 16px; border-radius: 12px;
+      background: var(--cream); border: 1.5px solid var(--cream-edge); color: var(--text);
+    }
+    .time-pill svg { width: 20px; height: 20px; flex: 0 0 auto; }
+    .time-pill input[type="time"] {
+      width: auto; min-width: 120px; height: 48px; min-height: 48px;
+      border: 0; background: transparent; padding: 0; font-size: 17px; font-weight: 600;
+    }
+    .time-pill input[type="time"]::-webkit-calendar-picker-indicator { display: none; }
     input[type="text"], input[type="time"], input[type="date"], textarea, select {
       width: 100%; min-height: 48px; border-radius: 12px; border: 1.5px solid var(--line);
       background: #fff; padding: 10px 12px; font-size: 16px;
     }
     textarea { min-height: 96px; resize: vertical; }
-    .days { display: flex; flex-wrap: wrap; gap: 8px; }
+    .days { display: flex; flex-wrap: nowrap; gap: 4px; }
     .days button {
-      width: 48px; height: 48px; border-radius: 999px; border: 1.5px solid var(--line);
-      background: var(--cream); font-size: 14px; font-weight: 600;
+      flex: 0 0 48px; width: 48px; height: 48px; padding: 0; border-radius: 999px;
+      border: 1.5px solid var(--cream-edge); background: var(--cream); color: var(--muted);
+      font-size: 15px; font-weight: 600;
     }
     .days button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
-    .step-row { display: flex; flex-wrap: nowrap; gap: 8px; align-items: flex-end; margin: 8px 0; }
-    .step-row > label { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
-    .step-row select { width: 100%; min-width: 0; }
-    .step-row .stepper, .step-row [data-rm] { flex: 0 0 auto; }
-    .stepper span { min-width: 64px; text-align: center; font-size: 16px; font-weight: 600; }
-    #ed-add-step { width: 100%; margin-top: 8px; }
+    #ed-steps {
+      background: var(--cream); border: 1px solid var(--cream-edge); border-radius: 20px;
+      padding: 0 12px; margin-top: 6px;
+    }
+    #ed-steps:empty { display: none; }
+    .step-row {
+      display: flex; align-items: center; gap: 10px; min-height: 56px; margin: 0;
+      border-top: 1px solid var(--line);
+    }
+    .step-row:first-child { border-top: 0; }
+    .step-name { flex: 1 1 auto; min-width: 0; font-size: 16px; }
+    .step-row .stepper { flex: 0 0 auto; }
+    #ed-steps .stepper button { background: var(--sand); border-color: var(--cream-edge); color: var(--ink); }
+    .step-mins, .stepper span { min-width: 64px; width: 64px; text-align: center; font-size: 16px; font-weight: 600; }
+    #ed-add-step { min-width: 48px; margin-top: 8px; }
     .season-modes { display: flex; flex-wrap: wrap; gap: 8px; }
     .season-modes button { min-height: 48px; padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--cream); font-size: 16px; font-weight: 600; }
     .season-modes button.on { background: var(--teal); color: #fff; border-color: var(--teal); }
@@ -336,7 +372,7 @@
         </div>
         <div class="phase" id="phase">…</div>
         <div class="when-line" id="when-line"></div>
-        <div class="timer hidden" id="timer" hidden aria-live="polite"></div>
+        <div class="timer hidden" id="timer" hidden aria-live="polite"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3c0 0-6 7-6 11.2a6 6 0 0 0 12 0C18 10 12 3 12 3z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg><span id="timer-text"></span></div>
         <p class="hero-body" id="hero-body" hidden></p>
         <p class="sub" id="sub" hidden></p>
         <button type="button" class="btn-outline" id="change-end" hidden>
@@ -349,20 +385,40 @@
         </div>
       </div>
       <div class="desert-art" aria-hidden="true">
-        <svg viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMaxYMid meet">
-          <g class="art-sun" fill="none" stroke="#D2AE86" stroke-width="1.6" stroke-linecap="round" transform="translate(138,42)">
-            <circle cx="0" cy="0" r="14"/>
-            <path d="M0-24v6M0 18v6M-24 0h6M18 0h6M-17-17l4 4M13-13l4-4M13 13l4 4M-17 17l4-4"/>
+        <svg class="art" viewBox="0 0 170 190" width="170" height="190" fill="none" stroke="#D2AE86" stroke-width="1.2" stroke-linecap="round">
+          <g class="art-sun">
+            <circle cx="128" cy="34" r="13"/>
+            <path d="M147 34L154 34"/>
+            <path d="M141.4 47.4L146.4 52.4"/>
+            <path d="M128 53L128 60"/>
+            <path d="M114.6 47.4L109.6 52.4"/>
+            <path d="M109 34L102 34"/>
+            <path d="M114.6 20.6L109.6 15.6"/>
+            <path d="M128 15L128 8"/>
+            <path d="M141.4 20.6L146.4 15.6"/>
           </g>
-          <g class="art-waves" fill="none" stroke="#D2AE86" stroke-width="1.6" stroke-linecap="round">
-            <path d="M70 78c16-8 32 8 48 0s32 8 52 0"/>
-            <path d="M70 92c16-8 32 8 48 0s32 8 52 0"/>
-            <path d="M70 106c16-8 32 8 48 0s32 8 52 0"/>
-            <path d="M70 120c16-8 32 8 48 0s32 8 52 0"/>
+          <g class="art-waves">
+            <path d="M70 96c16-7 30-7 46 0s30 7 54-2" opacity=".8"/>
+            <path d="M60 108c16-7 30-7 46 0s30 7 46 0 14-4 18-3" opacity=".8"/>
+            <path d="M78 120c16-7 30-7 46 0s30 7 46-2" opacity=".8"/>
           </g>
-          <g class="art-dune" fill="none" stroke="#D2AE86" stroke-width="1.6" stroke-linejoin="round">
-            <path d="M48 168c28-28 52-22 78-36 16 10 32 6 52-8"/>
-            <path d="M24 176c32-18 58-14 86-28"/>
+          <g class="art-dune">
+            <path d="M60 190c22-30 44-46 62-46 16 0 32 18 48 34" fill="#E7C7A2" fill-opacity=".45"/>
+            <path d="M104 190c12-14 26-22 40-22 10 0 20 6 26 12"/>
+            <g fill="#D2AE86" stroke="none">
+              <circle cx="118" cy="160" r=".9"/>
+              <circle cx="126" cy="156" r=".9"/>
+              <circle cx="134" cy="160" r=".9"/>
+              <circle cx="142" cy="164" r=".9"/>
+              <circle cx="122" cy="168" r=".9"/>
+              <circle cx="130" cy="166" r=".9"/>
+              <circle cx="138" cy="170" r=".9"/>
+              <circle cx="146" cy="172" r=".9"/>
+              <circle cx="114" cy="176" r=".9"/>
+              <circle cx="126" cy="176" r=".9"/>
+              <circle cx="150" cy="180" r=".9"/>
+              <circle cx="138" cy="180" r=".9"/>
+            </g>
           </g>
         </svg>
       </div>
@@ -374,7 +430,7 @@
     <h1 class="strip-label">Recent runs</h1>
     <div class="history-card" id="history-card">
       <div id="history-home"><p class="history-note">No runs yet.</p></div>
-      <button type="button" class="history-more" id="history-see-all">Show older runs</button>
+      <button type="button" class="history-more" id="history-see-all">Show older runs ›</button>
     </div>
   </section>
   <section id="page-schedules" class="hidden" hidden>
@@ -400,22 +456,26 @@
       <h1 id="sched-dlg-title">Edit program</h1>
       <span class="season-chip" id="ed-season-chip"><svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="2.2" stroke="currentColor" stroke-width="1.3"/><path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.8 2.8l1.1 1.1M10.1 10.1l1.1 1.1M10.1 3.9l1.1-1.1M2.8 11.2l1.1-1.1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg><span id="ed-season-chip-text">All year</span></span>
     </div>
-    <label class="field-label" for="ed-name">Name</label>
-    <input id="ed-name" type="text" maxlength="24" autocomplete="off" placeholder="Lawn · Morning">
-    <div class="name-meta">
-      <p class="helper">Zone · Cadence, up to 24 characters. Shown everywhere.</p>
+    <div class="label-row">
+      <label class="field-label" for="ed-name">Name</label>
       <span id="ed-name-count">0/24</span>
     </div>
+    <input id="ed-name" type="text" maxlength="24" autocomplete="off" placeholder="Lawn · Morning" aria-describedby="ed-name-help ed-name-error">
+    <p class="field-error" id="ed-name-error" hidden></p>
+    <p class="helper" id="ed-name-help">Zone · Cadence, up to 24 characters. Shown everywhere.</p>
     <label class="field-label" for="ed-notes">Notes · optional</label>
     <textarea id="ed-notes"></textarea>
     <p class="helper">Only shown here and in a run's details. Never on Home, Recent runs, the wall screen or notifications.</p>
     <label class="field-label" for="ed-start">Start time</label>
-    <input id="ed-start" type="time" value="06:00">
+    <label class="time-pill">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <input id="ed-start" type="time" value="06:00">
+    </label>
     <label class="field-label">Days</label>
     <div class="days" id="ed-days"></div>
     <label class="field-label">Stations</label>
     <div id="ed-steps"></div>
-    <button type="button" class="ghost" id="ed-add-step">Add step</button>
+    <button type="button" class="ghost" id="ed-add-step">Add station</button>
     <label class="field-label">Season</label>
     <div class="season-modes">
       <button type="button" id="ed-season-all" data-mode="all">All year</button>
@@ -540,7 +600,8 @@
   </div>
   <script>
     const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
-    const DAY_LABEL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    const DAY_LETTER = ["M","T","W","T","F","S","S"];
+    const DAY_NAME = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
     const TZ = "America/Phoenix";
     const PAUSE_MIN_DAYS = 1;
     const PAUSE_MAX_DAYS = 14;
@@ -1072,7 +1133,7 @@
         $("phase").innerHTML = name ? `Watering <span class="dot">•</span> ${esc(name)}` : "Watering";
         let sec = kioskRemainingSec();
         if (sec == null && info && info.remainingSec != null) sec = info.remainingSec;
-        $("timer").textContent = formatMinLeft(sec) || "under 1 min left";
+        $("timer-text").textContent = formatMinLeft(sec) || "under 1 min left";
         setHidden($("timer"), false);
         const nxt = nextStationTitle(run, info);
         setQuiet(wateringQuiet(run, info), false, true);
@@ -1196,7 +1257,7 @@
       const set = new Set((selected || []).map((d) => String(d).toLowerCase()));
       const allOn = set.size === 0;
       $("ed-days").innerHTML = DAYS.map((d, i) =>
-        `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}">${DAY_LABEL[i]}</button>`
+        `<button type="button" data-day="${d}" class="${allOn || set.has(d) ? "on" : ""}" aria-label="${DAY_NAME[i]}">${DAY_LETTER[i]}</button>`
       ).join("");
       $("ed-days").querySelectorAll("[data-day]").forEach((b) => {
         b.addEventListener("click", () => b.classList.toggle("on"));
@@ -1206,35 +1267,36 @@
     function renderEdSteps(steps) {
       const box = $("ed-steps");
       box.innerHTML = "";
-      const list = (steps && steps.length) ? steps : [{ station_id: (state.stations[0] || {}).id || "", minutes: 5 }];
+      const list = (steps && steps.length) ? steps : [{ station_id: (state.stations[0] || {}).id || "", minutes: 6 }];
       list.forEach((step) => {
         const row = document.createElement("div");
         row.className = "step-row";
         const mins = Math.max(1, Math.min(180, Number(step.minutes) || 1));
+        const sid = step.station_id || "";
         row.innerHTML = `
-          <label>Station<select data-st>${stationOptions(step.station_id)}</select></label>
+          <span class="step-name">${esc(shortStation(sid) || "Station")}</span>
           <div class="stepper">
             <button type="button" data-minus aria-label="Fewer minutes">−</button>
-            <span data-min-label>${stepMinutesLabel(mins)}</span>
+            <span class="step-mins" data-min-label>${stepMinutesLabel(mins)}</span>
             <input data-min type="hidden" value="${mins}">
+            <input data-st type="hidden" value="${esc(sid)}">
             <button type="button" data-plus aria-label="More minutes">+</button>
-          </div>
-          <button type="button" class="ghost" data-rm aria-label="Remove">×</button>`;
+          </div>`;
         const sync = (delta) => {
           const input = row.querySelector("[data-min]");
           let n = Number(input.value) || 1;
-          n = Math.max(1, Math.min(180, n + delta));
+          n = Math.max(0, Math.min(180, n + delta));
+          if (n < 1) {
+            row.remove();
+            updateEdCollide();
+            return;
+          }
           input.value = String(n);
           row.querySelector("[data-min-label]").textContent = stepMinutesLabel(n);
           updateEdCollide();
         };
         row.querySelector("[data-minus]").addEventListener("click", () => sync(-1));
         row.querySelector("[data-plus]").addEventListener("click", () => sync(1));
-        row.querySelector("[data-rm]").addEventListener("click", () => {
-          row.remove();
-          if (!$("ed-steps").children.length) renderEdSteps([]);
-          updateEdCollide();
-        });
         box.appendChild(row);
       });
     }
@@ -1271,17 +1333,26 @@
       if (runeCount(next) <= NAME_MAX) return next;
       return base;
     }
+    function editorName(src, asDup) {
+      if (asDup) return withCopy(programName(src));
+      const named = String((src && src.name) || "").trim();
+      if (named) return named;
+      if (!src || (!src.id && !String(src.note || "").trim())) return "";
+      return String(src.note || "").trim() || String(src.id || "");
+    }
     function openEditor(sch, asDup) {
       const src = sch || { id: "", enabled: true, name: "", note: "", notes: "", weekdays: [], start: "06:00", steps: [], starts_on: "", ends_on: "" };
       let id = src.id;
       if (asDup) id = mintId((programName(src) || "copy") + "-copy");
       else if (!sch) id = mintId("program");
-      state.edit = { id, isNew: !sch || asDup };
+      state.edit = { id, isNew: !sch || asDup, note: src.note || "" };
       $("sched-dlg-title").textContent = asDup ? "Duplicate program" : (sch ? "Edit program" : "New program");
-      const shown = asDup ? withCopy(programName(src)) : (String(src.name || "").trim() || String(src.note || "").trim());
+      const shown = editorName(src, asDup);
       $("ed-name").value = shown;
       $("ed-name").dataset.last = shown;
       paintNameCount();
+      setHidden($("ed-name-error"), true);
+      $("ed-name").removeAttribute("aria-invalid");
       $("ed-notes").value = src.notes || "";
       $("ed-start").value = src.start || "06:00";
       $("ed-enabled").checked = src.enabled !== false;
@@ -1316,7 +1387,7 @@
         id: state.edit.id,
         enabled: $("ed-enabled").checked,
         name,
-        note: name,
+        note: state.edit.note || "",
         notes: $("ed-notes").value.trim(),
         weekdays,
         start: $("ed-start").value || "06:00",
@@ -1336,6 +1407,17 @@
     }
     async function saveEditor() {
       const body = readEditorDraft();
+      const nameEl = $("ed-name");
+      const err = $("ed-name-error");
+      if (!body.name) {
+        err.textContent = "Name is required.";
+        setHidden(err, false);
+        nameEl.setAttribute("aria-invalid", "true");
+        nameEl.focus();
+        return;
+      }
+      setHidden(err, true);
+      nameEl.removeAttribute("aria-invalid");
       if (runeCount(body.name) > NAME_MAX) { alert("Name can be at most 24 characters."); return; }
       if (!body.id) body.id = mintId(body.name || body.note);
       if (!body.steps.length) { alert("Add at least one station."); return; }
@@ -1349,21 +1431,23 @@
       showSchedules();
     }
     async function toggleEnabled(sch) {
+      const body = {
+        id: sch.id,
+        enabled: !sch.enabled,
+        note: sch.note || "",
+        notes: sch.notes || "",
+        weekdays: sch.weekdays || [],
+        start: sch.start || "06:00",
+        steps: sch.steps || [],
+        starts_on: sch.starts_on || "",
+        ends_on: sch.ends_on || "",
+      };
+      const name = String(sch.name || "").trim();
+      if (name) body.name = name;
       await j("/api/schedules/" + encodeURIComponent(sch.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: sch.id,
-          enabled: !sch.enabled,
-          name: sch.name || "",
-          note: sch.note || "",
-          notes: sch.notes || "",
-          weekdays: sch.weekdays || [],
-          start: sch.start || "06:00",
-          steps: sch.steps || [],
-          starts_on: sch.starts_on || "",
-          ends_on: sch.ends_on || "",
-        }),
+        body: JSON.stringify(body),
       });
       await loadSchedules();
     }
@@ -1606,7 +1690,10 @@
     function historyWhen(entry) {
       const d = new Date(entry.started_at);
       if (Number.isNaN(d.getTime())) return "Earlier";
-      return friendlyWhen(d);
+      const day = historyDay(d);
+      const time = clockPhrase(d);
+      if (!time) return day;
+      return `${day} ${time}`;
     }
     function historySpan(entry) {
       const start = new Date(entry.started_at);
@@ -1634,9 +1721,12 @@
       const st = historyStatus(entry);
       const detail = historyDetail(entry);
       return `<button type="button" class="run-row" data-run="${idx}">` +
+        `<span class="run-copy">` +
         `<span class="run-primary"><span class="run-when">${esc(historyWhen(entry))}</span><span class="run-sep">\u00A0·\u00A0</span><span class="run-name">${esc(historyProgramLabel(entry))}</span></span>` +
         `<span class="run-status ${st.cls}">${esc(st.text)}</span>` +
         (detail ? `<span class="run-detail">${esc(detail)}</span>` : "") +
+        `</span>` +
+        `<span class="run-chev" aria-hidden="true">›</span>` +
         `</button>`;
     }
     function bindHistory(root) {
@@ -1914,6 +2004,10 @@
         if (runeCount(el.value) > NAME_MAX) el.value = el.dataset.last || "";
         else el.dataset.last = el.value;
         paintNameCount();
+        if (el.value.trim()) {
+          setHidden($("ed-name-error"), true);
+          el.removeAttribute("aria-invalid");
+        }
       });
     }
     $("run-cancel").addEventListener("click", () => $("run-dlg").close());
@@ -1974,7 +2068,9 @@
         station_id: row.querySelector("[data-st]").value,
         minutes: Number(row.querySelector("[data-min]").value) || 1,
       }));
-      cur.push({ station_id: (state.stations[0] || {}).id || "", minutes: 5 });
+      const used = new Set(cur.map((s) => s.station_id));
+      const next = (state.stations || []).find((st) => st.id && !used.has(st.id)) || (state.stations || [])[0];
+      cur.push({ station_id: (next && next.id) || "", minutes: 6 });
       renderEdSteps(cur);
     });
     $("ed-season-all").addEventListener("click", () => setSeasonMode("all"));

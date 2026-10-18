@@ -116,3 +116,52 @@ func TestScheduleNameLimitAndNotesHidden(t *testing.T) {
 	_ = s.Eng.Stop()
 	<-done
 }
+
+func TestScheduleEmptyNameRejectedAndLegacyNoteKept(t *testing.T) {
+	s := newTestServer(t)
+	steps := []map[string]any{{"station_id": "front-north", "minutes": 6}}
+	rr := doJSON(t, s, http.MethodPut, "/api/schedules/lawn", map[string]any{
+		"id": "lawn", "enabled": true, "note": "legacy note", "start": "06:00", "steps": steps,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("absent name %d %s", rr.Code, rr.Body.String())
+	}
+	saved := decodeMap(t, rr)
+	if saved["note"] != "legacy note" {
+		t.Fatalf("note %v", saved["note"])
+	}
+	if name, ok := saved["name"]; ok && name != "" {
+		t.Fatalf("absent name stored %v", name)
+	}
+
+	rr = doJSON(t, s, http.MethodPut, "/api/schedules/lawn", map[string]any{
+		"id": "lawn", "enabled": false, "start": "07:15", "steps": steps,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("second absent name %d %s", rr.Code, rr.Body.String())
+	}
+	saved = decodeMap(t, rr)
+	if saved["note"] != "legacy note" || saved["start"] != "07:15" || saved["enabled"] != false {
+		t.Fatalf("note not preserved %+v", saved)
+	}
+	rr = doJSON(t, s, http.MethodGet, "/api/schedules/lawn", nil)
+	saved = decodeMap(t, rr)
+	if saved["note"] != "legacy note" {
+		t.Fatalf("loaded note %v", saved["note"])
+	}
+
+	for _, name := range []string{"", " ", "\t", " \n "} {
+		rr = doJSON(t, s, http.MethodPut, "/api/schedules/lawn", map[string]any{
+			"id": "lawn", "enabled": true, "name": name, "note": "legacy note",
+			"start": "06:00", "steps": steps,
+		})
+		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "name is required") {
+			t.Fatalf("name %q want 400 name is required, got %d %s", name, rr.Code, rr.Body.String())
+		}
+	}
+	rr = doJSON(t, s, http.MethodGet, "/api/schedules/lawn", nil)
+	saved = decodeMap(t, rr)
+	if saved["note"] != "legacy note" {
+		t.Fatalf("rejected put changed note %v", saved["note"])
+	}
+}

@@ -963,32 +963,61 @@ static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapsho
         lv_obj_t *tile = target(scr, tr, ZK_TARGET_TILE0 + i, COL_CARD, 22, 1);
         int title_y = soil ? 10 : (tr.h - 36) / 2;
         {
-            /* On/Off pill sits 14px from the tile's inner edge, same inset as the title.
-               Child x is inside the 3px border, so the content box is tr.w - 6 wide. */
-            int pill_w = (tr.w < 170) ? 56 : 64;
-            int pill_h = 32;
-            int inner_w = tr.w - 6;
-            int pill_x = inner_w - 14 - pill_w;
-            int pill_y = soil ? 6 : title_y + (33 - pill_h) / 2;
-            int title_w;
-            if (pill_x < 36) {
-                pill_x = 36;
+            /* Title keeps main's slot: 14 px inset on each side (tr.w - 28).
+               The On/Off pill is its own line under the title, left-aligned,
+               and stops above the soil bar when soil is shown. */
+            int title_w = tr.w - 28;
+            int title_h = (int)lv_font_get_line_height(&zk_font_xb_32);
+            int state_h = (int)lv_font_get_line_height(&zk_font_b_26);
+            int pill_w = 56;
+            int pill_h = 28;
+            int pill_x = 14;
+            int pill_y;
+            if (title_h < 1) {
+                title_h = 33;
             }
-            if (pill_y < 4) {
-                pill_y = 4;
+            if (state_h < 1) {
+                state_h = 27;
             }
-            title_w = pill_x - 8 - 14;
             if (title_w < 24) {
                 title_w = 24;
+            }
+            /* Flush under the title so a 28 px pill still clears the soil
+               percent (bar top minus the extra line-height). */
+            pill_y = title_y + title_h;
+            if (soil) {
+                int bar_h = 38;
+                int bar_y = tr.h - 14 - bar_h;
+                int pct_lh = (int)lv_font_get_line_height(&zk_font_xb_44);
+                int soil_top;
+                if (pct_lh < 1) {
+                    pct_lh = 45;
+                }
+                if (bar_y < title_y + 36) {
+                    bar_y = title_y + 36;
+                }
+                soil_top = bar_y + (bar_h - pct_lh) / 2;
+                if (pill_y + pill_h > soil_top) {
+                    pill_h = soil_top - pill_y;
+                }
+            }
+            if (pill_y + pill_h > tr.h - 8) {
+                pill_h = tr.h - 8 - pill_y;
+            }
+            if (pill_h < 1) {
+                pill_h = 1;
+            }
+            if (state_h > pill_h) {
+                state_h = pill_h;
             }
             mark_lab_n("tile_title", i, 1);
             g_w.tile_title[i] = lab(tile, "", &zk_font_xb_32, COL_INK, 14, title_y);
             lab_width(g_w.tile_title[i], title_w, LV_TEXT_ALIGN_LEFT);
             g_w.tile_pill[i] = box_at(tile, pill_x, pill_y, pill_w, pill_h, COL_TRACK, 16);
             mark_lab_n("tile_state", i, 1);
-            g_w.tile_state[i] = lab(g_w.tile_pill[i], "Off", &zk_font_b_26, COL_INK, 0, 2);
+            g_w.tile_state[i] = lab(g_w.tile_pill[i], "Off", &zk_font_b_26, COL_INK, 0, 0);
             lab_width(g_w.tile_state[i], pill_w, LV_TEXT_ALIGN_CENTER);
-            lv_obj_set_height(g_w.tile_state[i], 27);
+            lv_obj_set_height(g_w.tile_state[i], state_h);
         }
         if (!soil) {
             continue;

@@ -97,11 +97,13 @@ func TestAutoRainPauseExemptStationRun(t *testing.T) {
 		t.Fatal("manual run cleared auto rain pause")
 	}
 	_ = s.Eng.Stop()
+	waitEngineIdle(t, s.Eng)
 	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("exempt %d %s", rr.Code, rr.Body.String())
 	}
 	_ = s.Eng.Stop()
+	waitEngineIdle(t, s.Eng)
 
 	s.Eng.SetPause(&until, "rain")
 	rr = doJSON(t, s, http.MethodPost, "/api/stations/front-north/run", map[string]any{"durationSec": 1})
@@ -110,6 +112,27 @@ func TestAutoRainPauseExemptStationRun(t *testing.T) {
 	}
 	if !s.Eng.IsPaused(time.Now()) {
 		t.Fatal("manual run cleared manual pause")
+	}
+}
+
+// waitEngineIdle polls until Stop's run goroutine has released the engine.
+// Stop() itself sets phase Idle and turns stations off, but running stays
+// true until the goroutine's cleanup. That flag clears in the same lock as
+// run progress, so Idle with no stations and no progress means the next
+// run will not see "engine: busy watering".
+func waitEngineIdle(t *testing.T, eng *engine.Engine) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		st := eng.Status()
+		_, active := eng.RunProgress(time.Now())
+		if st.Phase == engine.PhaseIdle && len(st.StationsOn) == 0 && !active {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("engine not idle after Stop: phase=%s on=%v active=%v", st.Phase, st.StationsOn, active)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

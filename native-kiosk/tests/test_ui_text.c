@@ -346,6 +346,41 @@ static void test_running_long(void)
     }
 }
 
+/* Main's station title slot is tile width minus 14 px insets (parent_w - 28).
+ * Soil and no-soil must both keep that width. "Test Station N" fit on main. */
+static void test_home_title_width(const char *fix)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int i;
+    TCHECK(load_fix(fix, ZK_SCREEN_HOME) == 0, "load %s", fix);
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    check_geometry(b, n, fix);
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        char want[32];
+        const zk_ui_label_box_t *t;
+        const zk_ui_label_box_t *st;
+        snprintf(id, sizeof id, "tile_title%d", i);
+        t = find_box(b, n, id);
+        TCHECK(t != NULL, "%s missing %s", fix, id);
+        if (t) {
+            TEQ_I(t->w, t->parent_w - 28);
+            snprintf(want, sizeof want, "Test Station %d", i + 1);
+            TEQ_S(t->text, want);
+        }
+        snprintf(id, sizeof id, "tile_state%d", i);
+        st = find_box(b, n, id);
+        TCHECK(st != NULL, "%s missing %s", fix, id);
+        if (t && st) {
+            TCHECK(st->y >= t->y + t->h, "%s pill overlaps title y %d+%d vs %d", fix, t->y, t->h, st->y);
+        }
+    }
+}
+
 static void test_station_sheet_and_needs_update(void)
 {
     zk_ui_label_box_t b[96];
@@ -424,6 +459,8 @@ int main(void)
     test_paused_long();
     test_home_long();
     test_home_onoff();
+    test_home_title_width("home-rain");
+    test_home_title_width("home-nosoil");
     test_running_long();
     test_station_sheet_and_needs_update();
     zk_data_stop();
