@@ -533,9 +533,27 @@ static void fill_soil_text(zk_tile_copy_t *tile, const zk_copy_src_t *src, const
              zk_soil_word(in ? in->soil_cfg : NULL, st->id, pct));
 }
 
+/* Half up, away from zero. Negative, NaN, and non-positive return -1. */
+static int half_up_units(double v, int scale)
+{
+    double x;
+    if (!(v == v) || v <= 0 || scale < 1) {
+        return -1;
+    }
+    if (v > 999.99) {
+        v = 999.99;
+    }
+    x = v * (double)scale + 0.5;
+    if (x >= 2000000000.0) {
+        return 2000000000;
+    }
+    return (int)x;
+}
+
 static void fill_rain(zk_hero_copy_t *h, const zk_kiosk_t *k)
 {
     int hundredths;
+    int tenths;
     char num[24];
     double v;
     h->rain = 0;
@@ -545,14 +563,17 @@ static void fill_rain(zk_hero_copy_t *h, const zk_kiosk_t *k)
         return;
     }
     v = k->rain.total_72h;
-    if (!(v == v) || v <= 0.05) {
+    /* Show only when the 72 h total, rounded to 0.01 in, is at least 0.06 in.
+     * The words round to 0.1 in, so the line never says "Rain 0.0 in". */
+    hundredths = half_up_units(v, 100);
+    if (hundredths < 6) {
         return;
     }
-    hundredths = (int)(v * 100.0 + 0.5);
-    if (hundredths <= 5) {
+    tenths = half_up_units(v, 10);
+    if (tenths < 1) {
         return;
     }
-    zk_fmt_inches_trim(v, num, sizeof num);
+    snprintf(num, sizeof num, "%d.%d", tenths / 10, tenths % 10);
     snprintf(h->rain_text, sizeof h->rain_text, "Rain %s in " ZK_MID " last 72 h", num);
     h->rain = 1;
     if (v >= 1.0) {
@@ -744,7 +765,11 @@ static void fill_sched(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view
             b = n;
         }
         zk_str_copy(base, sizeof base, out->sched.label);
-        snprintf(out->sched.label, sizeof out->sched.label, "%s " ZK_MID " %d" ZK_EN "%d of %d", base, a, b, n);
+        if (a == b) {
+            snprintf(out->sched.label, sizeof out->sched.label, "%s " ZK_MID " %d of %d", base, a, n);
+        } else {
+            snprintf(out->sched.label, sizeof out->sched.label, "%s " ZK_MID " %d" ZK_EN "%d of %d", base, a, b, n);
+        }
     }
     out->sched.n_rows = 0;
     for (i = 0; i < 2; i++) {
@@ -826,15 +851,15 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
         }
         out->hero.style = ZK_HERO_STOP_CONFIRMED;
     } else if (pending) {
+        /* Same two-line headline before and after a 2xx. Only the label and line 2 change. */
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, ZK_STOP_PENDING_HEADLINE);
         if (offline) {
             zk_fmt_time_nbsp(k ? k->now.hh : src->wall.hh, k ? k->now.mm : src->wall.mm, tbuf, sizeof tbuf);
             snprintf(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " LAST UPDATE %s", tbuf);
-            zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Stop not sent yet:");
-            zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "can't reach controller. Retrying\xE2\x80\xA6");
+            zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, ZK_STOP_PENDING_OFFLINE);
         } else {
-            zk_str_copy(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " NO REPLY YET");
-            zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Stop not confirmed yet");
-            zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Waiting for the controller. Retrying\xE2\x80\xA6");
+            zk_str_copy(out->hero.label, sizeof out->hero.label, ZK_STOP_PENDING_LABEL);
+            zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, ZK_STOP_PENDING_RETRY);
         }
         out->hero.style = ZK_HERO_STOP_PENDING;
     } else if (offline) {
@@ -1051,6 +1076,7 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
         } else {
             const char *title = "";
             const char *prog = "";
+            int manual_run = k && is_manual(k);
             zk_str_copy(out->sheet.label, sizeof out->sheet.label, "STOP");
             if (k && k->has_run) {
                 title = station_title_id(k, k->run.current_station);
@@ -1058,14 +1084,23 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
             } else if (k && k->current_station[0]) {
                 title = station_title_id(k, k->current_station);
             }
-            if (title[0] && prog[0]) {
+            if (manual_run) {
+                if (title[0]) {
+                    snprintf(out->sheet.body, sizeof out->sheet.body,
+                             "Ends the manual run on %s now. Schedules stay on.", title);
+                } else {
+                    zk_str_copy(out->sheet.body, sizeof out->sheet.body,
+                                "Ends the manual run now. Schedules stay on.");
+                }
+            } else if (title[0] && prog[0]) {
                 snprintf(out->sheet.body, sizeof out->sheet.body,
                          "%s closes now and the rest of %s is skipped. Schedules stay on.", title, prog);
             } else if (title[0]) {
                 snprintf(out->sheet.body, sizeof out->sheet.body,
                          "%s closes now and the rest of the program is skipped. Schedules stay on.", title);
             } else {
-                zk_str_copy(out->sheet.body, sizeof out->sheet.body, "Schedules stay on.");
+                zk_str_copy(out->sheet.body, sizeof out->sheet.body,
+                            "Nothing is watering right now. Schedules stay on.");
             }
         }
         zk_str_copy(out->sheet.title, sizeof out->sheet.title, "Stop all watering?");

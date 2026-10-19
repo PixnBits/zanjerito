@@ -1527,6 +1527,7 @@ case_af() {
 # Bringing it back with every valve off confirms.
 case_ag() {
     local ctl=$TMP/ag.ctl
+    local last
     printf 'watering=stay\nreach=up\n' >"$ctl"
     start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
     kiosk_bg 24 \
@@ -1553,8 +1554,27 @@ case_ag() {
         return 1
     fi
     printf 'watering=stay\nreach=down\n' >"$ctl"
-    if ! wait_err "Stop not sent yet:" 48; then
+    if ! wait_err "Can't reach controller. Retrying…" 48; then
         echo "ag: offline pending copy missing" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    last=$(grep '^HERO ' "$TMP/kiosk.err" | tail -n 1 || true)
+    if ! printf '%s\n' "$last" | grep -F "Stop not confirmed yet" >/dev/null; then
+        echo "ag: offline headline is not Stop not confirmed yet [$last]" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Stop not sent yet" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: retired sent-yet copy" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "NO REPLY YET" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: retired no-reply label" >&2
         show_kiosk_err
         stop_kiosk
         return 1
@@ -1574,6 +1594,41 @@ case_ag() {
         return 1
     fi
     stop_kiosk
+}
+
+# Open Stop all and leave it. Past the idle threshold the sheet returns to
+# Home, no cancel is posted, and the hero is not the pending sentence.
+case_ah() {
+    local sheet=$TMP/ah-sheet.png home=$TMP/ah-home.png
+    local red sand cream
+    start_stub "$FIX/dc-watering-4" || return 1
+    ZK_IDLE_HOME_MS=800 ZK_HERO_LOG=1 kiosk 6 \
+        "wait:400;tap:${STOP_X},${STOP_Y};wait:300;shot:${sheet};wait:2000;shot:${home}" \
+        14 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "" || return 1
+    [[ -f "$sheet" && -f "$home" ]] || { echo "ah: missing shots" >&2; return 1; }
+    red=$(nearcount "$sheet" 420 500 332 356 181 54 26 12)
+    if [[ "$red" -lt 1000 ]]; then
+        echo "ah: Stop all was not open ($red)" >&2
+        return 1
+    fi
+    red=$(nearcount "$home" 420 500 332 356 181 54 26 12)
+    sand=$(nearcount "$home" 588 596 36 44 251 236 214 8)
+    cream=$(nearcount "$home" 588 596 36 44 255 250 238 8)
+    if [[ "$red" -gt 20 || "$sand" -lt 40 || "$cream" -ne 0 ]]; then
+        echo "ah: idle did not return Home (red $red sand $sand cream $cream)" >&2
+        return 1
+    fi
+    if grep -F "Stop not confirmed" "$TMP/kiosk.err" >/dev/null; then
+        echo "ah: hero went pending without a confirm" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -F "Front Yard Drip Emitters" "$TMP/kiosk.err" >/dev/null; then
+        echo "ah: home hero missing" >&2
+        show_kiosk_err
+        return 1
+    fi
 }
 
 # Reachable controller, ack slower than the 5s HTTP timeout. Pending copy, STOP stays filled.
@@ -1734,6 +1789,7 @@ run_case ad case_ad
 run_case ae case_ae
 run_case af case_af
 run_case ag case_ag
+run_case ah case_ah
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

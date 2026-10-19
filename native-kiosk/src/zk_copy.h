@@ -23,6 +23,11 @@
 #define ZK_SCHED_EMPTY "Nothing scheduled"
 #define ZK_SCHED_EMPTY_BODY "Add a program on your phone"
 #define ZK_SCHED_READ "SCHEDULES " ZK_MID " READ ONLY"
+/* Explicit break. "confirmed yet" is 327 px in the 332 px column. */
+#define ZK_STOP_PENDING_HEADLINE "Stop not\nconfirmed" ZK_NBSP "yet"
+#define ZK_STOP_PENDING_LABEL "STOP " ZK_MID " WAITING FOR CONTROLLER"
+#define ZK_STOP_PENDING_RETRY "Retrying until all valves are off."
+#define ZK_STOP_PENDING_OFFLINE "Can't reach controller. Retrying\xE2\x80\xA6"
 #define ZK_WORD_STOP "STOP"
 #define ZK_WORD_CANCEL "Cancel"
 #define ZK_WORD_RUN "Run"

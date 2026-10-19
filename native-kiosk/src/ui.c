@@ -627,8 +627,12 @@ static uint32_t wrap_line(const char *s, uint32_t nbytes, const lv_font_t *font,
         return 0;
     }
     while (i < nbytes && s[i]) {
-        uint32_t n = utf8_next(s, i);
+        uint32_t n;
         int w;
+        if (s[i] == '\n') {
+            return i;
+        }
+        n = utf8_next(s, i);
         if (n == i || n > nbytes) {
             break;
         }
@@ -693,6 +697,12 @@ static int fit_wrapped(char *dst, size_t cap, const char *src, const lv_font_t *
     while (*p && nlines < max_lines) {
         int w = nlines == 0 ? first_w : rest_w;
         uint32_t adv;
+        while (*p == '\n') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
         if (w < 1) {
             w = first_w;
         }
@@ -705,6 +715,9 @@ static int fit_wrapped(char *dst, size_t cap, const char *src, const lv_font_t *
         seg[nlines].hard = (p[adv] != '\0' && p[adv - 1] != ' ') ? 1 : 0;
         any_hard |= seg[nlines].hard;
         p += adv;
+        if (*p == '\n') {
+            p++;
+        }
         nlines++;
     }
     overflow = *p != '\0';
@@ -1480,9 +1493,31 @@ static void apply_hero(void)
     time_h = 40;
 
     /* Headline box stays inset 22 / width 332. A name that needs a fourth
-     * line is ellipsized at three. The box does not grow into the hero. */
+     * line is ellipsized at three. The box does not grow into the hero.
+     * An explicit newline is the line break. This Literata 48 draws
+     * "confirmed yet" at 334 px, so that authored line may use up to 16 px
+     * more and still ends inside the hero. */
     head_x = 22;
     head_w = 332;
+    if (h->headline[0] && strchr(h->headline, '\n')) {
+        const char *p = h->headline;
+        int need = 0;
+        while (*p) {
+            const char *nl = strchr(p, '\n');
+            uint32_t n = nl ? (uint32_t)(nl - p) : (uint32_t)strlen(p);
+            int lw = (int)lv_text_get_width(p, n, hf, 0);
+            if (lw > need) {
+                need = lw;
+            }
+            if (!nl) {
+                break;
+            }
+            p = nl + 1;
+        }
+        if (need > head_w && need <= 332 + 16) {
+            head_w = need;
+        }
+    }
     clamped = fit_wrapped(broken, sizeof broken, h->headline, hf, head_w, head_w, 3, NULL);
     head_txt = broken[0] ? broken : (h->headline[0] ? h->headline : "");
     use_font(g_w.h_head, hf, 0);
@@ -2452,6 +2487,32 @@ static void paint(void)
     log_hero();
 }
 
+/* One log line. A drawn break and a non-breaking space still read as the sentence. */
+static void flatten_hero_log(char *s)
+{
+    char *r;
+    char *w;
+    if (!s) {
+        return;
+    }
+    r = s;
+    w = s;
+    while (*r) {
+        if (*r == '\n') {
+            *w++ = ' ';
+            r++;
+            continue;
+        }
+        if ((unsigned char)r[0] == 0xC2 && (unsigned char)r[1] == 0xA0) {
+            *w++ = ' ';
+            r += 2;
+            continue;
+        }
+        *w++ = *r++;
+    }
+    *w = 0;
+}
+
 static void log_hero(void)
 {
     const char *env;
@@ -2462,6 +2523,7 @@ static void log_hero(void)
         return;
     }
     snprintf(line, sizeof line, "HERO %s | %s", g_view.hero.headline, g_view.hero.secondary);
+    flatten_hero_log(line);
     if (strcmp(prev, line) == 0) {
         return;
     }
@@ -2682,10 +2744,11 @@ void zk_ui_tick(void)
         g_screen = (enum zk_screen)g_override;
     } else if (g_stop_hold < 0) {
         int64_t now = zk_platform_mono_ms();
+        int64_t limit = zk_idle_home_ms();
         if (!g_idle_ready) {
             g_idle_from = now;
             g_idle_ready = 1;
-        } else if (now >= g_idle_from && zk_flow_idle_returns_home(g_screen, now - g_idle_from)) {
+        } else if (now >= g_idle_from && zk_flow_idle_returns_home_limit(g_screen, now - g_idle_from, limit)) {
             /* Back to Home. Stop all is not confirmed. */
             g_screen = ZK_SCREEN_HOME;
             g_under = ZK_SCREEN_HOME;

@@ -4,6 +4,7 @@
 #include "platform.h"
 #include "ui.h"
 #include "zk_copy.h"
+#include "zk_flow.h"
 #include "zk_layout.h"
 
 #include "generated/zk_fonts.h"
@@ -622,6 +623,15 @@ static void test_home_title_width(void)
         return;
     }
     assert_rain_end(rain, nr, "home-rain");
+    {
+        const zk_ui_label_box_t *rt = find_box(rain, nr, "rain_text");
+        TCHECK(rt && rt->visible, "home-rain meter");
+        if (rt) {
+            TEQ_S(rt->text, "Rain 0.2 in " ZK_MID " last 72 h");
+            TCHECK(strstr(rt->text, "0.0") == NULL, "rain line said 0.0");
+            TCHECK(strstr(rt->text, "0.24") == NULL, "rain line kept the raw hundredths");
+        }
+    }
     TCHECK(load_fix("home-nosoil", ZK_SCREEN_HOME) == 0, "load home-nosoil");
     nd = grab(dry, 96);
     if (nd < 0) {
@@ -1010,7 +1020,7 @@ static void test_schedules_screen(void)
     n4 = grab(four, 96);
     t = find_box(four, n4, "sched_label");
     if (t) {
-        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY " ZK_MID " 3" ZK_EN "3 of 3");
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY " ZK_MID " 3 of 3");
     }
     t = find_box(four, n4, "sched_name0");
     if (t) {
@@ -1122,6 +1132,146 @@ static void test_button_rects(void)
     expect_btn(b, n, "ok_word", 524, 232, 240, 96);
 }
 
+/* A 24-character station name stays whole. A longer name clamps at 3 lines. */
+static void test_hero_name_24(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    const zk_ui_label_box_t *head;
+    const char *full = "Front Yard Drip Emitters";
+    char flat[160];
+    TCHECK(load_fix("dc-watering-4", ZK_SCREEN_HOME) == 0, "load 24-char name");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    head = find_box(b, n, "hero_headline");
+    TCHECK(head != NULL, "24-char headline");
+    TEQ_I((int)strlen(full), 24);
+    if (!head) {
+        return;
+    }
+    strip_breaks(flat, sizeof flat, head->text);
+    TEQ_S(flat, full);
+    TCHECK(!ends_ellipsis(head->text), "24-char name ellipsized: %s", head->text);
+    TCHECK(strstr(head->text, "\xE2\x80\xA6") == NULL, "24-char name clamped: %s", head->text);
+}
+
+static void test_pending_headline(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int w;
+    const zk_ui_label_box_t *head;
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *sub;
+    const char *line2 = "confirmed" ZK_NBSP "yet";
+    TCHECK(load_fix("dc-watering-4", ZK_SCREEN_HOME) == 0, "load pending hero");
+    zk_ui_debug_set_stop(ZK_STOP_QUEUED);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    head = find_box(b, n, "hero_headline");
+    label = find_box(b, n, "hero_label");
+    sub = find_box(b, n, "hero_secondary");
+    TCHECK(head && label && sub, "reachable pending labels");
+    if (head) {
+        TEQ_S(head->text, ZK_STOP_PENDING_HEADLINE);
+        TCHECK(strstr(head->text, "\n") == head->text + strlen("Stop not"), "headline break");
+    }
+    if (label) {
+        TEQ_S(label->text, ZK_STOP_PENDING_LABEL);
+        TCHECK(strstr(label->text, "NO REPLY") == NULL, "rendered no-reply label");
+    }
+    if (sub) {
+        TEQ_S(sub->text, ZK_STOP_PENDING_RETRY);
+    }
+    w = (int)lv_text_get_width(line2, (uint32_t)strlen(line2), &zk_font_lit_48, 0);
+    /* This font is 334 px. The headline box grows just enough to keep the line. */
+    TCHECK(w > 300 && w <= 348, "confirmed yet is %d px", w);
+    if (head) {
+        TCHECK(head->w >= w, "headline box %d clips line 2 (%d)", head->w, w);
+        TCHECK(head->x + head->w <= head->parent_x + head->parent_w, "headline leaves the hero");
+    }
+    w = (int)lv_text_get_width(ZK_STOP_PENDING_RETRY, (uint32_t)strlen(ZK_STOP_PENDING_RETRY), &zk_font_r_26, 0);
+    TCHECK(w > 0 && w <= 332, "reachable line 2 is %d px", w);
+    w = (int)lv_text_get_width(ZK_STOP_PENDING_OFFLINE, (uint32_t)strlen(ZK_STOP_PENDING_OFFLINE), &zk_font_r_26, 0);
+    TCHECK(w > 0 && w <= 332, "unreachable line 2 is %d px", w);
+
+    zk_data_debug_force_stale(1);
+    zk_ui_debug_set_stop(ZK_STOP_WAIT);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    head = find_box(b, n, "hero_headline");
+    label = find_box(b, n, "hero_label");
+    sub = find_box(b, n, "hero_secondary");
+    TCHECK(head && label && sub, "unreachable pending labels");
+    if (head) {
+        TEQ_S(head->text, ZK_STOP_PENDING_HEADLINE);
+        TCHECK(strstr(head->text, "sent yet") == NULL, "rendered sent-yet headline");
+    }
+    if (label) {
+        TEQ_S(label->text, "STOP " ZK_MID " LAST UPDATE 6:26" ZK_NBSP "AM");
+    }
+    if (sub) {
+        TEQ_S(sub->text, ZK_STOP_PENDING_OFFLINE);
+    }
+    zk_data_debug_force_stale(0);
+    zk_ui_debug_set_stop(-1);
+}
+
+static void test_schedules_empty_offline(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    const zk_ui_label_box_t *t;
+    TCHECK(load_fix("dc-schedules-empty", ZK_SCREEN_SCHEDULES) == 0, "load empty schedules");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    t = find_box(b, n, "sched_label");
+    if (t) {
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY");
+    }
+    t = find_box(b, n, "sched_empty");
+    TCHECK(t && t->visible, "empty title");
+    if (t) {
+        TEQ_S(t->text, ZK_SCHED_EMPTY);
+    }
+    t = find_box(b, n, "sched_empty_body");
+    TCHECK(t && t->visible, "empty body");
+    if (t) {
+        TEQ_S(t->text, ZK_SCHED_EMPTY_BODY);
+    }
+    t = find_box(b, n, "sched_name0");
+    if (t) {
+        TCHECK(!t->visible, "empty list drew a program");
+    }
+    t = find_box(b, n, "next_word");
+    if (t) {
+        TCHECK(!t->visible, "Next shown on an empty list");
+    }
+
+    TCHECK(load_fix("dc-schedules-offline", ZK_SCREEN_SCHEDULES) == 0, "load offline schedules");
+    zk_data_debug_force_stale(1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    t = find_box(b, n, "sched_label");
+    TCHECK(t && t->visible, "offline schedules label");
+    if (t) {
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " LAST UPDATE 6:42" ZK_NBSP "AM");
+    }
+    t = find_box(b, n, "sched_name0");
+    if (t) {
+        TEQ_S(t->text, "Lawn " ZK_MID " Morning");
+        TCHECK(t->visible, "offline program hidden");
+    }
+    zk_data_debug_force_stale(0);
+}
+
 static void test_unavailable_names(void)
 {
     int i;
@@ -1160,11 +1310,14 @@ int main(void)
     test_home_onoff();
     test_tile_names_fit_clamp();
     test_hero_longname();
+    test_hero_name_24();
+    test_pending_headline();
     test_home_title_width();
     test_running_long();
     test_sheets_soil_offline();
     test_running_sheet();
     test_schedules_screen();
+    test_schedules_empty_offline();
     test_button_rects();
     test_unavailable_names();
     zk_data_stop();

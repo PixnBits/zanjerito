@@ -45,8 +45,14 @@ void zk_flow_tap(enum zk_target_id id, const zk_flow_tile_t *tile, zk_flow_out_t
 int zk_flow_debounce_ok(int64_t last_ms, int64_t now_ms);
 
 /* 1 when this screen should return to Home after idle_ms with no touch.
- * Stop all is included. The caller must not confirm the stop. Home returns 0. */
+ * The threshold is ZK_IDLE_HOME_MS. Stop all is included. The caller must
+ * not confirm the stop. Home returns 0. */
 int zk_flow_idle_returns_home(enum zk_screen screen, int64_t idle_ms);
+/* Same check with an explicit threshold. limit_ms < 1 uses ZK_IDLE_HOME_MS. */
+int zk_flow_idle_returns_home_limit(enum zk_screen screen, int64_t idle_ms, int64_t limit_ms);
+/* Default ZK_IDLE_HOME_MS. ZK_IDLE_HOME_MS in the environment overrides it
+ * when the value is an integer from 1 to 600000. Anything else is ignored. */
+int64_t zk_idle_home_ms(void);
 
 typedef enum {
     ZK_STOP_IDLE = 0,

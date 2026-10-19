@@ -1,5 +1,7 @@
 #include "zk_flow.h"
 
+#include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 void zk_flow_tap(enum zk_target_id id, const zk_flow_tile_t *tile, zk_flow_out_t *out)
@@ -76,11 +78,8 @@ int zk_flow_debounce_ok(int64_t last_ms, int64_t now_ms)
     return (now_ms - last_ms) >= (int64_t)ZK_DEBOUNCE_MS;
 }
 
-int zk_flow_idle_returns_home(enum zk_screen screen, int64_t idle_ms)
+static int idle_screen(enum zk_screen screen)
 {
-    if (idle_ms < (int64_t)ZK_IDLE_HOME_MS) {
-        return 0;
-    }
     switch (screen) {
     case ZK_SCREEN_SCHEDULES:
     case ZK_SCREEN_SHEET_RUN:
@@ -92,6 +91,39 @@ int zk_flow_idle_returns_home(enum zk_screen screen, int64_t idle_ms)
     default:
         return 0;
     }
+}
+
+int64_t zk_idle_home_ms(void)
+{
+    const char *env;
+    char *end;
+    long v;
+    env = getenv("ZK_IDLE_HOME_MS");
+    if (!env || !env[0]) {
+        return (int64_t)ZK_IDLE_HOME_MS;
+    }
+    errno = 0;
+    v = strtol(env, &end, 10);
+    if (errno != 0 || end == env || *end != '\0' || v < 1 || v > 600000L) {
+        return (int64_t)ZK_IDLE_HOME_MS;
+    }
+    return (int64_t)v;
+}
+
+int zk_flow_idle_returns_home_limit(enum zk_screen screen, int64_t idle_ms, int64_t limit_ms)
+{
+    if (limit_ms < 1) {
+        limit_ms = (int64_t)ZK_IDLE_HOME_MS;
+    }
+    if (idle_ms < limit_ms) {
+        return 0;
+    }
+    return idle_screen(screen);
+}
+
+int zk_flow_idle_returns_home(enum zk_screen screen, int64_t idle_ms)
+{
+    return zk_flow_idle_returns_home_limit(screen, idle_ms, (int64_t)ZK_IDLE_HOME_MS);
 }
 
 int zk_stop_confirm(zk_stop_flow_t *f)

@@ -1,6 +1,8 @@
 #include "zk_test.h"
 
 #include "zk_copy.h"
+
+#include <stdlib.h>
 #include "zk_flow.h"
 #include "zk_layout.h"
 #include "zk_logic.h"
@@ -137,9 +139,37 @@ static void test_copy_states(void)
     TEQ_S(v.hero.rain_text, "Rain 0.4 in " ZK_MID " last 72 h");
     TEQ_I(v.hero.rain, 1);
     TEQ_I(v.hero.rain_fill_px, 131);
+    /* Gate is half-up to 0.01 in, at least 0.06. Words are half-up to 0.1 in. */
     k.rain.total_72h = 0.05;
     build(&k, &sc, &in, 0, &v);
     TEQ_I(v.hero.rain, 0);
+    k.rain.total_72h = 0.054;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_I(v.hero.rain, 0);
+    k.rain.total_72h = 0.055;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_I(v.hero.rain, 1);
+    TEQ_S(v.hero.rain_text, "Rain 0.1 in " ZK_MID " last 72 h");
+    k.rain.total_72h = 0.06;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.rain_text, "Rain 0.1 in " ZK_MID " last 72 h");
+    k.rain.total_72h = 0.14;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.rain_text, "Rain 0.1 in " ZK_MID " last 72 h");
+    k.rain.total_72h = 0.15;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.rain_text, "Rain 0.2 in " ZK_MID " last 72 h");
+    k.rain.total_72h = 0.24;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.rain_text, "Rain 0.2 in " ZK_MID " last 72 h");
+    TCHECK(strstr(v.hero.rain_text, "0.0") == NULL, "rain line said 0.0");
+    k.rain.total_72h = 0.25;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.rain_text, "Rain 0.3 in " ZK_MID " last 72 h");
+    k.rain.total_72h = 1.24;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.rain_text, "Rain 1.2 in " ZK_MID " last 72 h");
+    TEQ_I(v.hero.rain_fill_px, ZK_RAIN_TRACK);
     k.rain.total_72h = 0.03;
     build(&k, &sc, &in, 0, &v);
     TEQ_I(v.hero.rain, 0);
@@ -176,6 +206,8 @@ static void test_copy_states(void)
     build(&k, &sc, &in, 0, &v);
     TEQ_S(v.hero.label, "WATERING NOW " ZK_MID " LAWN A + B " ZK_MID " WEEKDAYS AM");
     TEQ_S(v.hero.headline, "Front Yard Drip Emitters");
+    TEQ_I((int)strlen("Front Yard Drip Emitters"), 24);
+    TCHECK(strstr(v.hero.headline, "\xE2\x80\xA6") == NULL, "24-char name truncated in copy");
     TEQ_S(v.hero.time_line, "2 min left");
     TEQ_S(v.hero.secondary, "ends 6:28" ZK_NBSP "AM " ZK_MID " next Beds");
     TEQ_I((int)v.tiles[2].vis, (int)ZK_TILE_ON);
@@ -249,10 +281,12 @@ static void test_copy_states(void)
     in.stop_phase = ZK_STOP_QUEUED;
     in.offline_pending = 1;
     build(&k, &sc, &in, 1, &v);
-    TEQ_S(v.hero.headline, "Stop not sent yet:");
-    TEQ_S(v.hero.secondary, "can't reach controller. Retrying" "\xE2\x80\xA6" "");
-    snprintf(joined, sizeof joined, "%s %s", v.hero.headline, v.hero.secondary);
-    TEQ_S(joined, "Stop not sent yet: can't reach controller. Retrying" "\xE2\x80\xA6" "");
+    TEQ_S(v.hero.headline, ZK_STOP_PENDING_HEADLINE);
+    TEQ_S(v.hero.secondary, ZK_STOP_PENDING_OFFLINE);
+    snprintf(joined, sizeof joined, "%s\n%s", v.hero.headline, v.hero.secondary);
+    TEQ_S(joined, ZK_STOP_PENDING_HEADLINE "\n" ZK_STOP_PENDING_OFFLINE);
+    TCHECK(strstr(joined, "sent yet") == NULL, "retired sent-yet copy");
+    TCHECK(strstr(v.hero.label, "NO REPLY") == NULL, "retired no-reply label");
     TEQ_S(v.hero.label, "STOP " ZK_MID " LAST UPDATE 6:42" ZK_NBSP "AM");
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "pending is not stopped");
     TEQ_I(v.stop_filled, 1);
@@ -260,9 +294,9 @@ static void test_copy_states(void)
     TEQ_I((int)v.tiles[0].vis, (int)ZK_TILE_UNAVAILABLE);
     TEQ_I(zk_stop_shows_stopped(&(zk_stop_flow_t){.phase = ZK_STOP_QUEUED}), 0);
     build(&k, &sc, &in, 0, &v);
-    TEQ_S(v.hero.label, "STOP " ZK_MID " NO REPLY YET");
-    TEQ_S(v.hero.headline, "Stop not confirmed yet");
-    TEQ_S(v.hero.secondary, "Waiting for the controller. Retrying" "\xE2\x80\xA6" "");
+    TEQ_S(v.hero.label, ZK_STOP_PENDING_LABEL);
+    TEQ_S(v.hero.headline, ZK_STOP_PENDING_HEADLINE);
+    TEQ_S(v.hero.secondary, ZK_STOP_PENDING_RETRY);
     TEQ_I((int)v.hero.style, (int)ZK_HERO_STOP_PENDING);
     TEQ_I(v.stop_filled, 1);
     TEQ_I(v.bar_disabled, 1);
@@ -370,12 +404,34 @@ static void test_copy_sheets(void)
     TEQ_S(v.sheet.title, "Stop all watering?");
     TEQ_S(v.sheet.body, "Front Yard Drip Emitters closes now and the rest of Front Summer is skipped. Schedules stay on.");
 
+    zk_str_copy(k.run.kind, sizeof k.run.kind, "manual");
+    zk_str_copy(k.run.program, sizeof k.run.program, "manual");
+    zk_str_copy(k.run.current_station, sizeof k.run.current_station, "lawn-a");
+    in.station_index = 0;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sheet.title, "Stop all watering?");
+    TEQ_S(v.sheet.body, "Ends the manual run on Lawn A now. Schedules stay on.");
+    zk_str_copy(k.run.kind, sizeof k.run.kind, "schedule");
+    zk_str_copy(k.run.program, sizeof k.run.program, "Front Summer");
+    zk_str_copy(k.run.current_station, sizeof k.run.current_station, "drip");
+
     in.offline_pending = 1;
     build(&k, &sc, &in, 1, &v);
     TEQ_S(v.sheet.label, "STOP " ZK_MID " CAN'T REACH CONTROLLER");
     TEQ_S(v.sheet.title, "Stop all watering?");
     TCHECK(strstr(v.sheet.body, "The controller can't be reached right now.") == v.sheet.body, "offline stop lead");
     TCHECK(strstr(v.sheet.body, "'Watering stopped'") != NULL, "quotes the confirmed line");
+
+    /* Nothing running. */
+    k.has_run = 0;
+    k.watering = 0;
+    k.n_on = 0;
+    k.current_station[0] = 0;
+    memset(&k.run, 0, sizeof k.run);
+    in.sheet_kind = ZK_SHEET_STOP_ALL;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sheet.title, "Stop all watering?");
+    TEQ_S(v.sheet.body, "Nothing is watering right now. Schedules stay on.");
 
     /* Overlap detail uses the spec's example program names. */
     memset(&k, 0, sizeof k);
@@ -592,7 +648,9 @@ static void test_offline_stop_ack(void)
     in.stop_phase = ZK_STOP_QUEUED;
     build(&k, NULL, &in, 1, &v);
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "queued copy");
-    TEQ_S(v.hero.headline, "Stop not sent yet:");
+    TEQ_S(v.hero.headline, ZK_STOP_PENDING_HEADLINE);
+    TEQ_S(v.hero.secondary, ZK_STOP_PENDING_OFFLINE);
+    TCHECK(strstr(v.hero.headline, "sent yet") == NULL, "queued still says sent yet");
     in.stop_phase = ZK_STOP_WAIT;
     k.watering = 1;
     k.has_run = 1;
@@ -600,15 +658,18 @@ static void test_offline_stop_ack(void)
     zk_str_copy(k.run.current_station, sizeof k.run.current_station, "lawn-a");
     build(&k, NULL, &in, 0, &v);
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "http ok still watering");
-    TEQ_S(v.hero.headline, "Stop not confirmed yet");
-    TEQ_S(v.hero.secondary, "Waiting for the controller. Retrying" "\xE2\x80\xA6" "");
+    TEQ_S(v.hero.headline, ZK_STOP_PENDING_HEADLINE);
+    TEQ_S(v.hero.secondary, ZK_STOP_PENDING_RETRY);
+    TEQ_S(v.hero.label, ZK_STOP_PENDING_LABEL);
+    TCHECK(strstr(v.hero.label, "NO REPLY") == NULL, "wait still says no reply");
     TEQ_I((int)v.hero.style, (int)ZK_HERO_STOP_PENDING);
     TEQ_I(v.stop_filled, 1);
 
     in.stop_phase = ZK_STOP_WAIT;
     build(&k, NULL, &in, 1, &v);
-    TEQ_S(v.hero.headline, "Stop not sent yet:");
-    TEQ_S(v.hero.secondary, "can't reach controller. Retrying" "\xE2\x80\xA6" "");
+    TEQ_S(v.hero.headline, ZK_STOP_PENDING_HEADLINE);
+    TEQ_S(v.hero.secondary, ZK_STOP_PENDING_OFFLINE);
+    TCHECK(strstr(v.hero.headline, "sent yet") == NULL, "unreachable after 2xx says sent yet");
     TEQ_I((int)v.hero.style, (int)ZK_HERO_STOP_PENDING);
     TEQ_I(v.stop_filled, 1);
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "unreachable after 2xx is not stopped");
@@ -824,10 +885,10 @@ static void test_schedules_copy(void)
         build(&k, &sc, &in, 0, &v);
         TEQ_I(v.sched.n_rows, 1);
         TEQ_S(v.sched.rows[0].name, "Trees " ZK_MID " Sundays");
-        TEQ_S(v.sched.label, "SCHEDULES " ZK_MID " READ ONLY " ZK_MID " 3" ZK_EN "3 of 3");
+        TEQ_S(v.sched.label, "SCHEDULES " ZK_MID " READ ONLY " ZK_MID " 3 of 3");
         TEQ_I(v.sched.next_on, 1);
         build(&k, &sc, &in, 1, &v);
-        TEQ_S(v.sched.label, "SCHEDULES " ZK_MID " LAST UPDATE 6:00" ZK_NBSP "PM " ZK_MID " 3" ZK_EN "3 of 3");
+        TEQ_S(v.sched.label, "SCHEDULES " ZK_MID " LAST UPDATE 6:00" ZK_NBSP "PM " ZK_MID " 3 of 3");
         in.sched_index = 0;
         sc.n = 2;
     }
@@ -890,6 +951,23 @@ static void test_idle_home(void)
     TEQ_I(zk_flow_idle_returns_home(ZK_SCREEN_SHEET_STOP_ALL, 60000), 1);
     TEQ_I((int)f.phase, (int)ZK_STOP_WAIT);
     TEQ_I(zk_stop_shows_stopped(&f), 0);
+    /* The pure predicate stays on 60000. The UI reads ZK_IDLE_HOME_MS. */
+    setenv("ZK_IDLE_HOME_MS", "1500", 1);
+    TEQ_I((int)zk_idle_home_ms(), 1500);
+    TEQ_I(zk_flow_idle_returns_home(ZK_SCREEN_SHEET_STOP_ALL, 1500), 0);
+    TEQ_I(zk_flow_idle_returns_home_limit(ZK_SCREEN_SHEET_STOP_ALL, 1499, zk_idle_home_ms()), 0);
+    TEQ_I(zk_flow_idle_returns_home_limit(ZK_SCREEN_SHEET_STOP_ALL, 1500, zk_idle_home_ms()), 1);
+    TEQ_I(zk_flow_idle_returns_home_limit(ZK_SCREEN_HOME, 1500, 1500), 0);
+    setenv("ZK_IDLE_HOME_MS", "nope", 1);
+    TEQ_I((int)zk_idle_home_ms(), 60000);
+    setenv("ZK_IDLE_HOME_MS", "0", 1);
+    TEQ_I((int)zk_idle_home_ms(), 60000);
+    setenv("ZK_IDLE_HOME_MS", "600001", 1);
+    TEQ_I((int)zk_idle_home_ms(), 60000);
+    unsetenv("ZK_IDLE_HOME_MS");
+    TEQ_I((int)zk_idle_home_ms(), 60000);
+    TEQ_I(zk_flow_idle_returns_home_limit(ZK_SCREEN_SHEET_STOP_ALL, 59999, 0), 0);
+    TEQ_I(zk_flow_idle_returns_home_limit(ZK_SCREEN_SHEET_STOP_ALL, 60000, 0), 1);
 }
 
 static void test_dirty_rects(void)
