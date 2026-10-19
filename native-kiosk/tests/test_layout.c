@@ -186,11 +186,11 @@ static void test_grids(void)
     /* Soil slot geometry is fixed. It does not depend on whether soil is shown. */
     in.n_stations = 4;
     zk_layout_rects_of(ZK_SCREEN_HOME, &in, &R);
-    TEQ_I(R.slots[0].x, 418);
+    TEQ_I(R.slots[0].x, 414);
     TEQ_I(R.slots[0].y, 101);
-    TEQ_I(R.slots[0].w, 156);
+    TEQ_I(R.slots[0].w, 164);
     TEQ_I(R.slots[0].h, 24);
-    TEQ_I(R.slots[1].x, 614);
+    TEQ_I(R.slots[1].x, 610);
     TEQ_I(R.slots[2].y, 273);
     in.n_stations = 6;
     for (i = 0; i < 6; i++) {
@@ -198,9 +198,9 @@ static void test_grids(void)
         int col = i % 2;
         int row = i / 2;
         zk_layout_slot(6, i, &slot);
-        TEQ_I(slot.x, (col ? 614 : 418));
+        TEQ_I(slot.x, (col ? 610 : 414));
         TEQ_I(slot.y, 69 + row * 114);
-        TEQ_I(slot.w, 156);
+        TEQ_I(slot.w, 164);
         TEQ_I(slot.h, 24);
     }
 }

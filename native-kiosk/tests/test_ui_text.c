@@ -362,7 +362,7 @@ static void test_home_long(void)
         TEQ_I(tile.border_w, 2);
         TEQ_I(tile.border, 0xD9C3A0);
         TEQ_I(tile.drop_visible, 0);
-        TEQ_I(tile.title_w, tile.tile_w - 28);
+        TEQ_I(tile.title_w, tile.tile_w - 20);
     }
     assert_slots_fixed(b, n, 4);
 }
@@ -432,7 +432,7 @@ static void test_home_onoff(void)
             TEQ_I(tile.border, 0xD9C3A0);
             TEQ_I(tile.drop_visible, 0);
         }
-        TEQ_I(tile.title_w, tile.tile_w - 28);
+        TEQ_I(tile.title_w, tile.tile_w - 20);
     }
     for (i = 0; i < n; i++) {
         TCHECK(strcmp(b[i].text, "On") != 0 && strcmp(b[i].text, "Off") != 0, "pill text %s", b[i].text);
@@ -653,7 +653,7 @@ static void test_home_title_width(void)
         t = find_box(dry, nd, id);
         TCHECK(t != NULL, "nosoil missing %s", id);
         if (t) {
-            TEQ_I(t->w, t->parent_w - 28);
+            TEQ_I(t->w, t->parent_w - 20);
             snprintf(want, sizeof want, "Test Station %d", i + 1);
             TEQ_S(t->text, want);
         }
@@ -665,7 +665,7 @@ static void test_home_title_width(void)
         TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
         TEQ_I(tile.drop_visible, 0);
         TEQ_I(tile.bg, 0xFCF5E6);
-        TEQ_I(tile.title_w, tile.tile_w - 28);
+        TEQ_I(tile.title_w, tile.tile_w - 20);
         TEQ_I(tile.border_w, 2);
     }
     for (i = 0; ids[i]; i++) {
@@ -844,11 +844,11 @@ static void test_running_sheet(void)
         TCHECK(sched && sched->visible, "schedules hidden on the running sheet");
         if (pause) {
             TEQ_S(pause->text, ZK_WORD_PAUSE);
-            TEQ_I((int)pause->rgb, 0x6E5A45);
+            TEQ_I((int)pause->rgb, 0x4A2F12);
         }
         if (sched) {
             TEQ_S(sched->text, ZK_WORD_SCHEDULES);
-            TEQ_I((int)sched->rgb, 0x6E5A45);
+            TEQ_I((int)sched->rgb, 0x4A2F12);
         }
     }
     ok = NULL;
@@ -1069,8 +1069,8 @@ static void test_schedules_screen(void)
     }
 }
 
-/* Regression: names that fit the spec clamp (3 lines for 4 stations, 2 for 6)
- * must not be ellipsized because the soil slot is below them. */
+/* Regression: a name that fits the grid's line count (4-up up to 4 at the
+ * floor, 6-up up to 3) must not be ellipsized because the soil slot is below it. */
 static void test_tile_names_fit_clamp(void)
 {
     static const struct { const char *fix; int nstat; } cases[] = {{"dc-idle-4", 4}, {"dc-soil-4", 4}, {"dc-idle-6", 6}, {"dc-soil-6", 6}};
@@ -1617,12 +1617,11 @@ static uint32_t t_utf8_next(const char *s, uint32_t i)
     return i + 1;
 }
 
-static uint32_t oracle_wrap_line(const char *s, uint32_t nbytes, const lv_font_t *font, int max_w)
+/* Longest prefix that fits. Does not retreat to a space, matching wrap_fill_line. */
+static uint32_t oracle_fill_line(const char *s, uint32_t nbytes, const lv_font_t *font, int max_w)
 {
     uint32_t i = 0;
-    uint32_t last_space = 0;
     uint32_t last_fit = 0;
-    int have_space = 0;
     if (!s || nbytes == 0 || !font || max_w < 1) {
         return 0;
     }
@@ -1638,19 +1637,12 @@ static uint32_t oracle_wrap_line(const char *s, uint32_t nbytes, const lv_font_t
         }
         w = (int)lv_text_get_width(s, n, font, 0);
         if (w > max_w) {
-            if (have_space && last_space > 0) {
-                return last_space;
-            }
             if (last_fit > 0) {
                 return last_fit;
             }
             return n;
         }
         last_fit = n;
-        if (s[n - 1] == ' ') {
-            last_space = n;
-            have_space = 1;
-        }
         i = n;
     }
     return i > 0 ? i : 0;
@@ -1744,7 +1736,7 @@ static int oracle_chars(const char *src, const lv_font_t *font, int first_w, int
         if (nlines >= max_lines || w < 1) {
             return 0;
         }
-        adv = oracle_wrap_line(p, (uint32_t)strlen(p), font, w);
+        adv = oracle_fill_line(p, (uint32_t)strlen(p), font, w);
         if (adv == 0) {
             return 0;
         }
@@ -1907,33 +1899,115 @@ static int breaks_only_wide_words(const char *shown, const char *full, const lv_
     return 1;
 }
 
-static void tile_policy(const char *full, int six, int running, int title_w, int *allow_char, int *want_ellipsis,
+/* A character-broken line must stay full, including lines after the first break
+ * whose next source character is a space. A short "MM" before that space fails. */
+static int glyph_fits_after(const char *line, uint32_t len, const char *next, const lv_font_t *font, int width)
+{
+    char buf[384];
+    uint32_t n;
+    int w;
+    if (!next || !next[0] || next[0] == '\n' || !font || width < 1) {
+        return 0;
+    }
+    n = t_utf8_next(next, 0);
+    if (n == 0 || len + n >= sizeof buf) {
+        return 0;
+    }
+    memcpy(buf, line, len);
+    memcpy(buf + len, next, n);
+    w = (int)lv_text_get_width(buf, len + n, font, 0);
+    return w <= width;
+}
+
+static int filled_when_char_broken(const char *shown, const char *full, const lv_font_t *font, int width)
+{
+    const char *s = shown ? shown : "";
+    const char *f = full ? full : "";
+    const char *line = s;
+    int char_mode = 0;
+    while (*s || *f) {
+        if (*s == '\n') {
+            uint32_t len = (uint32_t)(s - line);
+            if (*f != ' ') {
+                char_mode = 1;
+            }
+            if (char_mode) {
+                const char *next = f;
+                while (*next == ' ') {
+                    next++;
+                }
+                if (*next && *next != '\n' && glyph_fits_after(line, len, next, font, width)) {
+                    return 0;
+                }
+            }
+            if (*f == ' ') {
+                f++;
+            }
+            s++;
+            line = s;
+            continue;
+        }
+        if (!*s || !*f || *s != *f) {
+            return 0;
+        }
+        s++;
+        f++;
+    }
+    return 1;
+}
+
+/* Sheet titles are "NAME is watering". The promise applies to NAME. */
+static int promise_len(const char *full)
+{
+    const char *suf = " is watering";
+    size_t n;
+    size_t s;
+    if (!full) {
+        return 0;
+    }
+    n = strlen(full);
+    s = strlen(suf);
+    if (n >= s && memcmp(full + (n - s), suf, s) == 0) {
+        return (int)(n - s);
+    }
+    return (int)n;
+}
+
+static void tile_policy(const char *full, int six, int title_w, int *allow_char, int *want_ellipsis,
                         const lv_font_t **font_out, int *first_w, int *rest_w, int *max_lines)
 {
     const lv_font_t *big = six ? &zk_font_lit_20 : &zk_font_lit_26;
     const lv_font_t *floor = six ? &zk_font_lit_18 : &zk_font_lit_20;
+    int big_lines = six ? 2 : 3;
+    int floor_lines = six ? 3 : 4;
+    int w = title_w > 0 ? title_w : 164;
     const lv_font_t *font;
-    int lines = six ? 2 : 3;
-    int pad = running ? 28 : 0;
-    int first = title_w - pad;
-    int rest = title_w;
-    if (first < 8) {
-        first = title_w;
+    int lines;
+    /* Word-wrap only. A character break is not a fit at the larger size, and
+     * a running tile does not give up width for the drop. */
+    if (oracle_words(full, big, w, w, big_lines)) {
+        font = big;
+        lines = big_lines;
+    } else {
+        font = floor;
+        lines = floor_lines;
     }
-    font = (oracle_words(full, big, first, rest, lines) || oracle_chars(full, big, first, rest, lines)) ? big : floor;
     *font_out = font;
-    *first_w = first;
-    *rest_w = rest;
+    *first_w = w;
+    *rest_w = w;
     *max_lines = lines;
-    if (oracle_words(full, font, first, rest, lines)) {
+    if (oracle_words(full, font, w, w, lines)) {
         *allow_char = 0;
         *want_ellipsis = 0;
-    } else if (oracle_chars(full, font, first, rest, lines)) {
+    } else if (oracle_chars(full, font, w, w, lines)) {
         *allow_char = 1;
         *want_ellipsis = 0;
     } else {
         *allow_char = 1;
         *want_ellipsis = 1;
+    }
+    if (promise_len(full) <= 24) {
+        *want_ellipsis = 0;
     }
 }
 
@@ -1947,26 +2021,32 @@ static const zk_ui_label_box_t *find_fmt(const zk_ui_label_box_t *b, int n, cons
 static void assert_icon_clear(const zk_ui_label_box_t *b, int n, int index, const char *what)
 {
     zk_ui_tile_dbg_t tile;
-    const zk_ui_label_box_t *ln;
     const zk_ui_label_box_t *title;
-    int ink_x;
+    const zk_ui_label_box_t *slot;
+    int tw;
     TCHECK(zk_ui_debug_tile(index, &tile) == 1, "%s tile", what);
-    if (!tile.on || !tile.drop_visible) {
+    if (!tile.on) {
         return;
     }
-    ln = find_fmt(b, n, "tile_ln%d", index);
     title = find_fmt(b, n, "tile_title%d", index);
-    if (ln && ln->visible) {
-        ink_x = ln->x;
-    } else if (title) {
-        ink_x = title->x + tile.line1_pad;
-    } else {
-        TCHECK(0, "%s no name", what);
+    slot = find_fmt(b, n, "tile_slot%d", index);
+    TCHECK(tile.drop_visible, "%s drop hidden", what);
+    TEQ_I(tile.drop_w, 20);
+    TEQ_I(tile.drop_h, 20);
+    TEQ_I(tile.line1_pad, 0);
+    if (!title || !slot || !slot->visible) {
+        TCHECK(slot && slot->visible, "%s status line", what);
         return;
     }
-    TEQ_I(tile.drop_w, 22);
-    TEQ_I(tile.drop_h, 22);
-    TCHECK(ink_x >= tile.drop_x + tile.drop_w, "%s drop %d+%d meets ink %d", what, tile.drop_x, tile.drop_w, ink_x);
+    /* The name keeps the full box. The icon sits in the status row, clear of it. */
+    TCHECK(title->y + title->h <= tile.drop_y, "%s drop overlaps the name", what);
+    TCHECK(tile.drop_y >= slot->parent_y && tile.drop_y + tile.drop_h <= slot->parent_y + slot->parent_h,
+           "%s drop outside the status row", what);
+    TCHECK(slot->x >= tile.drop_x + tile.drop_w + 2, "%s status ink %d meets drop %d+%d", what, slot->x, tile.drop_x,
+           tile.drop_w);
+    tw = (int)lv_text_get_width(slot->text, (uint32_t)strlen(slot->text), slot->font, 0);
+    TCHECK(slot->x + tw <= slot->parent_x + slot->parent_w + 1, "%s status %d px past the slot [%s]", what, tw,
+           slot->text);
 }
 
 static void assert_tile(const zk_ui_label_box_t *b, int n, int index, const char *full, const char *what)
@@ -1990,12 +2070,18 @@ static void assert_tile(const zk_ui_label_box_t *b, int n, int index, const char
         return;
     }
     six = title->parent_h > 0 && title->parent_h < 140;
-    tile_policy(full, six, tile.on, tile.title_w, &allow_char, &want_ellipsis, &font, &first_w, &rest_w, &max_lines);
+    tile_policy(full, six, tile.title_w, &allow_char, &want_ellipsis, &font, &first_w, &rest_w, &max_lines);
+    TEQ_I(tile.line1_pad, 0);
+    TEQ_I(title->x - title->parent_x, 10);
     TCHECK(title->font == font, "%s font", what);
     TCHECK(count_lines(title->text) <= max_lines, "%s lines %d [%s]", what, count_lines(title->text), title->text);
     TCHECK(lines_fit_widths(title->text, title->font, first_w, rest_w, max_lines), "%s ink [%s] %d/%d", what,
            title->text, first_w, rest_w);
     ell_w = strchr(title->text, '\n') ? rest_w : first_w;
+    if (promise_len(full) <= 24) {
+        TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s 24-char ellipsis [%s]", what, title->text);
+        TCHECK(!title->clamped, "%s 24-char clamped [%s]", what, title->text);
+    }
     if (want_ellipsis) {
         TCHECK(title->clamped, "%s not clamped [%s]", what, title->text);
         TCHECK(ellipsis_rule(title->text, full, title->font, ell_w), "%s ellipsis [%s]", what, title->text);
@@ -2005,6 +2091,22 @@ static void assert_tile(const zk_ui_label_box_t *b, int n, int index, const char
         TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, title->text);
         TCHECK(breaks_only_wide_words(title->text, full, title->font, first_w > rest_w ? rest_w : first_w),
                "%s mid-word [%s]", what, title->text);
+        if (allow_char) {
+            TCHECK(filled_when_char_broken(title->text, full, title->font, first_w), "%s short char break [%s]", what,
+                   title->text);
+        }
+    }
+    if (slot && title->font) {
+        int lh = (int)lv_font_get_line_height(title->font);
+        int drawn = lh > 0 ? title->h / lh : 0;
+        if (six && title->font == &zk_font_lit_18 && drawn >= 3) {
+            TEQ_I(title->y - title->parent_y, 4);
+            TEQ_I(slot->parent_y - title->parent_y, 74);
+        }
+        if (!six && title->font == &zk_font_lit_20 && drawn >= 4) {
+            TEQ_I(title->y - title->parent_y, 4);
+            TEQ_I(slot->parent_y - title->parent_y, 100);
+        }
     }
     if (tile.on) {
         assert_icon_clear(b, n, index, what);
@@ -2030,36 +2132,8 @@ static void assert_tile(const zk_ui_label_box_t *b, int n, int index, const char
     assert_box_clear(title, slot, NULL, what);
 }
 
-static void assert_hero_name(const zk_ui_label_box_t *b, int n, const char *full, int allow_char, const char *what)
-{
-    const zk_ui_label_box_t *head = find_box(b, n, "hero_headline");
-    const zk_ui_label_box_t *time = find_box(b, n, "hero_time");
-    const zk_ui_label_box_t *sub = find_box(b, n, "hero_secondary");
-    TCHECK(head != NULL, "%s headline", what);
-    if (!head) {
-        return;
-    }
-    TCHECK(text_covers(head->text, full, allow_char), "%s text [%s] want [%s]", what, head->text, full);
-    TCHECK(!head->clamped, "%s clamped [%s]", what, head->text);
-    TCHECK(strstr(head->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, head->text);
-    assert_wrap(head, what);
-    assert_box_clear(head, time, sub, what);
-}
-
-static void assert_sheet_name(const zk_ui_label_box_t *b, int n, const char *full, int allow_char, const char *what)
-{
-    const zk_ui_label_box_t *title = find_box(b, n, "sheet_title");
-    const zk_ui_label_box_t *timed = find_box(b, n, "sheet_time");
-    TCHECK(title != NULL, "%s sheet", what);
-    if (!title) {
-        return;
-    }
-    TCHECK(text_covers(title->text, full, allow_char), "%s text [%s] want [%s]", what, title->text, full);
-    TCHECK(!title->clamped, "%s clamped [%s]", what, title->text);
-    TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, title->text);
-    assert_wrap(title, what);
-    assert_box_clear(title, timed, NULL, what);
-}
+static void assert_hero_rule(const zk_ui_label_box_t *b, int n, const char *full, const char *what);
+static void assert_sheet_rule(const zk_ui_label_box_t *b, int n, const char *full, const char *what);
 
 /* Idle Literata headline is the next-run time (spec). The station name is on the tile. */
 static void assert_idle_hero_is_time(const zk_ui_label_box_t *b, int n, const char *name, const char *what)
@@ -2083,21 +2157,20 @@ static void check_name_slots(const char *name)
     zk_ui_label_box_t b[96];
     char dir[64];
     char sheet[160];
-    int allow = strchr(name, ' ') == NULL;
     int n;
     snprintf(dir, sizeof dir, "/tmp/zk-names-XXXXXX");
     TCHECK(write_scene(dir, sizeof dir, name, 4, 1) == 0, "scene water4 %s", name);
     TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load water4 %s", name);
     n = grab(b, 96);
     if (n > 0) {
-        assert_hero_name(b, n, name, allow, "hero watering");
+        assert_hero_rule(b, n, name, "hero watering");
         assert_tile(b, n, 0, name, "4-up running");
         zk_ui_debug_set_view(ZK_SCREEN_SHEET_STOP_STATION, 0, 0);
         zk_ui_refresh();
         n = grab(b, 96);
         snprintf(sheet, sizeof sheet, "%s is watering", name);
         if (n > 0) {
-            assert_sheet_name(b, n, sheet, allow, "sheet title");
+            assert_sheet_rule(b, n, sheet, "sheet title");
         }
     }
     drop_scene(dir);
@@ -2107,7 +2180,7 @@ static void check_name_slots(const char *name)
     TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load manual %s", name);
     n = grab(b, 96);
     if (n > 0) {
-        assert_hero_name(b, n, name, allow, "hero manual");
+        assert_hero_rule(b, n, name, "hero manual");
     }
     drop_scene(dir);
 
@@ -2236,6 +2309,7 @@ static void assert_hero_rule(const zk_ui_label_box_t *b, int n, const char *full
 {
     const zk_ui_label_box_t *head = find_box(b, n, "hero_headline");
     static const lv_font_t *faces[] = {&zk_font_lit_48, &zk_font_lit_40, &zk_font_lit_32};
+    const lv_font_t *expect = NULL;
     int allow = 0;
     int fits = 0;
     int i;
@@ -2246,21 +2320,33 @@ static void assert_hero_rule(const zk_ui_label_box_t *b, int n, const char *full
     TEQ_I(head->w, 332);
     TCHECK(count_lines(head->text) <= 3, "%s lines [%s]", what, head->text);
     TCHECK(lines_fit_widths(head->text, head->font, head->w, head->w, 3), "%s ink [%s]", what, head->text);
+    expect = &zk_font_lit_32;
     for (i = 0; i < 3; i++) {
         if (oracle_words(full, faces[i], 332, 332, 3)) {
             fits = 1;
             allow = 0;
+            expect = faces[i];
             break;
         }
     }
     if (!fits && oracle_chars(full, &zk_font_lit_32, 332, 332, 3)) {
         fits = 1;
         allow = 1;
+        expect = &zk_font_lit_32;
+    }
+    if (full && (int)strlen(full) <= 24) {
+        TCHECK(fits, "%s 24-char name does not fit [%s]", what, head->text);
+        TCHECK(strstr(head->text, "\xE2\x80\xA6") == NULL, "%s 24-char ellipsis [%s]", what, head->text);
     }
     if (fits) {
+        TCHECK(head->font == expect, "%s stepped past a size that fits", what);
         TCHECK(text_covers(head->text, full, allow), "%s text [%s]", what, head->text);
         TCHECK(strstr(head->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, head->text);
         TCHECK(breaks_only_wide_words(head->text, full, head->font, 332), "%s mid-word [%s]", what, head->text);
+        if (allow) {
+            TCHECK(filled_when_char_broken(head->text, full, head->font, 332), "%s short char break [%s]", what,
+                   head->text);
+        }
     } else {
         TCHECK(ellipsis_rule(head->text, full, head->font, 332), "%s ellipsis [%s]", what, head->text);
     }
@@ -2270,6 +2356,7 @@ static void assert_hero_rule(const zk_ui_label_box_t *b, int n, const char *full
 static void assert_sheet_rule(const zk_ui_label_box_t *b, int n, const char *full, const char *what)
 {
     const zk_ui_label_box_t *title = find_box(b, n, "sheet_title");
+    const lv_font_t *expect = &zk_font_lit_26;
     int allow = 0;
     int ell = 0;
     TCHECK(title != NULL, "%s sheet", what);
@@ -2279,17 +2366,32 @@ static void assert_sheet_rule(const zk_ui_label_box_t *b, int n, const char *ful
     TCHECK(count_lines(title->text) <= 2, "%s lines [%s]", what, title->text);
     TCHECK(lines_fit_widths(title->text, title->font, title->w, title->w, 2), "%s ink [%s] w=%d", what, title->text,
            title->w);
-    if (oracle_words(full, &zk_font_lit_32, 728, 728, 2) || oracle_words(full, &zk_font_lit_26, 728, 728, 2)) {
+    if (oracle_words(full, &zk_font_lit_32, 728, 728, 2)) {
         allow = 0;
+        expect = &zk_font_lit_32;
+    } else if (oracle_words(full, &zk_font_lit_26, 728, 728, 2)) {
+        allow = 0;
+        expect = &zk_font_lit_26;
     } else if (oracle_chars(full, &zk_font_lit_26, 728, 728, 2)) {
         allow = 1;
+        expect = &zk_font_lit_26;
     } else {
         ell = 1;
+        expect = &zk_font_lit_26;
+    }
+    if (promise_len(full) <= 24) {
+        ell = 0;
+        TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s 24-char ellipsis [%s]", what, title->text);
     }
     if (!ell) {
+        TCHECK(title->font == expect, "%s stepped past a size that fits", what);
         TCHECK(text_covers(title->text, full, allow), "%s text [%s] want [%s]", what, title->text, full);
         TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, title->text);
         TCHECK(breaks_only_wide_words(title->text, full, title->font, 728), "%s mid-word [%s]", what, title->text);
+        if (allow) {
+            TCHECK(filled_when_char_broken(title->text, full, title->font, 728), "%s short char break [%s]", what,
+                   title->text);
+        }
     } else {
         TCHECK(ellipsis_rule(title->text, full, title->font, title->w), "%s ellipsis [%s]", what, title->text);
     }
@@ -2480,6 +2582,12 @@ static void test_wide_words(void)
     const char *one[] = {full};
     int n;
     TEQ_I((int)strlen(full), 24);
+    {
+        int w10 = (int)lv_text_get_width("MMMMMMMMMM", 10, &zk_font_lit_32, 0);
+        int w11 = (int)lv_text_get_width("MMMMMMMMMMM", 11, &zk_font_lit_32, 0);
+        /* Measured advance, not a hand count. Ten M fit the 332 px hero; eleven do not. */
+        TCHECK(w10 <= 332 && w11 > 332, "lit_32 ten M is %d, eleven is %d", w10, w11);
+    }
     snprintf(dir, sizeof dir, "/tmp/zk-wide-XXXXXX");
     TCHECK(write_scene(dir, sizeof dir, full, 4, 1) == 0, "wide water4");
     TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load wide water4");

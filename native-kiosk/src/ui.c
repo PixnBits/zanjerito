@@ -199,7 +199,7 @@ static uint8_t g_oct44[44 * 44];
 static uint8_t g_oct40[40 * 40];
 static uint8_t g_play30[30 * 30];
 static uint8_t g_play28[28 * 28];
-static uint8_t g_drop22[22 * 22];
+static uint8_t g_drop20[20 * 20];
 static uint8_t g_warn22[22 * 22];
 static uint8_t g_cal28[28 * 28];
 static uint8_t g_back28[28 * 28];
@@ -207,7 +207,7 @@ static lv_image_dsc_t g_oct44_dsc;
 static lv_image_dsc_t g_oct40_dsc;
 static lv_image_dsc_t g_play30_dsc;
 static lv_image_dsc_t g_play28_dsc;
-static lv_image_dsc_t g_drop22_dsc;
+static lv_image_dsc_t g_drop20_dsc;
 static lv_image_dsc_t g_warn_dsc;
 static lv_image_dsc_t g_cal28_dsc;
 static lv_image_dsc_t g_back28_dsc;
@@ -1014,7 +1014,41 @@ static int wrap_words(char *dst, size_t cap, const char *src, const lv_font_t *f
     return 1;
 }
 
-/* Character breaks, no ellipsis. Used only when a single word is wider than the line. */
+/* Longest prefix that fits. Does not retreat to a space, so the next word
+ * continues on a line that broke in the middle of the previous word. */
+static uint32_t wrap_fill_line(const char *s, uint32_t nbytes, const lv_font_t *font, int max_w)
+{
+    uint32_t i = 0;
+    uint32_t last_fit = 0;
+    if (!s || nbytes == 0 || !font || max_w < 1) {
+        return 0;
+    }
+    while (i < nbytes && s[i]) {
+        uint32_t n;
+        int w;
+        if (s[i] == '\n') {
+            return i;
+        }
+        n = utf8_next(s, i);
+        if (n == i || n > nbytes) {
+            break;
+        }
+        w = (int)lv_text_get_width(s, n, font, 0);
+        if (w > max_w) {
+            if (last_fit > 0) {
+                return last_fit;
+            }
+            return n;
+        }
+        last_fit = n;
+        i = n;
+    }
+    return i > 0 ? i : 0;
+}
+
+/* Character breaks, no ellipsis. Used only when a single word is wider than the
+ * line at the floor size. Each line stays full: the rest of that word and the
+ * following words continue on it. */
 static int wrap_chars(char *dst, size_t cap, const char *src, const lv_font_t *font, int first_w, int rest_w,
                       int max_lines, int *nlines_out)
 {
@@ -1047,7 +1081,7 @@ static int wrap_chars(char *dst, size_t cap, const char *src, const lv_font_t *f
         if (nlines >= max_lines || w < 1) {
             return 0;
         }
-        adv = wrap_line(p, (uint32_t)strlen(p), font, 0, w);
+        adv = wrap_fill_line(p, (uint32_t)strlen(p), font, w);
         if (adv == 0) {
             return 0;
         }
@@ -1090,21 +1124,6 @@ static int wrap_chars(char *dst, size_t cap, const char *src, const lv_font_t *f
         *nlines_out = nlines;
     }
     return 1;
-}
-
-/* 1 when src is fully drawn in max_lines. An over-wide word may break by
- * characters. Ellipsis is not a fit. */
-static int name_fits(const char *src, const lv_font_t *font, int first_w, int rest_w, int max_lines)
-{
-    char buf[384];
-    int n = 0;
-    if (wrap_words(buf, sizeof buf, src, font, first_w, rest_w, max_lines, 1, &n)) {
-        return 1;
-    }
-    if (wrap_chars(buf, sizeof buf, src, font, first_w, rest_w, max_lines, &n)) {
-        return 1;
-    }
-    return 0;
 }
 
 static void copy_span(char *dst, size_t cap, const char *s, uint32_t n)
@@ -1853,8 +1872,9 @@ static void apply_hero(void)
         int fi;
         int nlines = 0;
         int ok = 0;
-        /* Word-wrap at the largest size that holds every word. Step down
-         * before breaking a word that would fit on its own line at 40 or 32. */
+        /* Word-wrap at the largest size. Step 48, then 40, then 32 before any
+         * character break. At 32 a word wider than the line breaks by
+         * characters and that line stays full. Ellipsis is the last fallback. */
         for (fi = 0; fi < 3; fi++) {
             if (wrap_words(broken, sizeof broken, h->headline, faces[fi], head_w, head_w, 3, 1, &nlines)) {
                 hf = faces[fi];
@@ -2064,44 +2084,41 @@ static void apply_tiles(const zk_layout_rects *L)
     const lv_font_t *big_f = six ? &zk_font_lit_20 : &zk_font_lit_26;
     const lv_font_t *floor_f = six ? &zk_font_lit_18 : &zk_font_lit_20;
     const lv_font_t *nf;
-    int lines = six ? 2 : 3;
+    int big_lines = six ? 2 : 3;
+    int floor_lines = six ? 3 : 4;
+    int lines;
     int sheet = top_covered();
     int nscan = L->n_tiles;
     int all_big = 1;
-    /* One size for the whole grid: the largest face on which every name fits
-     * (word wrap, or a character break of one over-wide word). Floor is 20
-     * on 4-up and 18 on 6-up. A name that still does not fit is ellipsized
-     * on that floor, per tile. */
+    /* One size for the whole grid: the largest face on which every name
+     * word-wraps. 4-up is 26 (3 lines) or the floor 20 (4 lines). 6-up is 20
+     * (2 lines) or the floor 18 (3 lines). A character break is not a fit at
+     * the larger size. Ellipsis is only after the floor break fails. */
     if (nscan > ZK_MAX_SHOWN) {
         nscan = ZK_MAX_SHOWN;
     }
     for (i = 0; i < nscan; i++) {
-        int tw = L->tiles[i].w - 28;
-        int on = g_view.tiles[i].vis == ZK_TILE_ON;
-        int fw;
+        char scratch[384];
+        int tw = L->tiles[i].w - 2 * ZK_TILE_PAD_X;
+        int nlines = 0;
         if (tw < 40) {
             tw = 40;
         }
-        fw = tw - (on ? 28 : 0);
-        if (fw < 8) {
-            fw = tw;
-        }
-        if (!name_fits(g_view.tiles[i].name, big_f, fw, tw, lines)) {
+        if (!wrap_words(scratch, sizeof scratch, g_view.tiles[i].name, big_f, tw, tw, big_lines, 1, &nlines)) {
             all_big = 0;
             break;
         }
     }
     nf = all_big ? big_f : floor_f;
+    lines = all_big ? big_lines : floor_lines;
     g_w.n_tiles = L->n_tiles;
     for (i = 0; i < ZK_MAX_SHOWN; i++) {
         const zk_tile_copy_t *c;
         int title_w;
-        int title_x = 14;
-        int pad;
+        int title_x;
         int th;
         int y0;
         int lh;
-        int gap = 6;
         int on;
         int un;
         char wrapped[256];
@@ -2131,15 +2148,17 @@ static void apply_tiles(const zk_layout_rects *L)
         paint_box(g_w.tile[i], bg, bd, 2, 16, LV_BORDER_SIDE_FULL);
         clickable(g_w.tile[i], listed((enum zk_target_id)(ZK_TARGET_TILE0 + i)));
 
-        title_w = L->tiles[i].w - 28;
+        /* 10 px from each outer edge. Children sit inside the 2 px border, so
+         * the widget x is 8 and the measured box is 164. */
+        title_w = L->tiles[i].w - 2 * ZK_TILE_PAD_X;
+        title_x = ZK_TILE_PAD_X - 2;
         if (title_w < 40) {
             title_w = 40;
+            title_x = 2;
         }
-        /* Drop is inline on line 1 only (22 px + 6 px gap). The pad stays while
-         * running so the icon never covers the first letter. Later lines use
-         * the full title width. The box is not widened. */
-        pad = on ? 28 : 0;
-        title_x = 14;
+        if (title_x < 0) {
+            title_x = 0;
+        }
         wrapped[0] = 0;
         nlines = 1;
         clamped = 0;
@@ -2165,7 +2184,7 @@ static void apply_tiles(const zk_layout_rects *L)
             slot_h = ZK_SLOT_H;
         }
         /* LVGL places children inside the 2 px border. Shift so the slot's
-         * screen rect is the layout slot (tile x+14, 156x24), not after the name. */
+         * screen rect is the layout slot (tile x+10, 164x24). */
         slot_x -= 2;
         slot_y -= 2;
         if (slot_x < 0) {
@@ -2175,21 +2194,18 @@ static void apply_tiles(const zk_layout_rects *L)
             slot_y = 0;
         }
         {
-            int first_w = title_w - pad;
-            int rest_w = title_w;
-            int name_gap = gap;
+            int name_gap = 4;
             int name_bottom;
-            int hang;
-            int top_min = 6;
-            const char *nl;
-            if (first_w < 8) {
-                first_w = title_w;
-            }
-            /* Fit to the spec line count first (3 on 4-up, 2 on 6-up). The slot
-             * moves down afterwards. Soil on/off does not change this. */
-            if (!wrap_words(wrapped, sizeof wrapped, c->name, nf, first_w, rest_w, lines, 1, &nlines) &&
-                !wrap_chars(wrapped, sizeof wrapped, c->name, nf, first_w, rest_w, lines, &nlines)) {
-                clamped = fit_wrapped(wrapped, sizeof wrapped, c->name, nf, 0, first_w, rest_w, lines, 1, &nlines);
+            /* Child y 2 is tile y+4 (2 px border + 2). A short name stays
+             * bottom-aligned on the rest slot. A taller name starts here and
+             * pushes the slot down. 6-up at 3 lines of 22 lands the slot at
+             * tile y+74, with 2 px clear of the inner bottom. */
+            int top_min = 2;
+            /* Word-wrap at this grid's size. Break a word only when it is
+             * wider than the line here, then fill that line. */
+            if (!wrap_words(wrapped, sizeof wrapped, c->name, nf, title_w, title_w, lines, 1, &nlines) &&
+                !wrap_chars(wrapped, sizeof wrapped, c->name, nf, title_w, title_w, lines, &nlines)) {
+                clamped = fit_wrapped(wrapped, sizeof wrapped, c->name, nf, 0, title_w, title_w, lines, 1, &nlines);
             }
             if (nlines < 1) {
                 nlines = 1;
@@ -2202,12 +2218,10 @@ static void apply_tiles(const zk_layout_rects *L)
                 name_bottom = lh;
             }
             {
-                /* A name that needs its lines pushes the slot down, never past
-                 * the tile's inner bottom. The shift depends only on the name. */
-                int inner_h = L->tiles[i].h - 4;
-                int slot_max = inner_h - slot_h - 4;
+                /* 2 px clear of the inner bottom (content height minus the slot). */
+                int content_h = L->tiles[i].h - 4;
+                int slot_max = content_h - slot_h - 2;
                 th = lh * nlines;
-                /* Bottom-align against the fixed slot so a one-line name stays put. */
                 y0 = name_bottom - th;
                 if (y0 < top_min) {
                     int shift = top_min - y0;
@@ -2219,35 +2233,12 @@ static void apply_tiles(const zk_layout_rects *L)
                 }
             }
             set_tracked(g_w.title[i], wrapped[0] ? wrapped : " ", clamped);
-            nl = strchr(wrapped, '\n');
-            hang = on && nl && nl[1];
-            lv_obj_set_style_pad_left(g_w.title[i], hang ? 0 : pad, 0);
+            lv_obj_set_style_pad_left(g_w.title[i], 0, 0);
             lv_label_set_long_mode(g_w.title[i], LV_LABEL_LONG_WRAP);
             place(g_w.title[i], title_x, y0, title_w, th);
-            show(g_w.title[i], hang ? 0 : 1);
-            if (hang) {
-                char line1[ZK_TITLE_MAX];
-                copy_span(line1, sizeof line1, wrapped, (uint32_t)(nl - wrapped));
-                set_tracked(g_w.title_ln[i], line1[0] ? line1 : " ", 0);
-                set_tracked(g_w.title_rest[i], nl + 1, clamped);
-                /* Line 1 is one measured line. The rest may be two lines on 4-up. */
-                lv_label_set_long_mode(g_w.title_ln[i], LV_LABEL_LONG_CLIP);
-                lv_label_set_long_mode(g_w.title_rest[i], LV_LABEL_LONG_WRAP);
-                place(g_w.title_ln[i], title_x + pad, y0, first_w, lh);
-                place(g_w.title_rest[i], title_x, y0 + lh, rest_w, th > lh ? th - lh : lh);
-                show(g_w.title_ln[i], 1);
-                show(g_w.title_rest[i], 1);
-            } else {
-                show(g_w.title_ln[i], 0);
-                show(g_w.title_rest[i], 0);
-            }
-        }
-        if (on) {
-            place(g_w.drop[i], 14, y0 + (lh > 22 ? (lh - 22) / 2 : 0), 22, 22);
-            recolor(g_w.drop[i], COL_WHITE);
-            show(g_w.drop[i], 1);
-        } else {
-            show(g_w.drop[i], 0);
+            show(g_w.title[i], 1);
+            show(g_w.title_ln[i], 0);
+            show(g_w.title_rest[i], 0);
         }
 
         place(g_w.slot[i], slot_x, slot_y, slot_w, slot_h);
@@ -2262,52 +2253,93 @@ static void apply_tiles(const zk_layout_rects *L)
         }
         text_color(g_w.slot_tx[i], sc);
         set_tracked(g_w.slot_tx[i], c->slot, 0);
-        if (c->soil == ZK_SOIL_NONE) {
-            int bar_w = 20;
-            int text_gap = 4;
+        /* Running tiles keep the full name width. The 20 px drop sits on this
+         * line, then a gap, then the status text. Shrink the gap to 2 px if
+         * icon + text would leave the 164 px slot. */
+        {
+            enum { DROP_PX = 20 };
+            int gap = 6;
             int tw = text_width(g_w.slot_tx[i]);
-            int tx;
-            int lw;
+            int lead = 0;
+            int show_drop = on;
             if (tw < 0) {
                 tw = 0;
             }
-            /* The words stay fully inside the 156 px slot. Shrink the gap, then the empty bar. */
-            while (bar_w + text_gap + tw > slot_w && text_gap > 0) {
-                text_gap--;
+            if (show_drop) {
+                while (DROP_PX + gap + tw > slot_w && gap > 2) {
+                    gap--;
+                }
+                lead = DROP_PX + gap;
+                if (lead > slot_w) {
+                    lead = slot_w;
+                }
+                recolor(g_w.drop[i], COL_WHITE);
+                place(g_w.drop[i], slot_x, slot_y + (slot_h - DROP_PX) / 2, DROP_PX, DROP_PX);
+                show(g_w.drop[i], 1);
+            } else {
+                show(g_w.drop[i], 0);
             }
-            while (bar_w + text_gap + tw > slot_w && bar_w > 0) {
-                bar_w--;
-            }
-            tx = bar_w + text_gap;
-            lw = tw > 0 ? tw : slot_w - tx;
-            if (tx >= slot_w) {
-                tx = 0;
-                lw = slot_w;
-            } else if (lw > slot_w - tx) {
+            if (c->soil == ZK_SOIL_NONE) {
+                int bar_w = 20;
+                int text_gap = 4;
+                int tx;
+                int lw;
+                /* The words stay inside the slot. Shrink the gap, then the empty bar. */
+                while (lead + bar_w + text_gap + tw > slot_w && text_gap > 0) {
+                    text_gap--;
+                }
+                while (lead + bar_w + text_gap + tw > slot_w && bar_w > 0) {
+                    bar_w--;
+                }
+                tx = lead + bar_w + text_gap;
+                lw = tw > 0 ? tw : slot_w - tx;
+                if (tx >= slot_w) {
+                    tx = lead < slot_w ? lead : 0;
+                    lw = slot_w - tx;
+                } else if (lw > slot_w - tx) {
+                    lw = slot_w - tx;
+                }
+                if (lw < 1) {
+                    lw = 1;
+                }
+                paint_box(g_w.bar[i], COL_CREAM, on ? COL_WHITE : COL_LINE, 2, 2, LV_BORDER_SIDE_FULL);
+                lv_obj_set_style_bg_opa(g_w.bar[i], LV_OPA_TRANSP, 0);
+                place(g_w.bar[i], lead, 7, bar_w > 0 ? bar_w : 1, 10);
+                show(g_w.bar[i], bar_w > 0);
+                show(g_w.fill[i], 0);
+                place(g_w.slot_tx[i], tx, 3, lw, 18);
+            } else if (c->soil == ZK_SOIL_VALUE || c->soil == ZK_SOIL_STALE) {
+                int bw = 56;
+                int tx;
+                int lw;
+                int fw = c->percent < 0 ? 0 : c->percent * bw / 100;
+                uint32_t track = on ? COL_ON_TRACK : COL_TRACK;
+                uint32_t fill = on ? COL_ON_FILL : (c->soil == ZK_SOIL_STALE ? COL_STALE : COL_TEAL);
+                paint_box(g_w.bar[i], track, track, 0, 4, LV_BORDER_SIDE_NONE);
+                place(g_w.bar[i], lead, 8, bw, 8);
+                show(g_w.bar[i], 1);
+                paint_box(g_w.fill[i], fill, fill, 0, 4, LV_BORDER_SIDE_NONE);
+                place(g_w.fill[i], 0, 0, fw > 0 ? fw : 1, 8);
+                show(g_w.fill[i], fw > 0);
+                tx = lead + bw + 8;
                 lw = slot_w - tx;
+                if (lw < 1) {
+                    lw = 1;
+                    if (tx >= slot_w) {
+                        tx = 0;
+                        lw = slot_w;
+                    }
+                }
+                place(g_w.slot_tx[i], tx, 2, lw, 20);
+            } else {
+                int lw = slot_w - lead;
+                show(g_w.bar[i], 0);
+                show(g_w.fill[i], 0);
+                if (lw < 1) {
+                    lw = 1;
+                }
+                place(g_w.slot_tx[i], lead, 2, lw, 20);
             }
-            paint_box(g_w.bar[i], COL_CREAM, on ? COL_WHITE : COL_LINE, 2, 2, LV_BORDER_SIDE_FULL);
-            lv_obj_set_style_bg_opa(g_w.bar[i], LV_OPA_TRANSP, 0);
-            place(g_w.bar[i], 0, 7, bar_w > 0 ? bar_w : 1, 10);
-            show(g_w.bar[i], bar_w > 0);
-            show(g_w.fill[i], 0);
-            place(g_w.slot_tx[i], tx, 3, lw, 18);
-        } else if (c->soil == ZK_SOIL_VALUE || c->soil == ZK_SOIL_STALE) {
-            int bw = 56;
-            int fw = c->percent < 0 ? 0 : c->percent * bw / 100;
-            uint32_t track = on ? COL_ON_TRACK : COL_TRACK;
-            uint32_t fill = on ? COL_ON_FILL : (c->soil == ZK_SOIL_STALE ? COL_STALE : COL_TEAL);
-            paint_box(g_w.bar[i], track, track, 0, 4, LV_BORDER_SIDE_NONE);
-            place(g_w.bar[i], 0, 8, bw, 8);
-            show(g_w.bar[i], 1);
-            paint_box(g_w.fill[i], fill, fill, 0, 4, LV_BORDER_SIDE_NONE);
-            place(g_w.fill[i], 0, 0, fw > 0 ? fw : 1, 8);
-            show(g_w.fill[i], fw > 0);
-            place(g_w.slot_tx[i], bw + 8, 2, slot_w - bw - 8, 20);
-        } else {
-            show(g_w.bar[i], 0);
-            show(g_w.fill[i], 0);
-            place(g_w.slot_tx[i], 0, 2, slot_w, 20);
         }
     }
 }
@@ -2315,7 +2347,6 @@ static void apply_tiles(const zk_layout_rects *L)
 static void apply_bar(const zk_layout_rects *L)
 {
     int full = sheet_kind_of(g_screen) == ZK_SHEET_STOP_ALL;
-    int station = sheet_kind_of(g_screen) == ZK_SHEET_STOP_STATION;
     int resume = g_view.bar_is_resume;
     int dis = g_view.bar_disabled;
     uint32_t bg;
@@ -2333,7 +2364,8 @@ static void apply_bar(const zk_layout_rects *L)
     }
     place(g_w.pause, L->pause.x, L->pause.y, L->pause.w, L->pause.h);
     place(g_w.stop, L->stop.x, L->stop.y, L->stop.w, L->stop.h);
-    if (dis || (station && !listed(resume ? ZK_TARGET_RESUME : ZK_TARGET_PAUSE))) {
+    /* A sheet does not dim the bar. Offline and a pending stop still do. */
+    if (dis) {
         bg = COL_DIM;
         fg = COL_MUTED;
         bd = COL_DIM;
@@ -2383,8 +2415,8 @@ static void apply_bar(const zk_layout_rects *L)
 
     {
         int on_list = g_screen == ZK_SCREEN_SCHEDULES;
-        int dim = (g_lin.offline && !g_lin.sched_cached && !on_list) ||
-                  (station && !listed(on_list ? ZK_TARGET_HOME : ZK_TARGET_SCHEDULES));
+        /* Offline with nothing cached dims Schedules. A sheet does not. */
+        int dim = g_lin.offline && !g_lin.sched_cached && !on_list;
         const char *word = on_list ? ZK_WORD_HOME : ZK_WORD_SCHEDULES;
         const void *icon = on_list ? (const void *)&g_back28_dsc : (const void *)&g_cal28_dsc;
         place(g_w.sched_btn, L->sched.x, L->sched.y, L->sched.w, L->sched.h);
@@ -2775,7 +2807,7 @@ static void build_tree(lv_obj_t *scr)
     blit_a8(&zk_icon_stop_oct_84, 40, 40, g_oct40, &g_oct40_dsc);
     blit_a8(&zk_icon_play_44, 30, 30, g_play30, &g_play30_dsc);
     blit_a8(&zk_icon_play_44, 28, 28, g_play28, &g_play28_dsc);
-    blit_a8(&zk_icon_drop_30, 22, 22, g_drop22, &g_drop22_dsc);
+    blit_a8(&zk_icon_drop_30, 20, 20, g_drop20, &g_drop20_dsc);
     blit_a8(&zk_icon_list_52, 28, 28, g_cal28, &g_cal28_dsc);
     blit_a8(&zk_icon_back_44, 28, 28, g_back28, &g_back28_dsc);
     build_warn();
@@ -2828,7 +2860,6 @@ static void build_tree(lv_obj_t *scr)
         mark_lab_n("tile_rest", i, 0);
         g_w.title_rest[i] = make_quiet_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
         remember(g_w.title_rest[i]);
-        g_w.drop[i] = make_icon(g_w.tile[i], &g_drop22_dsc);
         g_w.slot[i] = make_box(g_w.tile[i]);
         lv_obj_set_style_bg_opa(g_w.slot[i], LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_width(g_w.slot[i], 0, 0);
@@ -2837,6 +2868,10 @@ static void build_tree(lv_obj_t *scr)
         mark_lab_n("tile_slot", i, 0);
         g_w.slot_tx[i] = make_label(g_w.slot[i], &zk_font_r_20, COL_MUTED);
         lv_label_set_long_mode(g_w.slot_tx[i], LV_LABEL_LONG_CLIP);
+        /* On the status line, not in front of the name. 20 px, spec v1.2.
+         * A tile child, so it stays visible when the slot has no text. */
+        g_w.drop[i] = make_icon(g_w.tile[i], &g_drop20_dsc);
+        show(g_w.drop[i], 0);
     }
 
     g_w.pause = make_box(scr);
