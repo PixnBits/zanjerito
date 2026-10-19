@@ -12,7 +12,7 @@
 #define ZK_MID "\xC2\xB7"
 #define ZK_EN "\xE2\x80\x93"
 #define ZK_RQ "\xE2\x80\xBA"
-#define ZK_RAIN_TRACK 280
+#define ZK_RAIN_TRACK 328
 #define ZK_PAUSE_BODY "{\"until\":\"tomorrow_morning\",\"reason\":\"rain\"}"
 #define ZK_WORD_PAUSE "Pause for rain"
 #define ZK_WORD_RESUME "Resume"
@@ -78,6 +78,7 @@ typedef struct {
     char label[120];
     char title[220];
     char body[480];
+    char time_line[96];
     int minutes;
     int show_stepper;
     int minus_enabled;
@@ -91,7 +92,7 @@ typedef struct {
 } zk_sched_row_t;
 
 typedef struct {
-    char label[80];
+    char label[160];
     char note[120];
     char empty_title[48];
     char empty_body[64];

@@ -735,7 +735,17 @@ static void fill_sched(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view
         start = 0;
     }
     out->sched.n_total = n;
-    out->sched.next_on = n > 1 ? 1 : 0;
+    out->sched.next_on = n > 2 ? 1 : 0;
+    if (n > 2) {
+        char base[96];
+        int a = start + 1;
+        int b = start + 2;
+        if (b > n) {
+            b = n;
+        }
+        zk_str_copy(base, sizeof base, out->sched.label);
+        snprintf(out->sched.label, sizeof out->sched.label, "%s " ZK_MID " %d" ZK_EN "%d of %d", base, a, b, n);
+    }
     out->sched.n_rows = 0;
     for (i = 0; i < 2; i++) {
         int idx = start + i;
@@ -782,8 +792,8 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
     watering = k && is_watering(k);
     paused = k && k->pause.paused;
     confirmed = in->stop_phase == ZK_STOP_CONFIRMED && !manual && !watering;
-    pending = !confirmed && in->offline_pending &&
-              (in->stop_phase == ZK_STOP_QUEUED || in->stop_phase == ZK_STOP_WAIT);
+    /* Pending from the moment Stop all is confirmed, including the first POST. */
+    pending = !confirmed && (in->stop_phase == ZK_STOP_QUEUED || in->stop_phase == ZK_STOP_WAIT);
     find_overlap(src, &ov);
     out->overlap = (!offline && !manual && !watering && !paused && k && k->has_next_run && ov.on) ? 1 : 0;
     if (ov.on && ov.wday >= 0 && ov.wday <= 6) {
@@ -803,16 +813,29 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
         zk_fmt_time_nbsp(at.hh, at.mm, tbuf, sizeof tbuf);
         snprintf(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " CONFIRMED %s", tbuf);
         zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Watering stopped");
-        if (k && k->has_next_run && k->next_run.has_at) {
+        if (paused) {
+            if (k && k->has_next_effective && k->next_effective.has_at) {
+                when_nbsp(k->next_effective.at, src->wall, when, sizeof when);
+                snprintf(out->hero.secondary, sizeof out->hero.secondary, "Next run %s", when);
+            } else {
+                zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Paused until you resume");
+            }
+        } else if (k && k->has_next_run && k->next_run.has_at) {
             when_nbsp(k->next_run.at, src->wall, when, sizeof when);
             snprintf(out->hero.secondary, sizeof out->hero.secondary, "Next run %s", when);
         }
         out->hero.style = ZK_HERO_STOP_CONFIRMED;
     } else if (pending) {
-        zk_fmt_time_nbsp(k ? k->now.hh : src->wall.hh, k ? k->now.mm : src->wall.mm, tbuf, sizeof tbuf);
-        snprintf(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " LAST UPDATE %s", tbuf);
-        zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Stop not sent yet:");
-        zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "can't reach controller. Retrying\xE2\x80\xA6");
+        if (offline) {
+            zk_fmt_time_nbsp(k ? k->now.hh : src->wall.hh, k ? k->now.mm : src->wall.mm, tbuf, sizeof tbuf);
+            snprintf(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " LAST UPDATE %s", tbuf);
+            zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Stop not sent yet:");
+            zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "can't reach controller. Retrying\xE2\x80\xA6");
+        } else {
+            zk_str_copy(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " NO REPLY YET");
+            zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Stop not confirmed yet");
+            zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Waiting for the controller. Retrying\xE2\x80\xA6");
+        }
         out->hero.style = ZK_HERO_STOP_PENDING;
     } else if (offline) {
         if (k && k->has_now) {
@@ -861,12 +884,8 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
     } else if (paused) {
         zk_str_copy(out->hero.label, sizeof out->hero.label, "PAUSED FOR RAIN");
         until_text(&k->pause, out->hero.headline, sizeof out->hero.headline);
-        if (k->pause.has_until && src->have_schedules && src->schedules) {
-            zk_wall_t fire;
-            if (zk_next_fire_after(src->schedules, k->pause.until, &fire)) {
-                when_nbsp(fire, src->wall, out->hero.time_line, sizeof out->hero.time_line);
-            }
-        }
+        /* Spec row only. The next fire stays off this hero; "Watering stopped"
+         * while paused uses next_effective_run instead. */
         zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Tap a station to run it anyway");
         out->hero.style = ZK_HERO_PAUSED;
     } else if (!k || !k->has_next_run) {
@@ -945,7 +964,7 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
             out->tiles[i].muted_slot = 1;
         }
     }
-    out->bar_disabled = offline ? 1 : 0;
+    out->bar_disabled = (offline || pending) ? 1 : 0;
     out->bar_is_resume = paused ? 1 : 0;
     zk_str_copy(out->bar_word, sizeof out->bar_word, paused ? ZK_WORD_RESUME : ZK_WORD_PAUSE);
     /* Filled while water is on, and while a stop is still unacknowledged.
@@ -994,19 +1013,37 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
         }
     } else if (in->sheet_kind == ZK_SHEET_STOP_STATION) {
         const zk_kiosk_station_t *st = k ? station_at(k, in->station_index) : NULL;
+        int manual_run = k && is_manual(k);
         const char *next = (k && k->has_run) ? station_title_id(k, k->run.next_station) : "";
         int left = (k && k->has_run) ? ceil_min(k->run.step_remaining_sec) : 0;
-        snprintf(out->sheet.label, sizeof out->sheet.label, "WATERING NOW " ZK_MID " %d MIN LEFT", left);
-        snprintf(out->sheet.title, sizeof out->sheet.title, "%s is watering", st ? st->title : "");
-        if (next[0]) {
-            snprintf(out->sheet.body, sizeof out->sheet.body,
-                     "The program goes on with the next station, %s. Use STOP to end everything.", next);
+        int remain = (k && k->has_run && k->run.step_remaining_sec > 0) ? k->run.step_remaining_sec : 0;
+        zk_wall_t end = src->wall;
+        char clk[24];
+        char chosen[480];
+        if (manual_run) {
+            zk_str_copy(out->sheet.label, sizeof out->sheet.label, "MANUAL RUN");
+        } else if (k) {
+            upper_label(out->sheet.label, sizeof out->sheet.label, "WATERING NOW " ZK_MID " ", program_name(k));
         } else {
-            zk_str_copy(out->sheet.body, sizeof out->sheet.body,
-                        "The program goes on with the next station. Use STOP to end everything.");
+            zk_str_copy(out->sheet.label, sizeof out->sheet.label, "WATERING NOW");
         }
+        snprintf(out->sheet.title, sizeof out->sheet.title, "%s is watering", st ? st->title : "");
+        zk_wall_add_seconds(&end, remain);
+        zk_fmt_time_nbsp(end.hh, end.mm, clk, sizeof clk);
+        snprintf(out->sheet.time_line, sizeof out->sheet.time_line, "%d min left " ZK_MID " ends %s", left, clk);
+        if (manual_run) {
+            zk_str_copy(chosen, sizeof chosen, "Manual run. Tap STOP below to end it now.");
+        } else if (next[0]) {
+            snprintf(chosen, sizeof chosen, "Next: %s. Tap STOP below to end all watering.", next);
+        } else {
+            zk_str_copy(chosen, sizeof chosen, "Last station. Tap STOP below to end watering now.");
+        }
+        if (in->width_px && in->width_px(chosen, strlen(chosen), in->width_user) > 728) {
+            zk_str_copy(chosen, sizeof chosen, "Tap STOP below to end all watering.");
+        }
+        zk_str_copy(out->sheet.body, sizeof out->sheet.body, chosen);
     } else if (in->sheet_kind == ZK_SHEET_STOP_ALL) {
-        if (offline || pending || in->offline_pending) {
+        if (offline) {
             zk_str_copy(out->sheet.label, sizeof out->sheet.label, "STOP " ZK_MID " CAN'T REACH CONTROLLER");
             zk_str_copy(out->sheet.body, sizeof out->sheet.body,
                         "The controller can't be reached right now. The kiosk keeps trying to send the stop "

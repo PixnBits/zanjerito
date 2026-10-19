@@ -28,10 +28,12 @@
 #   y  --fbshot without --fb exits 2
 #   z  padded stride keeps the sentinel and matches an unpadded fbshot
 #   aa bottom rows 474..479 are background, not the old red step strip
-#   ab a running tile tap, the old Stop station point, and Cancel post nothing
-#   ac ack that still shows watering: a second Stop all posts a second cancel
+#   ab a running tile tap, the old Stop station point, and OK post nothing
+#   ac 2xx while still watering stays pending, re-POSTs, then confirms on all-off
 #   ad a slow ack (longer than the HTTP timeout) shows pending and stays filled
 #   ae Schedules, Stop all, Cancel, Next, and Home send no POST
+#   af a tile tap during a pending stop sends no station POST
+#   ag 2xx then unreachable stays pending; all-off after it returns confirms
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -341,6 +343,59 @@ kiosk() {
         >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
 }
 
+# Background host so a test can flip the stub control file. ZK_HERO_LOG prints
+# "HERO headline | secondary" and flushes, so stderr shows the stop sentence.
+kiosk_bg() {
+    local dur=$1
+    local script=$2
+    local limit=$3
+    shift 3
+    stop_kiosk
+    ZK_HERO_LOG=1 timeout "$limit" env -u ZAN_API -u ZK_POLL_MS_STATUS \
+        -u ZK_POWER_FORCE -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC \
+        -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
+        "$BIN" \
+        --api "http://127.0.0.1:${PORT}" \
+        "$@" \
+        --script "$script" \
+        --duration "$dur" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err" &
+    KIOSK_PID=$!
+}
+
+wait_err() {
+    local phrase=$1
+    local ticks=${2:-80}
+    local i
+    for i in $(seq 1 "$ticks"); do
+        if grep -F "$phrase" "$TMP/kiosk.err" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [[ -n "${KIOSK_PID}" ]] && ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            return 1
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
+wait_posts() {
+    local want=$1
+    local ticks=${2:-80}
+    local i n
+    for i in $(seq 1 "$ticks"); do
+        n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+        if [[ "$n" -ge "$want" ]]; then
+            return 0
+        fi
+        if [[ -n "${KIOSK_PID}" ]] && ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            return 1
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
 show_kiosk_err() {
     echo "--- kiosk stderr ---" >&2
     cat "$TMP/kiosk.err" >&2 || true
@@ -572,7 +627,19 @@ PY
         return 1
     fi
     KIOSK_PID=
-    assert_posts "POST /api/run/cancel" || return 1
+    # The slow GET never delivers an all-off snapshot, so the stop stays pending
+    # and the 2s timer retries. The first POST is the timing check above.
+    n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+    if [[ "$n" -lt 1 || "$n" -gt 4 ]]; then
+        echo "case j: $n cancels" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    if post_lines | grep -v '^POST /api/run/cancel' | grep -q .; then
+        echo "case j: unexpected POST" >&2
+        post_lines >&2 || true
+        return 1
+    fi
 }
 
 # Tile tap opens the station sheet. Writes stay off.
@@ -625,7 +692,18 @@ case_n() {
         echo "needs-update cream pixels $n" >&2
         return 1
     fi
-    assert_posts "POST /api/run/cancel" || return 1
+    # 2xx is not the ack. The kiosk stays pending and retries on the 2s timer.
+    n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+    if [[ "$n" -lt 1 || "$n" -gt 3 ]]; then
+        echo "needs-update stop posted $n cancels" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    if post_lines | grep -v '^POST /api/run/cancel' | grep -q .; then
+        echo "needs-update stop posted something else" >&2
+        post_lines >&2 || true
+        return 1
+    fi
 }
 
 trim_file() {
@@ -1335,7 +1413,7 @@ case_z() {
 }
 
 # Running tile (600,16 184x160) opens the status sheet. The old Stop station
-# rect (400,232 364x96) is empty. Cancel (36,232 352x96) closes it. No POST.
+# rect (400,232 364x96) is empty. OK (36,232 352x96) closes it. No POST.
 case_ab() {
     local sheet=$TMP/ab-sheet.png ghost=$TMP/ab-ghost.png home=$TMP/ab-home.png
     local red teal
@@ -1365,27 +1443,137 @@ case_ab() {
     fi
 }
 
-# Cancel is acknowledged, but the next snapshot still shows watering.
-# The second confirm must post again. STOP stays filled (not "Watering stopped").
+# 2xx while the snapshot still shows water is not the ack. Stay on
+# "Stop not confirmed yet", keep re-POSTing, and never say "Watering stopped"
+# until the stub flips to all valves off.
 case_ac() {
-    local png=$TMP/ac.png
-    local red n
-    start_stub "$FIX/dc-watering-4" --post-delay 2 --stay-watering || return 1
-    kiosk 16 \
-        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:9000;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:1500;shot:${png}" \
-        22 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts $'POST /api/run/cancel\nPOST /api/run/cancel' || return 1
-    [[ -f "$png" ]] || { echo "missing ac shot" >&2; return 1; }
-    red=$(nearcount "$png" 420 500 370 450 181 54 26 12)
-    if [[ "$red" -lt 80 ]]; then
-        echo "STOP is not filled after the second confirm ($red)" >&2
+    local ctl=$TMP/ac.ctl
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
+    kiosk_bg 20 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:16000" \
+        28 --allow-writes || return 1
+    if ! wait_err "Stop not confirmed yet" 40; then
+        echo "ac: never Stop not confirmed yet" >&2
+        show_kiosk_err
+        stop_kiosk
         return 1
     fi
-    n=$(python3 "$TMP/png.py" stale "$png")
-    if [[ "$n" -gt 40 ]]; then
-        echo "second confirm is stuck on the pending hero ($n)" >&2
+    if ! wait_posts 2 48; then
+        echo "ac: did not re-POST while water was still on" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
         return 1
     fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "ac: Watering stopped before valves were off" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=clear\nreach=up\n' >"$ctl"
+    if ! wait_err "Watering stopped" 48; then
+        echo "ac: all-off snapshot did not confirm" >&2
+        show_kiosk_err
+        post_lines >&2 || true
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
+# A tile tap during a pending stop is not a target: the screen does not change
+# and Run's point does not POST /api/stations.
+case_af() {
+    local before=$TMP/af-before.png after=$TMP/af-after.png
+    local ctl=$TMP/af.ctl
+    local n stations
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
+    ZK_HERO_LOG=1 kiosk 8 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:1200;shot:${before};tap:496,96;wait:400;tap:676,280;wait:500;shot:${after}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    if ! grep -F "Stop not confirmed yet" "$TMP/kiosk.err" >/dev/null; then
+        echo "af: pending copy missing" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "af: Watering stopped during a pending tile tap" >&2
+        show_kiosk_err
+        return 1
+    fi
+    stations=$(post_lines | grep -c '/api/stations/' || true)
+    if [[ "$stations" -ne 0 ]]; then
+        echo "af: tile tap posted a station run" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+    if [[ "$n" -lt 1 ]]; then
+        echo "af: stop was not posted" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    [[ -f "$before" && -f "$after" ]] || { echo "af: missing shots" >&2; return 1; }
+    if ! cmp -s "$before" "$after"; then
+        echo "af: tile tap changed the pending screen" >&2
+        return 1
+    fi
+}
+
+# 2xx, then the controller drops out: stay pending with the offline sentence.
+# Bringing it back with every valve off confirms.
+case_ag() {
+    local ctl=$TMP/ag.ctl
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
+    kiosk_bg 24 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:20000" \
+        32 --allow-writes || return 1
+    if ! wait_posts 1 40; then
+        echo "ag: cancel was not posted" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    sleep 0.8
+    if ! grep -F "Stop not confirmed yet" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: reachable pending copy missing after 2xx" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: Watering stopped on the 2xx" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=stay\nreach=down\n' >"$ctl"
+    if ! wait_err "Stop not sent yet:" 48; then
+        echo "ag: offline pending copy missing" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: Watering stopped while unreachable" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=clear\nreach=up\n' >"$ctl"
+    if ! wait_err "Watering stopped" 48; then
+        echo "ag: all-off snapshot did not confirm" >&2
+        show_kiosk_err
+        post_lines >&2 || true
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
 }
 
 # Reachable controller, ack slower than the 5s HTTP timeout. Pending copy, STOP stays filled.
@@ -1544,6 +1732,8 @@ run_case ab case_ab
 run_case ac case_ac
 run_case ad case_ad
 run_case ae case_ae
+run_case af case_af
+run_case ag case_ag
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

@@ -289,7 +289,7 @@ static void test_bar_and_sheets(void)
     TEQ_I(R.sheet.h, 332);
     TEQ_I(R.minus.w, 96);
     TEQ_I(R.minus.h, 96);
-    TEQ_I(R.run.x, 600);
+    TEQ_I(R.run.x, 588);
     TEQ_I(R.run.w, 176);
     TEQ_I(R.run.h, 96);
 
@@ -303,10 +303,12 @@ static void test_bar_and_sheets(void)
     TEQ_I(R.cancel.h, 112);
 
     n = zk_layout_targets(ZK_SCREEN_SHEET_STOP_STATION, &in, t, 32);
-    TCHECK(has_id(t, n, ZK_TARGET_CANCEL), "running sheet cancel");
+    TCHECK(has_id(t, n, ZK_TARGET_OK), "running sheet ok");
+    TCHECK(!has_id(t, n, ZK_TARGET_CANCEL), "running sheet has no cancel");
     TCHECK(has_id(t, n, ZK_TARGET_STOP), "running sheet STOP");
     TCHECK(!has_id(t, n, ZK_TARGET_STOP_ALL), "running sheet is not stop-all");
     TCHECK(!has_id(t, n, ZK_TARGET_RUN), "running sheet does not run");
+    TEQ_I((int)zk_hit_test(t, n, 212, 280), (int)ZK_TARGET_OK);
     TEQ_I((int)zk_hit_test(t, n, 582, 280), (int)ZK_TARGET_NONE);
     TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_SHEET_STOP_STATION, &in, 594, 412), 1);
     zk_layout_rects_of(ZK_SCREEN_SHEET_STOP_STATION, &in, &R);
@@ -314,10 +316,10 @@ static void test_bar_and_sheets(void)
     TEQ_I(R.sheet.y, 16);
     TEQ_I(R.sheet.w, 768);
     TEQ_I(R.sheet.h, 332);
-    TEQ_I(R.cancel.x, 36);
-    TEQ_I(R.cancel.y, 232);
-    TEQ_I(R.cancel.w, 352);
-    TEQ_I(R.cancel.h, 96);
+    TEQ_I(R.ok.x, 36);
+    TEQ_I(R.ok.y, 232);
+    TEQ_I(R.ok.w, 352);
+    TEQ_I(R.ok.h, 96);
     TEQ_I(R.sheet_title.x, 36);
     TEQ_I(R.sheet_title.y, 62);
     TEQ_I(R.sheet_title.w, 728);
@@ -417,10 +419,10 @@ static void test_schedules_layout(void)
     check_targets(ZK_SCREEN_SCHEDULES, &in, "schedules two");
     n = zk_layout_targets(ZK_SCREEN_SCHEDULES, &in, t, 32);
     TCHECK(has_id(t, n, ZK_TARGET_STOP) && has_id(t, n, ZK_TARGET_HOME), "schedules bar");
-    TCHECK(has_id(t, n, ZK_TARGET_PAUSE) && has_id(t, n, ZK_TARGET_SCHED_NEXT), "schedules pause and next");
+    TCHECK(has_id(t, n, ZK_TARGET_PAUSE) && !has_id(t, n, ZK_TARGET_SCHED_NEXT), "two programs have no Next");
     TCHECK(!has_id(t, n, ZK_TARGET_SCHEDULES) && !has_id(t, n, ZK_TARGET_TILE0), "no home entry or tiles");
     TEQ_I((int)zk_hit_test(t, n, 76, 412), (int)ZK_TARGET_HOME);
-    TEQ_I((int)zk_hit_test(t, n, 582, 280), (int)ZK_TARGET_SCHED_NEXT);
+    TEQ_I((int)zk_hit_test(t, n, 582, 280), (int)ZK_TARGET_NONE);
     TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_SCHEDULES, &in, 594, 412), 1);
     TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_SCHEDULES, &in, 76, 412), 0);
 
@@ -436,10 +438,12 @@ static void test_schedules_layout(void)
 
     in.paused = 0;
     in.offline = 1;
+    in.n_schedules = 3;
     n = zk_layout_targets(ZK_SCREEN_SCHEDULES, &in, t, 32);
     TCHECK(has_id(t, n, ZK_TARGET_HOME) && has_id(t, n, ZK_TARGET_STOP), "offline schedules can go home");
     TCHECK(has_id(t, n, ZK_TARGET_SCHED_NEXT), "offline browse stays live");
     TCHECK(!has_id(t, n, ZK_TARGET_PAUSE), "offline pause is not a target on the list");
+    in.n_schedules = 2;
 
     in.offline = 0;
     in.n_schedules = 3;
@@ -467,12 +471,42 @@ static void test_schedules_layout(void)
     TCHECK(!has_id(t, n, ZK_TARGET_SCHEDULES) && !has_id(t, n, ZK_TARGET_HOME), "sheet covers schedules");
 }
 
+static void test_stop_pending_targets(void)
+{
+    zk_layout_in in;
+    zk_target t[32];
+    int n;
+    int i;
+    memset(&in, 0, sizeof in);
+    in.n_stations = 4;
+    in.stop_pending = 1;
+    n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+    TEQ_I(n, 2);
+    TCHECK(has_id(t, n, ZK_TARGET_STOP) && has_id(t, n, ZK_TARGET_SCHEDULES), "pending reachable bar");
+    TCHECK(!has_id(t, n, ZK_TARGET_PAUSE) && !has_id(t, n, ZK_TARGET_RESUME), "pending pause is not a target");
+    TCHECK(!has_id(t, n, ZK_TARGET_TILE0) && !has_id(t, n, ZK_TARGET_HERO), "pending tiles and hero");
+    in.paused = 1;
+    n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+    TCHECK(!has_id(t, n, ZK_TARGET_RESUME), "pending resume is not a target");
+    in.paused = 0;
+    in.offline = 1;
+    in.sched_cached = 0;
+    n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+    TEQ_I(n, 2);
+    TCHECK(has_id(t, n, ZK_TARGET_STOP) && has_id(t, n, ZK_TARGET_SCHEDULES), "pending unreachable bar");
+    for (i = 0; i < n; i++) {
+        TCHECK(t[i].id == ZK_TARGET_STOP || t[i].id == ZK_TARGET_SCHEDULES, "pending target %d", (int)t[i].id);
+    }
+    TEQ_I((int)zk_hit_test(t, n, 496, 96), (int)ZK_TARGET_NONE);
+}
+
 int main(void)
 {
     test_min_tap_constant();
     test_grids();
     test_bar_and_sheets();
     test_schedules_layout();
+    test_stop_pending_targets();
     test_every_screen();
     test_dimmed_stop_passes();
     return zk_test_report("test_layout");

@@ -76,6 +76,24 @@ int zk_flow_debounce_ok(int64_t last_ms, int64_t now_ms)
     return (now_ms - last_ms) >= (int64_t)ZK_DEBOUNCE_MS;
 }
 
+int zk_flow_idle_returns_home(enum zk_screen screen, int64_t idle_ms)
+{
+    if (idle_ms < (int64_t)ZK_IDLE_HOME_MS) {
+        return 0;
+    }
+    switch (screen) {
+    case ZK_SCREEN_SCHEDULES:
+    case ZK_SCREEN_SHEET_RUN:
+    case ZK_SCREEN_SHEET_ANYWAY:
+    case ZK_SCREEN_SHEET_STOP_STATION:
+    case ZK_SCREEN_SHEET_OVERLAP:
+    case ZK_SCREEN_SHEET_STOP_ALL:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 int zk_stop_confirm(zk_stop_flow_t *f)
 {
     if (!f) {
@@ -85,10 +103,7 @@ int zk_stop_confirm(zk_stop_flow_t *f)
         f->again = 1;
         return 0;
     }
-    /* A failed attempt is already going to be retried. One POST at a time. */
-    if (f->phase == ZK_STOP_QUEUED) {
-        return 0;
-    }
+    /* A second confirm always sends. One POST at a time. */
     f->phase = ZK_STOP_QUEUED;
     f->inflight = 1;
     f->again = 0;
@@ -112,26 +127,30 @@ void zk_stop_http(zk_stop_flow_t *f, int ok)
 
 int zk_stop_snapshot(zk_stop_flow_t *f, zk_stop_snap_t snap)
 {
-    if (!f || f->phase != ZK_STOP_WAIT) {
+    if (!f) {
         return 0;
     }
-    if (snap == ZK_STOP_SNAP_STILL_ON) {
-        if (f->again) {
-            f->phase = ZK_STOP_QUEUED;
-            f->inflight = 1;
-            f->again = 0;
-            f->failed = 0;
-            return 1;
-        }
-        f->phase = ZK_STOP_IDLE;
+    if (f->phase != ZK_STOP_WAIT && f->phase != ZK_STOP_QUEUED) {
+        return 0;
+    }
+    if (f->inflight) {
+        return 0;
+    }
+    if (snap == ZK_STOP_SNAP_CLEAR) {
+        f->phase = ZK_STOP_CONFIRMED;
         f->inflight = 0;
         f->again = 0;
+        f->failed = 0;
         return 0;
     }
-    f->phase = ZK_STOP_CONFIRMED;
-    f->inflight = 0;
-    f->again = 0;
-    f->failed = 0;
+    /* Still on, or no snapshot: stay pending. From WAIT, send again now. */
+    if (f->phase == ZK_STOP_WAIT) {
+        f->phase = ZK_STOP_QUEUED;
+        f->inflight = 1;
+        f->again = 0;
+        f->failed = 0;
+        return 1;
+    }
     return 0;
 }
 

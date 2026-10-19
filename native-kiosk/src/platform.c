@@ -464,11 +464,19 @@ static void fb_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
     lv_display_flush_ready(disp);
 }
 
+static void note_press(const lv_indev_data_t *data)
+{
+    if (data && data->state == LV_INDEV_STATE_PRESSED) {
+        zk_ui_note_touch();
+    }
+}
+
 static void virt_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
     data->point = g_pt;
     data->state = g_ptr_state;
+    note_press(data);
     gate_pointer(data, &g_virt_down);
 }
 
@@ -477,6 +485,7 @@ static void evdev_read(lv_indev_t *indev, lv_indev_data_t *data)
     if (g_evdev_orig) {
         g_evdev_orig(indev, data);
     }
+    note_press(data);
     gate_pointer(data, &g_evdev_down);
 }
 

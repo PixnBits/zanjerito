@@ -50,6 +50,7 @@ typedef struct {
     int drop_visible;
     int title_w;
     int tile_w;
+    uint32_t name_rgb;
 } zk_ui_tile_dbg_t;
 
 /* Fills out for home tile index. Returns 1 when that tile exists. */
@@ -59,5 +60,19 @@ int zk_ui_debug_tile(int index, zk_ui_tile_dbg_t *out);
 void zk_ui_debug_set_stop(int phase);
 /* Same path as a finger release at (x, y), including the 300 ms debounce. */
 void zk_ui_debug_tap(int x, int y);
+/* Any press resets the 60 s return-to-home clock. */
+void zk_ui_note_touch(void);
+/* Shot hold. minutes < 1 clears. sched index < 0 clears. */
+void zk_ui_debug_set_minutes(int minutes);
+void zk_ui_debug_set_sched(int index);
+
+typedef struct {
+    int present;
+    int x, y, w, h;
+    uint32_t color;
+} zk_ui_glyph_dbg_t;
+
+/* Stepper bars after layout. NULL outs are skipped. */
+int zk_ui_debug_glyphs(zk_ui_glyph_dbg_t *minus, zk_ui_glyph_dbg_t *plus_h, zk_ui_glyph_dbg_t *plus_v);
 
 #endif

@@ -123,6 +123,7 @@ typedef struct {
     int n_stations;
     int paused;
     int offline; /* tiles and Pause are not targets */
+    int stop_pending; /* same lock as offline; STOP and Schedules stay live */
     int overlap; /* hero opens the read-only sheet */
     int minutes; /* stepper; minus is live only above 1 */
     int sched_cached; /* a schedules snapshot is already in hand, even if empty */

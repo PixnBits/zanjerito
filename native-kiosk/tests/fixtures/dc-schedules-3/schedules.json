@@ -1,0 +1,69 @@
+{
+ "schedules": [
+  {
+   "enabled": true,
+   "id": "lawn-morning",
+   "name": "Lawn \u00b7 Morning",
+   "start": "06:10",
+   "steps": [
+    {
+     "minutes": 6,
+     "station_id": "lawn-a"
+    },
+    {
+     "minutes": 6,
+     "station_id": "lawn-b"
+    },
+    {
+     "minutes": 6,
+     "station_id": "beds"
+    }
+   ],
+   "weekdays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun"
+   ]
+  },
+  {
+   "enabled": false,
+   "id": "beds-2d",
+   "name": "Beds \u00b7 Every 2 days",
+   "start": "07:00",
+   "steps": [
+    {
+     "minutes": 8,
+     "station_id": "beds"
+    },
+    {
+     "minutes": 4,
+     "station_id": "drip"
+    }
+   ],
+   "weekdays": [
+    "mon",
+    "wed",
+    "fri"
+   ]
+  },
+  {
+   "enabled": true,
+   "id": "trees-sun",
+   "name": "Trees \u00b7 Sundays",
+   "start": "06:10",
+   "steps": [
+    {
+     "minutes": 6,
+     "station_id": "trees"
+    }
+   ],
+   "weekdays": [
+    "sun"
+   ]
+  }
+ ]
+}

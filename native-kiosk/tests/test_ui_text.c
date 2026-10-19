@@ -52,6 +52,20 @@ static int prefix_ellipsis(const char *shown, const char *full)
     return n < fn && memcmp(flat, full, n) == 0;
 }
 
+/* Newlines from wrapping stand in for the spaces they replaced. */
+static int wrap_prefix(const char *shown, const char *full)
+{
+    char flat[ZK_UI_LABEL_TEXT_MAX];
+    size_t o = 0;
+    const char *s = shown ? shown : "";
+    while (*s && o + 1 < sizeof flat) {
+        flat[o++] = (*s == '\n') ? ' ' : *s;
+        s++;
+    }
+    flat[o] = 0;
+    return prefix_ellipsis(flat, full);
+}
+
 static size_t kept_prefix(const char *shown)
 {
     char flat[ZK_UI_LABEL_TEXT_MAX];
@@ -100,6 +114,7 @@ static int overlaps(const zk_ui_label_box_t *a, const zk_ui_label_box_t *b)
 }
 
 static void assert_hero_clear_of_rain(const zk_ui_label_box_t *b, int n, const char *screen);
+static void assert_rain_end(const zk_ui_label_box_t *b, int n, const char *screen);
 static void assert_slots_fixed(const zk_ui_label_box_t *b, int n, int nstat);
 
 static int inside_parent(const zk_ui_label_box_t *a)
@@ -258,6 +273,12 @@ static void test_paused_short(void)
     if (sub) {
         TEQ_S(sub->text, "Tap a station to run it anyway");
     }
+    {
+        const zk_ui_label_box_t *time = find_box(b, n, "hero_time");
+        if (time) {
+            TCHECK(!time->visible, "paused hero still draws a time line");
+        }
+    }
     if (bar) {
         TEQ_S(bar->text, "Resume");
     }
@@ -284,6 +305,12 @@ static void test_paused_long(void)
         TCHECK(strncmp(head->text, "Until ", 6) == 0, "headline %s", head->text);
         TCHECK(strstr(head->text, ZK_NBSP "AM") != NULL, "headline time %s", head->text);
         TCHECK(!ends_ellipsis(head->text), "headline ellipsized: %s", head->text);
+    }
+    {
+        const zk_ui_label_box_t *time = find_box(b, n, "hero_time");
+        if (time) {
+            TCHECK(!time->visible, "paused-long still draws a time line");
+        }
     }
 }
 
@@ -364,12 +391,21 @@ static void test_home_onoff(void)
         TCHECK(strcmp(label->text, full) == 0 || prefix_ellipsis(label->text, full), "label %s", label->text);
     }
     if (head) {
+        lv_point_t sz;
         char flat[64];
         strip_breaks(flat, sizeof flat, head->text);
-        TEQ_S(flat, ms);
-        TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+        lv_text_get_size(&sz, ms, &zk_font_lit_48, 0, 0, 332, LV_TEXT_FLAG_NONE);
+        TEQ_I(head->w, 332);
+        TEQ_I(head->x - head->parent_x, 24);
+        if ((int)sz.y > 52 * 3) {
+            TCHECK(prefix_ellipsis(head->text, ms), "headline %s", head->text);
+        } else {
+            TEQ_S(flat, ms);
+            TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+        }
     }
     if (time) {
+        TCHECK(time->visible, "time hidden");
         TCHECK(strstr(time->text, "min left") != NULL, "time %s", time->text);
     }
     for (i = 0; i < 4; i++) {
@@ -394,7 +430,16 @@ static void test_home_onoff(void)
         TCHECK(strcmp(b[i].text, "On") != 0 && strcmp(b[i].text, "Off") != 0, "pill text %s", b[i].text);
     }
     check_stop_gap(b, n);
-    assert_hero_clear_of_rain(b, n, "home-onoff");
+    {
+        const zk_ui_label_box_t *rain = find_box(b, n, "rain_text");
+        /* A three-line clamp that meets the meter hides the rain before the ends line. */
+        if (rain && rain->visible) {
+            assert_hero_clear_of_rain(b, n, "home-onoff");
+            assert_rain_end(b, n, "home-onoff");
+        } else if (time) {
+            TCHECK(time->visible, "time dropped when rain yielded");
+        }
+    }
 }
 
 static int box_hits(const zk_ui_label_box_t *a, int x, int y, int w, int h)
@@ -409,6 +454,20 @@ static int box_hits(const zk_ui_label_box_t *a, int x, int y, int w, int h)
         return 0;
     }
     return 1;
+}
+
+static void assert_rain_end(const zk_ui_label_box_t *b, int n, const char *screen)
+{
+    const zk_ui_label_box_t *end = find_box(b, n, "rain_1");
+    TCHECK(end && end->visible, "%s rain end label", screen);
+    if (!end) {
+        return;
+    }
+    TEQ_S(end->text, "1 in");
+    TEQ_I(end->parent_x, ZK_RAIN_X);
+    TEQ_I(end->x, ZK_RAIN_X + 268);
+    TEQ_I(end->w, 60);
+    TEQ_I(end->x + end->w, ZK_RAIN_X + ZK_RAIN_TRACK);
 }
 
 static void assert_hero_clear_of_rain(const zk_ui_label_box_t *b, int n, const char *screen)
@@ -495,16 +554,29 @@ static void test_running_long(void)
         TEQ_S(label->text, "WATERING NOW " ZK_MID " MORNING CYCLE");
     }
     if (head) {
+        lv_point_t sz;
         char flat[160];
         strip_breaks(flat, sizeof flat, head->text);
-        TEQ_S(flat, cur);
-        TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+        lv_text_get_size(&sz, cur, &zk_font_lit_48, 0, 0, 332, LV_TEXT_FLAG_NONE);
+        TEQ_I(head->w, 332);
+        TEQ_I(head->x - head->parent_x, 24);
+        if ((int)sz.y > 52 * 3) {
+            TCHECK(prefix_ellipsis(head->text, cur), "headline %s", head->text);
+        } else {
+            TEQ_S(flat, cur);
+            TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+        }
     }
     if (time) {
+        TCHECK(time->visible, "time hidden");
         TEQ_S(time->text, "3 min left");
     }
-    if (sub) {
+    if (sub && sub->visible) {
         TCHECK(strstr(sub->text, "next") != NULL, "secondary %s", sub->text);
+    } else {
+        const zk_ui_label_box_t *rain = find_box(b, n, "rain_text");
+        /* Rain yields before the ends line. A line that still does not fit may go. */
+        TCHECK(rain && !rain->visible, "secondary dropped while rain was still showing");
     }
     for (i = 0; i < 4; i++) {
         char id[32];
@@ -549,6 +621,7 @@ static void test_home_title_width(void)
     if (nr < 0) {
         return;
     }
+    assert_rain_end(rain, nr, "home-rain");
     TCHECK(load_fix("home-nosoil", ZK_SCREEN_HOME) == 0, "load home-nosoil");
     nd = grab(dry, 96);
     if (nd < 0) {
@@ -647,38 +720,47 @@ static void test_hero_longname(void)
     int n;
     const zk_ui_label_box_t *head;
     const zk_ui_label_box_t *time;
+    const zk_ui_label_box_t *sub;
+    const zk_ui_label_box_t *rain;
     const char *full = "North Orchard Drip Line East Bed Zone";
     char flat[160];
+    /* Rain yields before the ends/next line. The headline box stays 22/332. */
     TCHECK(load_fix("dc-watering-4-longname", ZK_SCREEN_HOME) == 0, "load longname");
     n = grab(b, 96);
     if (n < 0) {
         return;
     }
+    check_geometry(b, n, "longname", 0);
     head = find_box(b, n, "hero_headline");
     time = find_box(b, n, "hero_time");
-    TCHECK(head && time, "longname labels");
+    sub = find_box(b, n, "hero_secondary");
+    rain = find_box(b, n, "rain_text");
+    TCHECK(head && time && sub && rain, "longname labels");
     if (head) {
         lv_point_t sz;
-        int th;
         strip_breaks(flat, sizeof flat, head->text);
-        TEQ_S(flat, full);
-        TCHECK(!ends_ellipsis(head->text), "long headline ellipsized: %s", head->text);
-        /* The box must hold every wrapped line. A short box clips "Zone" into the time. */
-        lv_text_get_size(&sz, head->text, &zk_font_lit_48, 0, 0, head->w, LV_TEXT_FLAG_NONE);
-        th = (int)sz.y;
-        TCHECK(th >= 52 * 3, "long headline is %d px, not 3 lines", th);
-        TCHECK(head->h >= th, "headline box %d clips text %d", head->h, th);
-    }
-    if (time) {
-        TCHECK(strstr(time->text, "min left") != NULL, "time %s", time->text);
-    }
-    {
-        const zk_ui_label_box_t *sub = find_box(b, n, "hero_secondary");
-        if (sub) {
-            TCHECK(!sub->visible, "secondary kept under a 3-line headline");
+        lv_text_get_size(&sz, full, &zk_font_lit_48, 0, 0, 332, LV_TEXT_FLAG_NONE);
+        TEQ_I(head->w, 332);
+        TEQ_I(head->x - head->parent_x, 24);
+        if ((int)sz.y > 52 * 3) {
+            TCHECK(wrap_prefix(head->text, full), "long headline %s", head->text);
+            TCHECK(head->h <= 52 * 3 + 16, "headline box grew past 3 lines (%d)", head->h);
+        } else {
+            TEQ_S(flat, full);
+            TCHECK(!ends_ellipsis(head->text), "long headline ellipsized: %s", head->text);
         }
     }
-    assert_hero_clear_of_rain(b, n, "longname");
+    if (time) {
+        TCHECK(time->visible, "time hidden");
+        TCHECK(strstr(time->text, "min left") != NULL, "time %s", time->text);
+    }
+    if (sub) {
+        TCHECK(sub->visible, "ends/next line dropped");
+        TCHECK(strstr(sub->text, "next") != NULL, "secondary %s", sub->text);
+    }
+    if (rain) {
+        TCHECK(!rain->visible, "rain stayed in front of the ends line");
+    }
 }
 
 static void test_running_sheet(void)
@@ -689,7 +771,8 @@ static void test_running_sheet(void)
     const zk_ui_label_box_t *title;
     const zk_ui_label_box_t *label;
     const zk_ui_label_box_t *body;
-    const zk_ui_label_box_t *cancel;
+    const zk_ui_label_box_t *timed;
+    const zk_ui_label_box_t *ok;
     const zk_ui_label_box_t *stop;
     TCHECK(load_fix("dc-watering-6", ZK_SCREEN_HOME) == 0, "load dc-watering-6");
     zk_ui_debug_set_view(ZK_SCREEN_SHEET_STOP_STATION, 0, 2);
@@ -701,36 +784,50 @@ static void test_running_sheet(void)
     title = find_box(b, n, "sheet_title");
     label = find_box(b, n, "sheet_label");
     body = find_box(b, n, "sheet_body");
+    timed = find_box(b, n, "sheet_time");
     stop = find_box(b, n, "stop_word");
-    TCHECK(title && label && body && stop, "running sheet labels");
+    TCHECK(title && label && body && timed && stop, "running sheet labels");
     if (title) {
         TEQ_S(title->text, "Front Yard Drip Emitters is watering");
         TCHECK(title->visible, "running title hidden");
+        TEQ_I(title->y, 62);
     }
     if (label) {
-        TEQ_S(label->text, "WATERING NOW " ZK_MID " 2 MIN LEFT");
+        TEQ_S(label->text, "WATERING NOW " ZK_MID " LAWN A + B " ZK_MID " WEEKDAYS AM");
+        TEQ_I(label->y, 34);
+    }
+    if (timed) {
+        TEQ_S(timed->text, "2 min left " ZK_MID " ends 6:28" ZK_NBSP "AM");
+        TCHECK(timed->visible, "time line hidden");
+        TEQ_I(timed->y, 150);
     }
     if (body) {
-        TEQ_S(body->text, "The program goes on with the next station, Beds. Use STOP to end everything.");
+        TEQ_S(body->text, "Next: Beds. Tap STOP below to end all watering.");
+        TEQ_I(body->y, 196);
     }
     if (stop) {
         TEQ_S(stop->text, "STOP");
         TCHECK(stop->visible, "STOP hidden on the running sheet");
     }
-    cancel = NULL;
+    ok = NULL;
     for (i = 0; i < n; i++) {
         if (!b[i].visible) {
             continue;
         }
         TCHECK(strcmp(b[i].text, "Stop station") != 0, "Stop station still drawn");
+        TCHECK(strcmp(b[i].text, "Cancel") != 0, "Cancel still drawn on the running sheet");
         TCHECK(strstr(b[i].text, "Stop ") != b[i].text, "stop-station title still drawn: %s", b[i].text);
-        if (strcmp(b[i].text, "Cancel") == 0) {
-            cancel = &b[i];
+        if (strcmp(b[i].text, "OK") == 0) {
+            ok = &b[i];
         }
     }
-    TCHECK(cancel != NULL, "running sheet Cancel");
-    if (cancel) {
-        TCHECK(cancel->visible, "Cancel hidden");
+    TCHECK(ok != NULL, "running sheet OK");
+    if (ok) {
+        TCHECK(ok->visible, "OK hidden");
+        TEQ_I(ok->parent_x, 36);
+        TEQ_I(ok->parent_y, 232);
+        TEQ_I(ok->parent_w, 352);
+        TEQ_I(ok->parent_h, 96);
     }
 }
 
@@ -831,8 +928,7 @@ static void test_schedules_screen(void)
     }
     t = find_box(four, n4, "next_word");
     if (t) {
-        TEQ_S(t->text, "Next");
-        TCHECK(t->visible, "Next hidden");
+        TCHECK(!t->visible, "Next shown for two programs");
     }
     t = find_box(four, n4, "stop_word");
     if (t) {
@@ -879,6 +975,56 @@ static void test_schedules_screen(void)
         TCHECK(x1 == x2 && y1 == y2 && w1 == w2 && h1 == h2, "%s soil rect %d,%d %dx%d vs %d,%d %dx%d", ids[i], x1, y1,
                w1, h1, x2, y2, w2, h2);
     }
+
+    TCHECK(load_fix("dc-schedules-1", ZK_SCREEN_SCHEDULES) == 0, "load schedules 1");
+    n4 = grab(four, 96);
+    t = find_box(four, n4, "sched_label");
+    if (t) {
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY");
+    }
+    t = find_box(four, n4, "next_word");
+    if (t) {
+        TCHECK(!t->visible, "Next shown for one program");
+    }
+    t = find_box(four, n4, "sched_name1");
+    if (t) {
+        TCHECK(!t->visible, "second row on a one-program list");
+    }
+
+    TCHECK(load_fix("dc-schedules-3", ZK_SCREEN_SCHEDULES) == 0, "load schedules 3");
+    n4 = grab(four, 96);
+    t = find_box(four, n4, "sched_label");
+    if (t) {
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY " ZK_MID " 1" ZK_EN "2 of 3");
+    }
+    t = find_box(four, n4, "next_word");
+    if (t) {
+        TCHECK(t->visible, "Next hidden when N is 3");
+    }
+    t = find_box(four, n4, "sched_name0");
+    if (t) {
+        TEQ_S(t->text, "Lawn " ZK_MID " Morning");
+    }
+    zk_ui_debug_set_sched(2);
+    zk_ui_refresh();
+    n4 = grab(four, 96);
+    t = find_box(four, n4, "sched_label");
+    if (t) {
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY " ZK_MID " 3" ZK_EN "3 of 3");
+    }
+    t = find_box(four, n4, "sched_name0");
+    if (t) {
+        TEQ_S(t->text, "Trees " ZK_MID " Sundays");
+        TCHECK(t->visible, "page 2 name hidden");
+    }
+    t = find_box(four, n4, "sched_name1");
+    if (t) {
+        TCHECK(!t->visible, "page 2 drew a second row");
+    }
+    t = find_box(four, n4, "next_word");
+    if (t) {
+        TCHECK(t->visible, "Next hidden on the last page");
+    }
 }
 
 /* Regression: names that fit the spec clamp (3 lines for 4 stations, 2 for 6)
@@ -908,6 +1054,94 @@ static void test_tile_names_fit_clamp(void)
     }
 }
 
+static void expect_btn(const zk_ui_label_box_t *b, int n, const char *id, int x, int y, int w, int h)
+{
+    const zk_ui_label_box_t *t = find_box(b, n, id);
+    TCHECK(t && t->visible, "%s not drawn", id);
+    if (!t) {
+        return;
+    }
+    TCHECK(t->parent_x == x && t->parent_y == y && t->parent_w == w && t->parent_h == h,
+           "%s parent %d,%d %dx%d want %d,%d %dx%d", id, t->parent_x, t->parent_y, t->parent_w, t->parent_h, x, y, w,
+           h);
+}
+
+/* Every drawn sheet button's outer rect is its layout hit rect. */
+static void test_button_rects(void)
+{
+    zk_ui_label_box_t b[96];
+    zk_ui_glyph_dbg_t minus;
+    zk_ui_glyph_dbg_t plus_h;
+    zk_ui_glyph_dbg_t plus_v;
+    int n;
+    const zk_ui_label_box_t *word;
+    TCHECK(load_fix("dc-idle-6", ZK_SCREEN_HOME) == 0, "load run sheet");
+    zk_ui_debug_set_view(ZK_SCREEN_SHEET_RUN, 0, 2);
+    zk_ui_debug_set_minutes(1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    /* Stepper words are hidden; their parent is still the 96 px button. */
+    expect_parent(b, n, "minus_word", 36, 232, 96, 96);
+    expect_parent(b, n, "plus_word", 288, 232, 96, 96);
+    expect_btn(b, n, "cancel_word", 408, 232, 168, 96);
+    expect_btn(b, n, "run_word", 588, 232, 176, 96);
+    word = find_box(b, n, "minus_word");
+    TCHECK(word && !word->visible, "minus word still shown");
+    word = find_box(b, n, "plus_word");
+    TCHECK(word && !word->visible, "plus word still shown");
+    TCHECK(zk_ui_debug_glyphs(&minus, &plus_h, &plus_v) == 1, "glyphs");
+    TEQ_I(minus.present, 1);
+    TEQ_I(minus.x, 75);
+    TEQ_I(minus.y, 278);
+    TEQ_I(minus.w, 18);
+    TEQ_I(minus.h, 4);
+    TEQ_I((int)minus.color, 0x6E5A45);
+    TEQ_I(plus_h.present, 1);
+    TEQ_I(plus_h.x, 327);
+    TEQ_I(plus_h.y, 278);
+    TEQ_I(plus_h.w, 18);
+    TEQ_I(plus_h.h, 4);
+    TEQ_I((int)plus_h.color, 0x4A2F12);
+    TEQ_I(plus_v.present, 1);
+    TEQ_I(plus_v.x, 334);
+    TEQ_I(plus_v.y, 271);
+    TEQ_I(plus_v.w, 4);
+    TEQ_I(plus_v.h, 18);
+    TEQ_I((int)plus_v.color, 0x4A2F12);
+
+    zk_ui_debug_set_view(ZK_SCREEN_SHEET_STOP_ALL, 0, -1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    expect_btn(b, n, "cancel_word", 40, 328, 352, 112);
+    expect_btn(b, n, "stop_all_word", 408, 328, 352, 112);
+
+    TCHECK(load_fix("dc-overlap-6", ZK_SCREEN_HOME) == 0, "load overlap sheet");
+    zk_ui_debug_set_view(ZK_SCREEN_SHEET_OVERLAP, 0, -1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    expect_btn(b, n, "ok_word", 524, 232, 240, 96);
+}
+
+static void test_unavailable_names(void)
+{
+    int i;
+    TCHECK(load_fix("dc-idle-6", ZK_SCREEN_HOME) == 0, "load idle names");
+    for (i = 0; i < 6; i++) {
+        zk_ui_tile_dbg_t tile;
+        TCHECK(zk_ui_debug_tile(i, &tile) == 1, "idle tile %d", i);
+        TEQ_I((int)tile.name_rgb, 0x4A2F12);
+    }
+    TCHECK(load_fix("dc-offline-6", ZK_SCREEN_HOME) == 0, "load offline names");
+    zk_data_debug_force_stale(1);
+    zk_ui_refresh();
+    for (i = 0; i < 6; i++) {
+        zk_ui_tile_dbg_t tile;
+        TCHECK(zk_ui_debug_tile(i, &tile) == 1, "offline tile %d", i);
+        TEQ_I((int)tile.name_rgb, 0x6E5A45);
+    }
+    zk_data_debug_force_stale(0);
+}
+
 int main(void)
 {
     zk_platform_opts_t opts;
@@ -931,6 +1165,8 @@ int main(void)
     test_sheets_soil_offline();
     test_running_sheet();
     test_schedules_screen();
+    test_button_rects();
+    test_unavailable_names();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");

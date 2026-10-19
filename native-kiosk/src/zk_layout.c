@@ -134,9 +134,9 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
             out->value = R(144, 232, 132, 96);
             out->plus = R(288, 232, 96, 96);
             out->cancel = R(408, 232, 168, 96);
-            out->run = R(600, 232, 176, 96);
+            out->run = R(588, 232, 176, 96);
         } else if (sheet == ZK_SHEET_STOP_STATION) {
-            out->cancel = R(36, 232, 352, 96);
+            out->ok = R(36, 232, 352, 96);
         } else if (sheet == ZK_SHEET_OVERLAP) {
             out->ok = R(524, 232, 240, 96);
         }
@@ -173,58 +173,65 @@ int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target o
     }
     zk_layout_rects_of(screen, in, &L);
     sheet = sheet_of(screen);
-    if (screen == ZK_SCREEN_SCHEDULES) {
-        /* The list covers the hero and tiles. The bar stays live. */
+    /* A pending stop locks the screen the same way offline does, reachable or not. */
+    {
+        int locked = in->offline || in->stop_pending;
+        if (screen == ZK_SCREEN_SCHEDULES) {
+            /* The list covers the hero and tiles. The bar stays live. */
+            n = push(out, n, max, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
+            n = push(out, n, max, ZK_TARGET_HOME, L.sched, ZK_KIND_BUTTON);
+            if (!locked) {
+                if (in->paused) {
+                    n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
+                } else {
+                    n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
+                }
+            }
+            if (in->n_schedules > 2) {
+                n = push(out, n, max, ZK_TARGET_SCHED_NEXT, L.next, ZK_KIND_BUTTON);
+            }
+            return n;
+        }
+        if (sheet == ZK_SHEET_RUN || sheet == ZK_SHEET_ANYWAY) {
+            if (in->minutes > 1) {
+                n = push(out, n, max, ZK_TARGET_MINUS, L.minus, ZK_KIND_SHEET);
+            }
+            n = push(out, n, max, ZK_TARGET_PLUS, L.plus, ZK_KIND_SHEET);
+            n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
+            n = push(out, n, max, ZK_TARGET_RUN, L.run, ZK_KIND_SHEET);
+        } else if (sheet == ZK_SHEET_STOP_STATION) {
+            n = push(out, n, max, ZK_TARGET_OK, L.ok, ZK_KIND_SHEET);
+        } else if (sheet == ZK_SHEET_STOP_ALL) {
+            n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
+            n = push(out, n, max, ZK_TARGET_STOP_ALL, L.stop_all, ZK_KIND_SHEET);
+            return n;
+        } else if (sheet == ZK_SHEET_OVERLAP) {
+            n = push(out, n, max, ZK_TARGET_OK, L.ok, ZK_KIND_SHEET);
+        }
+        /* Partial sheet: STOP stays live. Resume stays live while paused
+         * and the controller is reachable with no stop in flight.
+         * Full sheet returned above. */
         n = push(out, n, max, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
-        n = push(out, n, max, ZK_TARGET_HOME, L.sched, ZK_KIND_BUTTON);
-        if (!in->offline) {
+        if (sheet == ZK_SHEET_NONE && !locked && in->overlap) {
+            n = push(out, n, max, ZK_TARGET_HERO, L.hero, ZK_KIND_HERO);
+        }
+        if (sheet == ZK_SHEET_NONE && !locked) {
+            for (i = 0; i < L.n_tiles; i++) {
+                n = push(out, n, max, (enum zk_target_id)(ZK_TARGET_TILE0 + i), L.tiles[i], ZK_KIND_TILE);
+            }
             if (in->paused) {
                 n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
             } else {
                 n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
             }
-        }
-        if (in->n_schedules > 1) {
-            n = push(out, n, max, ZK_TARGET_SCHED_NEXT, L.next, ZK_KIND_BUTTON);
-        }
-        return n;
-    }
-    if (sheet == ZK_SHEET_RUN || sheet == ZK_SHEET_ANYWAY) {
-        if (in->minutes > 1) {
-            n = push(out, n, max, ZK_TARGET_MINUS, L.minus, ZK_KIND_SHEET);
-        }
-        n = push(out, n, max, ZK_TARGET_PLUS, L.plus, ZK_KIND_SHEET);
-        n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
-        n = push(out, n, max, ZK_TARGET_RUN, L.run, ZK_KIND_SHEET);
-    } else if (sheet == ZK_SHEET_STOP_STATION) {
-        n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
-    } else if (sheet == ZK_SHEET_STOP_ALL) {
-        n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
-        n = push(out, n, max, ZK_TARGET_STOP_ALL, L.stop_all, ZK_KIND_SHEET);
-        return n;
-    } else if (sheet == ZK_SHEET_OVERLAP) {
-        n = push(out, n, max, ZK_TARGET_OK, L.ok, ZK_KIND_SHEET);
-    }
-    /* Partial sheet: STOP stays live. Resume stays live while paused.
-     * Pause and tiles are covered or not live. Full sheet returned above. */
-    n = push(out, n, max, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
-    if (sheet == ZK_SHEET_NONE && !in->offline && in->overlap) {
-        n = push(out, n, max, ZK_TARGET_HERO, L.hero, ZK_KIND_HERO);
-    }
-    if (sheet == ZK_SHEET_NONE && !in->offline) {
-        for (i = 0; i < L.n_tiles; i++) {
-            n = push(out, n, max, (enum zk_target_id)(ZK_TARGET_TILE0 + i), L.tiles[i], ZK_KIND_TILE);
-        }
-        if (in->paused) {
+            n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+        } else if (sheet == ZK_SHEET_NONE && in->stop_pending) {
+            n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+        } else if (sheet == ZK_SHEET_NONE && in->offline && in->sched_cached) {
+            n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+        } else if (sheet != ZK_SHEET_NONE && in->paused && !locked) {
             n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
-        } else {
-            n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
         }
-        n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
-    } else if (sheet == ZK_SHEET_NONE && in->offline && in->sched_cached) {
-        n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
-    } else if (sheet != ZK_SHEET_NONE && in->paused && !in->offline) {
-        n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
     }
     return n;
 }
