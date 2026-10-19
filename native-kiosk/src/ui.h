@@ -43,7 +43,7 @@ typedef struct {
 int zk_ui_debug_label_boxes(zk_ui_label_box_t *out, int cap);
 
 /* Home station tile after layout. bg and border are 0xRRGGBB. title_w is the
- * name widget width (same slot as main: tile width minus 28). */
+ * name widget width (tile width minus 20: 10 px from each outer edge). */
 typedef struct {
     int present;
     int on;
@@ -51,6 +51,8 @@ typedef struct {
     int border_w;
     uint32_t border;
     int drop_visible;
+    int drop_x, drop_y, drop_w, drop_h;
+    int line1_pad;
     int title_w;
     int tile_w;
     uint32_t name_rgb;

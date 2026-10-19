@@ -1,0 +1,55 @@
+{
+ "schedules": [
+  {
+   "enabled": true,
+   "id": "long-name",
+   "name": "test patio.sh parity: east 4, upper 2, lower 5 (bash cron 05:47) · Daily 5:47 AM",
+   "start": "05:47",
+   "steps": [
+    {
+     "minutes": 5,
+     "station_id": "lawn-a"
+    }
+   ],
+   "weekdays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun"
+   ]
+  },
+  {
+   "enabled": true,
+   "id": "fold-note",
+   "name": "Drip — “Thu” • 💧 Jardín­",
+   "start": "06:10",
+   "steps": [
+    {
+     "minutes": 4,
+     "station_id": "beds"
+    }
+   ],
+   "weekdays": [
+    "thu"
+   ]
+  },
+  {
+   "enabled": false,
+   "id": "drip-emoji",
+   "name": "Drip 💧",
+   "start": "07:00",
+   "steps": [
+    {
+     "minutes": 3,
+     "station_id": "drip"
+    }
+   ],
+   "weekdays": [
+    "sun"
+   ]
+  }
+ ]
+}

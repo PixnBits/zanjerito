@@ -23,9 +23,12 @@ CONV=(npx --yes "$CONV_PKG")
 CONV_VER="$("${CONV[@]}" -v 2>/dev/null | tail -n 1)"
 CONV_VER="${CONV_VER:-1.5.3}"
 
-# Printable ASCII, NBSP, middot, en dash, curly apostrophe, ellipsis, single right angle quote.
+# Printable ASCII, Latin-1 (U+00A0–U+00FF), en/em dash, quotes, bullet,
+# ellipsis, single right angle quote.
 # U+26A0 is not in these fonts; the kiosk draws the warning triangle.
-GLYPHS="0x20-0x7E,0xA0,0xB7,0x2013,0x2019,0x2026,0x203A"
+# Display strings are folded in zk_text_display; the extra punctuation is
+# here so a literal that still uses it does not draw a placeholder box.
+GLYPHS="0x20-0x7E,0xA0-0xFF,0x2013,0x2014,0x2018,0x2019,0x201C,0x201D,0x2022,0x2026,0x203A"
 
 gen_one() {
   local ttf="$1" name="$2" size="$3"
@@ -50,6 +53,49 @@ gen_one() {
   } >"$tmp"
   chmod 644 "$tmp"
   mv "$tmp" "$rel"
+  # Accented Latin raises the converter's line box. The kiosk rows were drawn
+  # against the previous metrics (Literata 32 is 35 px). Keep those numbers so
+  # a ring or acute cannot restack every screen. The glyph is still present.
+  pin_metrics "$name" "$rel"
+}
+
+# name, line_height, base_line — the values shipped before Latin-1 was added.
+pin_metrics() {
+  local name="$1" file="$2" lh bl
+  case "$name" in
+    zk_font_r_20) lh=20; bl=4 ;;
+    zk_font_r_22) lh=22; bl=4 ;;
+    zk_font_r_24) lh=24; bl=5 ;;
+    zk_font_r_26) lh=26; bl=5 ;;
+    zk_font_m_18) lh=17; bl=3 ;;
+    zk_font_m_20) lh=19; bl=4 ;;
+    zk_font_m_26) lh=27; bl=5 ;;
+    zk_font_m_28) lh=29; bl=6 ;;
+    zk_font_sb_18) lh=18; bl=3 ;;
+    zk_font_sb_24) lh=26; bl=5 ;;
+    zk_font_sb_26) lh=27; bl=5 ;;
+    zk_font_sb_36) lh=36; bl=7 ;;
+    zk_font_b_30) lh=31; bl=6 ;;
+    zk_font_b_36) lh=38; bl=8 ;;
+    zk_font_lit_18) lh=22; bl=5 ;;
+    zk_font_lit_20) lh=23; bl=5 ;;
+    zk_font_lit_26) lh=29; bl=6 ;;
+    zk_font_lit_32) lh=35; bl=7 ;;
+    zk_font_lit_40) lh=43; bl=10 ;;
+    zk_font_lit_48) lh=52; bl=12 ;;
+    *) return 0 ;;
+  esac
+  python3 - "$file" "$lh" "$bl" <<'PY'
+import pathlib, re, sys
+path, lh, bl = sys.argv[1:]
+file = pathlib.Path(path)
+text = file.read_text()
+text2, n1 = re.subn(r"(\.line_height = )\d+", r"\g<1>" + lh, text, count=1)
+text2, n2 = re.subn(r"(\.base_line = )\d+", r"\g<1>" + bl, text2, count=1)
+if n1 != 1 or n2 != 1:
+    raise SystemExit("pin_metrics: %s line_height=%d base_line=%d" % (path, n1, n2))
+file.write_text(text2)
+PY
 }
 
 # r: Barlow Semi Condensed Regular (400)

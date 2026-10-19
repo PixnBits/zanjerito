@@ -717,6 +717,7 @@ static void fill_sched_row(const zk_schedule_t *sch, zk_sched_row_t *row)
     }
     snprintf(row->meta, sizeof row->meta, "%s " ZK_MID " %s " ZK_MID " %d %s " ZK_MID " %d min " ZK_MID " %s", days, when,
              steps, steps == 1 ? "step" : "steps", mins, sch->enabled ? "Enabled" : "Disabled");
+    zk_utf8_seal(row->meta);
     row->enabled = sch->enabled ? 1 : 0;
     row->on = 1;
 }
@@ -949,7 +950,8 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
     feature = k ? soil_feature(src) : 0;
     for (i = 0; i < n; i++) {
         const zk_kiosk_station_t *st = &k->stations[i];
-        int lines = n > 4 ? 2 : 3;
+        /* Floor line count, used only when tile_px is set. The UI fits the name. */
+        int lines = n > 4 ? 3 : 4;
         int remain = -1;
         {
             char tmp[ZK_TITLE_MAX];

@@ -1,6 +1,7 @@
 #include "zk_model.h"
 
 #include "cJSON.h"
+#include "zk_text.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -10,16 +11,7 @@ void zk_str_copy(char *dst, size_t cap, const char *src)
     if (!dst || cap == 0) {
         return;
     }
-    if (!src) {
-        dst[0] = 0;
-        return;
-    }
-    size_t i = 0;
-    while (src[i] && i + 1 < cap) {
-        dst[i] = src[i];
-        i++;
-    }
-    dst[i] = 0;
+    zk_utf8_ncopy(dst, cap, src, src ? strlen(src) : 0);
 }
 
 void zk_str_upper(char *s)
@@ -50,11 +42,7 @@ void zk_str_trim_copy(char *dst, size_t cap, const char *src)
     while (n > 0 && (src[n - 1] == ' ' || src[n - 1] == '\t' || src[n - 1] == '\n' || src[n - 1] == '\r')) {
         n--;
     }
-    if (n + 1 > cap) {
-        n = cap - 1;
-    }
-    memcpy(dst, src, n);
-    dst[n] = 0;
+    zk_utf8_ncopy(dst, cap, src, n);
 }
 
 /* Howard Hinnant days_from_civil / civil_from_days (public domain). */
@@ -312,7 +300,9 @@ static void jstr(const cJSON *o, const char *k, char *dst, size_t cap)
         }
         return;
     }
-    zk_str_copy(dst, cap, v->valuestring);
+    /* Fold before the byte cap so a multibyte character is not split and a
+     * glyph outside the bundled font never reaches a label. */
+    zk_text_display(dst, cap, v->valuestring);
 }
 
 static int jnum(const cJSON *o, const char *k, double *out)

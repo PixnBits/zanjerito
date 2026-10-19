@@ -51,9 +51,14 @@
 #define ZK_LABEL_Y 34
 #define ZK_LABEL_W 332
 #define ZK_LABEL_H 44
-/* Soil slot: tile inset 14, 156x24. 6-up first row is y 69, stride 114. */
-#define ZK_SLOT_INSET 14
-#define ZK_SLOT_W 156
+/* Name and slot share one box: 10 px from each outer edge of the 184 px tile.
+ * That is 164 px. The spec's 160 is the CSS content box inside the 2 px border;
+ * LVGL measures 164 from the tile border, and that is the width the fitter uses.
+ * 6-up rest slot is y 69 (a 3-line floor name pushes the drawn slot to tile y+74). */
+#define ZK_TILE_PAD_X 10
+#define ZK_TILE_TEXT_W (ZK_TILE_W - 2 * ZK_TILE_PAD_X)
+#define ZK_SLOT_INSET ZK_TILE_PAD_X
+#define ZK_SLOT_W ZK_TILE_TEXT_W
 #define ZK_SLOT_H 24
 #define ZK_SLOT_Y6 69
 #define ZK_SLOT_STRIDE6 114

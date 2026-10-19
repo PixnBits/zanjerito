@@ -838,7 +838,7 @@ static void test_soil_never_zero_and_layout(void)
     zk_layout_rects_of(ZK_SCREEN_HOME, &lin, &b);
     TCHECK(memcmp(&a, &b, sizeof a) == 0, "rects identical");
     for (i = 0; i < 6; i++) {
-        TEQ_I(a.slots[i].w, 156);
+        TEQ_I(a.slots[i].w, 164);
         TEQ_I(a.slots[i].h, 24);
     }
     lin.n_stations = 4;
@@ -1075,7 +1075,7 @@ static void test_dirty_rects(void)
                 "600,130,184x102;404,244,184x102;600,244,184x102;148,360,244x104;16,360,120x104\n");
     ctx.soil_mask = 1u << 4;
     ctx.rain = 1;
-    expect_line(ZK_EVT_SOIL_RAIN, &ctx, "dirty event=soil_rain rects=418,297,156x24;40,264,328x64\n");
+    expect_line(ZK_EVT_SOIL_RAIN, &ctx, "dirty event=soil_rain rects=414,297,164x24;40,264,328x64\n");
     expect_line(ZK_EVT_RETRY_TICK, &ctx, "dirty event=retry_tick rects=38,34,332x44\n");
     expect_line(ZK_EVT_ACK, &ctx,
                 "dirty event=ack rects=16,16,376x332;404,16,184x102;600,16,184x102;404,130,184x102;600,130,184x102;"
