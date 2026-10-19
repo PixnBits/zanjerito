@@ -3,8 +3,10 @@
 #include "data.h"
 #include "platform.h"
 #include "ui.h"
+#include "zk_flow.h"
 #include "zk_layout.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,34 +21,60 @@ typedef struct {
     int chip;
     int stale;
     int needs_update;
+    int stop_phase; /* -1 clears the hold */
+    int minutes;    /* < 1 clears */
+    int sched_i;    /* < 0 clears */
 } shot_t;
 
+/* Direction C names from the handoff. Example fixtures only.
+ * minutes and sched_i are applied after set_view, which clears those holds. */
 static const shot_t k_shots[] = {
-    {"home-rain", "01-home-idle-rain.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-norain", "01b-home-idle-no-rain.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-nosoil", "01c-home-no-soil.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-stale", "01d-home-soil-stale.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-fault", "01e-home-fault.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"running", "02-running.png", ZK_SCREEN_RUNNING, 0, -1, 0, 0},
-    {"paused-rain", "03-paused-rain.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
-    {"paused-manual", "03b-paused-manual.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
-    {"home-rain", "04-pause-picker.png", ZK_SCREEN_PICKER, 0, -1, 0, 0},
-    {"home-rain", "05-schedules.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0},
-    {"home-rain", "06-confirm-stop.png", ZK_SCREEN_CONFIRM_STOP, 0, -1, 0, 0},
-    {"home-rain", "07-confirm-pause.png", ZK_SCREEN_CONFIRM_PAUSE, 0, 0, 0, 0},
-    {"home-rain", "08-home-stop-pressed.png", ZK_SCREEN_HOME, ZK_TARGET_STOP, -1, 0, 0},
-    {"home-rain", "09-offline.png", ZK_SCREEN_HOME, 0, -1, 1, 0},
-    {"paused-long", "03c-paused-long-reason.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
-    {"home-longnames", "01f-home-long-names.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"running-long", "02b-running-long.png", ZK_SCREEN_RUNNING, 0, -1, 0, 0},
-    {"home-rain", "10-station-sheet-soil.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
-    {"home-stale", "10b-station-sheet-soil-stale.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
-    {"home-nosoil", "10c-station-sheet-nosoil.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
-    {"running", "10d-station-sheet-running.png", ZK_SCREEN_STATION, 0, 1, 0, 0},
-    {"home-rain", "10e-station-sheet-exempt.png", ZK_SCREEN_STATION, 0, 1, 0, 0},
-    {"home-rain", "11-controller-needs-update.png", ZK_SCREEN_NEEDS_UPDATE, 0, -1, 0, 1},
-    {"home-rain", "12-home-schedules-button.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"paused-rain", "13-paused-schedules-button.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0}
+    {"dc-idle-4", "C-idle-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-idle-5", "C-idle-5.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-idle-6", "C-idle-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-watering-4", "C-watering-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-hero-24", "C-hero-24.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-names-24-4", "C-names-24-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-names-24-6", "C-names-24-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-watering-4-longname", "C-watering-4-longname.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-watering-4", "C-stop-slow-ack.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_QUEUED, 0, -1},
+    {"dc-watering-4", "C-stop-no-reply.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_QUEUED, 0, -1},
+    {"dc-watering-4", "C-stop-still-watering.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_WAIT, 0, -1},
+    {"dc-watering-4", "C-stop-not-confirmed-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_QUEUED, 0, -1},
+    {"dc-watering-4", "C-stop-not-confirmed-offline.png", ZK_SCREEN_HOME, 0, -1, 1, 0, ZK_STOP_WAIT, 0, -1},
+    {"dc-watering-6", "C-watering-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-paused-4", "C-paused-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-paused-6", "C-paused-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-nothing-4", "C-nothing-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-nothing-6", "C-nothing-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-overlap-6", "C-overlap-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-overlap-6", "S5-overlap-detail.png", ZK_SCREEN_SHEET_OVERLAP, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-offline-6", "C-offline-6.png", ZK_SCREEN_HOME, 0, -1, 1, 0, -1, 0, -1},
+    {"dc-offline-6", "C-offline-stop-1-confirm.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 1, 0, -1, 0, -1},
+    {"dc-offline-6", "C-offline-stop-2-pending.png", ZK_SCREEN_HOME, 0, -1, 1, 0, ZK_STOP_QUEUED, 0, -1},
+    {"dc-stopped", "C-offline-stop-3-stopped.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_CONFIRMED, 0, -1},
+    {"dc-idle-6", "S1-confirm-run.png", ZK_SCREEN_SHEET_RUN, 0, 2, 0, 0, -1, 0, -1},
+    {"dc-idle-6", "S1-confirm-run-min.png", ZK_SCREEN_SHEET_RUN, 0, 2, 0, 0, -1, 1, -1},
+    {"dc-paused-6", "S2-confirm-anyway.png", ZK_SCREEN_SHEET_ANYWAY, 0, 0, 0, 0, -1, 0, -1},
+    {"dc-watering-6", "S3-running-tile.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 2, 0, 0, -1, 0, -1},
+    {"dc-watering-6-last", "S3-running-tile-last.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 3, 0, 0, -1, 0, -1},
+    {"dc-manual-4", "S3-running-tile-manual.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 0, 0, 0, -1, 0, -1},
+    {"dc-watering-6", "S4-confirm-stop-all.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-manual-4", "S4-confirm-stop-all-manual.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-idle-6", "S4-confirm-stop-all-idle.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-4", "C-schedules-stop-all.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-soil-4", "C-soil-mix-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-soil-6", "C-soil-mix-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-soil-watering-6", "C-soil-watering-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-manual-4", "C-manual-run-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-4", "C-schedules-2.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-empty", "C-schedules-empty.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-offline", "C-schedules-offline.png", ZK_SCREEN_SCHEDULES, 0, -1, 1, 0, -1, 0, -1},
+    {"dc-schedules-1", "C-schedules-1.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-3", "C-schedules-3-p1.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, 0},
+    {"dc-schedules-3", "C-schedules-3-p2.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, 2},
+    {"dc-schedules-4", "C-schedules-4.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-6", "C-schedules-6.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
 };
 
 static int join2(char *dst, size_t cap, const char *a, const char *b)
@@ -89,14 +117,55 @@ static int one_shot(const char *root, const char *outdir, const shot_t *sc)
     zk_data_debug_force_stale(sc->stale);
     zk_data_debug_force_needs_update(sc->needs_update);
     zk_ui_debug_set_view(sc->screen, sc->pressed, sc->chip);
+    zk_ui_debug_set_minutes(sc->minutes);
+    zk_ui_debug_set_sched(sc->sched_i);
+    zk_ui_debug_set_stop(sc->stop_phase);
     zk_ui_refresh();
     if (zk_snapshot_png(out) != 0) {
         fprintf(stderr, "shots: write failed %s\n", out);
         return -1;
     }
+    zk_ui_debug_set_stop(-1);
     zk_data_debug_force_stale(0);
     zk_data_debug_force_needs_update(0);
     return 0;
+}
+
+static int shot_named(const char *name)
+{
+    size_t i;
+    for (i = 0; i < sizeof k_shots / sizeof k_shots[0]; i++) {
+        if (strcmp(k_shots[i].file, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Drop PNGs in outdir that this table no longer writes. Only after every shot succeeds. */
+static void drop_stale(const char *outdir)
+{
+    DIR *d;
+    struct dirent *ent;
+    d = opendir(outdir);
+    if (!d) {
+        return;
+    }
+    while ((ent = readdir(d)) != NULL) {
+        char path[768];
+        size_t n = strlen(ent->d_name);
+        if (n < 5 || strcmp(ent->d_name + n - 4, ".png") != 0) {
+            continue;
+        }
+        if (shot_named(ent->d_name)) {
+            continue;
+        }
+        if (join2(path, sizeof path, outdir, ent->d_name) != 0) {
+            continue;
+        }
+        unlink(path);
+    }
+    closedir(d);
 }
 
 int zk_shots_run(const char *fixtures_root, const char *outdir)
@@ -114,5 +183,6 @@ int zk_shots_run(const char *fixtures_root, const char *outdir)
             return -1;
         }
     }
+    drop_stale(outdir);
     return 0;
 }

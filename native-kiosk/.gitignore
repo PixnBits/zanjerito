@@ -1,3 +1,5 @@
 # fetched/generated locally, never committed
 /.cache/
 /build/
+__pycache__/
+*.pyc

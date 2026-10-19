@@ -28,6 +28,6 @@ Fonts are vendored under `fonts/`. cJSON and stb are vendored under `third_party
 
 - Path: `fonts/`
 - License: SIL Open Font License 1.1
-- Barlow Semi Condensed (SemiBold, Bold, ExtraBold) and Alfa Slab One (Regular)
-- Texts: `fonts/OFL-BarlowSemiCondensed.txt`, `fonts/OFL-AlfaSlabOne.txt`, and `fonts/README.md`
+- Barlow Semi Condensed (Regular, Medium, SemiBold, Bold) and Literata SemiBold static instances (text and display optical sizes)
+- Texts: `fonts/OFL-BarlowSemiCondensed.txt`, `fonts/OFL-Literata.txt`, and `fonts/README.md`
 - `generated/` holds converted subsets. Those subsets remain OFL font software

@@ -1,0 +1,159 @@
+{
+ "now": "2026-10-20T06:26:00-06:00",
+ "timezone": "America/Denver",
+ "phase": "StationOn",
+ "lockout": false,
+ "last_error": "",
+ "current_station": "beds",
+ "stations_on": [
+  "beds"
+ ],
+ "pause": {
+  "paused": false,
+  "until": null,
+  "label": "",
+  "reason": "",
+  "source": "",
+  "rain_inches": 0.0,
+  "last_rain_at": null
+ },
+ "rain_strip": {
+  "show": false,
+  "inches": 0.0,
+  "hours": 72
+ },
+ "rain": {
+  "enabled": true,
+  "unavailable": false,
+  "total_24h_inches": 0.0,
+  "total_72h_inches": 0.0,
+  "have_totals": false
+ },
+ "next_run": {
+  "schedule_id": "weekdays",
+  "name": "Lawn A + B \u00b7 Weekdays AM",
+  "at": "2026-10-20T06:10:00-06:00",
+  "ends_at": "2026-10-20T06:10:00-06:00",
+  "total_min": 18,
+  "skipped_by_pause": false
+ },
+ "next_effective_run": {
+  "schedule_id": "weekdays",
+  "name": "Lawn A + B \u00b7 Weekdays AM",
+  "at": "2026-10-20T06:10:00-06:00",
+  "ends_at": "2026-10-20T06:10:00-06:00",
+  "total_min": 18,
+  "skipped_by_pause": false
+ },
+ "run": {
+  "kind": "schedule",
+  "program_id": "weekdays",
+  "program": "Lawn A + B \u00b7 Weekdays AM",
+  "started_at": "2026-10-20T06:10:00-06:00",
+  "step_index": 3,
+  "step_count": 4,
+  "current_station": "beds",
+  "next_station": "",
+  "step_elapsed_sec": 0,
+  "step_remaining_sec": 120,
+  "run_remaining_sec": 120,
+  "run_total_sec": 1080,
+  "steps": [
+   {
+    "station_id": "lawn-a",
+    "title": "Lawn A",
+    "planned_sec": 360,
+    "elapsed_sec": 360,
+    "remaining_sec": 0,
+    "state": "done"
+   },
+   {
+    "station_id": "lawn-b",
+    "title": "Lawn B",
+    "planned_sec": 360,
+    "elapsed_sec": 360,
+    "remaining_sec": 0,
+    "state": "done"
+   },
+   {
+    "station_id": "drip",
+    "title": "Front Yard Drip Emitters",
+    "planned_sec": 120,
+    "elapsed_sec": 120,
+    "remaining_sec": 0,
+    "state": "done"
+   },
+   {
+    "station_id": "beds",
+    "title": "Beds",
+    "planned_sec": 120,
+    "elapsed_sec": 0,
+    "remaining_sec": 120,
+    "state": "active"
+   }
+  ]
+ },
+ "stations": [
+  {
+   "id": "lawn-a",
+   "title": "Lawn A",
+   "color": "red",
+   "on": false,
+   "state": "idle",
+   "rain_pause_exempt": false,
+   "soil_percent": null
+  },
+  {
+   "id": "lawn-b",
+   "title": "Lawn B",
+   "color": "yellow",
+   "on": false,
+   "state": "idle",
+   "rain_pause_exempt": false,
+   "soil_percent": null
+  },
+  {
+   "id": "drip",
+   "title": "Front Yard Drip Emitters",
+   "color": "blue",
+   "on": false,
+   "state": "idle",
+   "rain_pause_exempt": false,
+   "soil_percent": null
+  },
+  {
+   "id": "beds",
+   "title": "Beds",
+   "color": "green",
+   "on": true,
+   "state": "running",
+   "rain_pause_exempt": false,
+   "soil_percent": null
+  },
+  {
+   "id": "trees",
+   "title": "Trees",
+   "color": "red",
+   "on": false,
+   "state": "idle",
+   "rain_pause_exempt": false,
+   "soil_percent": null
+  },
+  {
+   "id": "side",
+   "title": "Side Yard Roses",
+   "color": "yellow",
+   "on": false,
+   "state": "idle",
+   "rain_pause_exempt": false,
+   "soil_percent": null
+  }
+ ],
+ "soil": {
+  "enabled": false,
+  "et_known": false,
+  "et_stale": false,
+  "show_bars": false,
+  "updated_at": null
+ }
+}

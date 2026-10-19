@@ -1,0 +1,33 @@
+{
+ "schedules": [
+  {
+   "enabled": true,
+   "id": "lawn-morning",
+   "name": "Lawn \u00b7 Morning",
+   "start": "06:10",
+   "steps": [
+    {
+     "minutes": 6,
+     "station_id": "lawn-a"
+    },
+    {
+     "minutes": 6,
+     "station_id": "lawn-b"
+    },
+    {
+     "minutes": 6,
+     "station_id": "beds"
+    }
+   ],
+   "weekdays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun"
+   ]
+  }
+ ]
+}

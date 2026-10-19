@@ -12,24 +12,26 @@ extern "C" {
 #include "lvgl.h"
 #endif
 
+LV_FONT_DECLARE(zk_font_r_20);
+LV_FONT_DECLARE(zk_font_r_22);
+LV_FONT_DECLARE(zk_font_r_24);
+LV_FONT_DECLARE(zk_font_r_26);
+LV_FONT_DECLARE(zk_font_m_18);
+LV_FONT_DECLARE(zk_font_m_20);
+LV_FONT_DECLARE(zk_font_m_26);
+LV_FONT_DECLARE(zk_font_m_28);
+LV_FONT_DECLARE(zk_font_sb_18);
+LV_FONT_DECLARE(zk_font_sb_24);
 LV_FONT_DECLARE(zk_font_sb_26);
-LV_FONT_DECLARE(zk_font_sb_28);
-LV_FONT_DECLARE(zk_font_b_26);
-LV_FONT_DECLARE(zk_font_b_28);
-LV_FONT_DECLARE(zk_font_b_34);
-LV_FONT_DECLARE(zk_font_xb_28);
-LV_FONT_DECLARE(zk_font_xb_32);
-LV_FONT_DECLARE(zk_font_xb_36);
-LV_FONT_DECLARE(zk_font_xb_40);
-LV_FONT_DECLARE(zk_font_xb_42);
-LV_FONT_DECLARE(zk_font_xb_44);
-LV_FONT_DECLARE(zk_font_xb_48);
-LV_FONT_DECLARE(zk_font_xb_50);
-LV_FONT_DECLARE(zk_font_xb_58);
-LV_FONT_DECLARE(zk_font_xb_96);
-LV_FONT_DECLARE(zk_font_xb_104);
-LV_FONT_DECLARE(zk_font_xb_172);
-LV_FONT_DECLARE(zk_font_alfa_26);
+LV_FONT_DECLARE(zk_font_sb_36);
+LV_FONT_DECLARE(zk_font_b_30);
+LV_FONT_DECLARE(zk_font_b_36);
+LV_FONT_DECLARE(zk_font_lit_18);
+LV_FONT_DECLARE(zk_font_lit_20);
+LV_FONT_DECLARE(zk_font_lit_26);
+LV_FONT_DECLARE(zk_font_lit_32);
+LV_FONT_DECLARE(zk_font_lit_40);
+LV_FONT_DECLARE(zk_font_lit_48);
 
 #ifdef __cplusplus
 }

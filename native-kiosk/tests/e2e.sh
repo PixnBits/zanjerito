@@ -3,18 +3,18 @@
 # Cases:
 #   a  read-only STOP+OK sends nothing
 #   b  STOP+OK posts cancel; a later Cancel does not
-#   c  pause for days, and pause until tomorrow morning
+#   c  one tap on Pause for rain posts tomorrow-morning pause
 #   d  resume posts only with --allow-writes
-#   e  confirm-STOP ignores a tap on the rail
-#   f  unreachable API shows the stale pill and exits 0
+#   e  Stop all sheet ignores a tap that is not Cancel or Stop all
+#   f  unreachable API shows the offline hero and exits 0
 #   g  no API exits 2
-#   h  one pause POST; stray taps after OK do not add another
+#   h  a second Pause inside 300 ms does not add a POST
 #   i  a second STOP while the first POST is held does not double-post
 #   j  cancel POST is not stuck behind a slow GET
-#   k  tile tap opens the station sheet and does not POST
-#   l  Schedules button, then Close
-#   m  STOP from the station sheet posts one cancel
-#   n  needs-update card; STOP still posts
+#   k  tile tap opens the run sheet and does not POST
+#   l  a hero tap on idle does nothing
+#   m  STOP from the run sheet posts one cancel
+#   n  unreachable kiosk shows the offline hero; STOP still posts
 #   o  idle dim, then off; a tile tap while off wakes and does not open the sheet
 #   p  a dimmed tile tap is swallowed; dimmed STOP opens confirm on that first tap
 #   q  a running fixture never dims or blanks
@@ -28,6 +28,15 @@
 #   y  --fbshot without --fb exits 2
 #   z  padded stride keeps the sentinel and matches an unpadded fbshot
 #   aa bottom rows 474..479 are background, not the old red step strip
+#   ab a running tile tap, the old Stop station point, and OK post nothing
+#   ac 2xx while still watering stays pending, re-POSTs, then confirms on all-off
+#   ad a slow ack (longer than the HTTP timeout) shows pending and stays filled
+#   ae Schedules, Stop all, Cancel, Next, and Home send no POST
+#   af a tile tap during a pending stop sends no station POST
+#   ag 2xx then unreachable stays pending; all-off after it returns confirms
+#   ah idle timeout on Stop all returns Home and posts nothing
+#   ai instant ack, water stays on: cancel POSTs stay within one per 2 s
+#   aj same bound in the 10 s after an outage clears
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -37,35 +46,23 @@ BIN=$ROOT/build/zan-kiosk-host
 STUB=$ROOT/tools/stub_server.py
 FIX=$ROOT/tests/fixtures
 
-# Centers from zk_layout.c (integer division). test_layout checks STOP height
-# 264 (304 while running), chip size 255x188, and each target's center.
-# HOME STOP (550,12 236x264) -> (668,144)
-# HOME slot y=292 h=168 -> (668,376)  Pause, and Resume on the paused screen
-# Confirm OK (120,240 270x130) -> (255,305); Cancel (410,240) -> (545,305)
-# Picker chips at (14,72), 255x188, gap 12:
-#   chip 0 tomorrow morning (141,166); chip 1 "2 days" (408,166)
-STOP_X=668
-STOP_Y=144
-SLOT_X=668
-SLOT_Y=376
-# Home tile 0 with rain: (14,198 256x126) -> (142,261)
-TILE0_X=142
-TILE0_Y=261
-# Schedules button (416,12 120x108) -> (476,66)
-SCHED_X=476
-SCHED_Y=66
-OK_X=255
-OK_Y=305
-CANCEL_X=545
-CANCEL_Y=305
-CHIP_TOMORROW_X=141
-CHIP_TOMORROW_Y=166
-CHIP_DAYS2_X=408
-CHIP_DAYS2_Y=166
-# Chip 2 "1 week": (14, 272) 255x188 -> center (141, 366).
-# (255, 305) is inside that chip while the picker is still up.
-CHIP_WEEK_X=141
-CHIP_WEEK_Y=366
+# Direction C centers. STOP (404,360 380x104), Pause (148,360 244x104).
+# Schedules / Home is (16,360 120x104). Next on the schedules list is (400,232 364x96).
+# Tile 0 on the 4-up grid is (404,16 184x160).
+# Stop all sheet: Cancel (40,328 352x112), Stop all (408,328 352x112).
+# Idle hero is not a target. Its center must not open a sheet.
+STOP_X=594
+STOP_Y=412
+SLOT_X=204
+SLOT_Y=412
+TILE0_X=496
+TILE0_Y=96
+HERO_X=204
+HERO_Y=182
+OK_X=584
+OK_Y=384
+CANCEL_X=216
+CANCEL_Y=384
 
 FAILS=0
 STUB_PID=
@@ -204,37 +201,26 @@ def main():
         import hashlib
         print(hashlib.sha256(open(path, "rb").read()).hexdigest())
         return
-    # Stale pill fill is #F6D5CC. Count matches in the lower band.
+    # Offline hero border is #A8432A. Idle home has none of that red.
     if cmd == "stale":
         n = 0
-        y1 = min(h, 470)
-        x1 = min(w, 520)
-        for y in range(400, y1):
-            for x in range(20, x1):
-                if near(pix(rows, x, y), (0xF6, 0xD5, 0xCC), 8):
+        for y in range(16, 348):
+            for x in range(16, 392):
+                if near(pix(rows, x, y), (0xA8, 0x43, 0x2A), 8):
                     n += 1
         print(n)
         return
-    # Confirm-STOP OK button is #B5361A, above the label.
+    # Stop all button fill is #B5361A. Sample left of the label inside (408,328 352x112).
     if cmd == "stopok":
-        rgb = pix(rows, 200, 260)
+        rgb = pix(rows, 424, 384)  # Stop all fill, left of the label
         print("%d %d %d" % rgb)
         return
-    # Needs-update card is cream #FCF5E6 in the main column.
+    # Offline hero border #A8432A. The idle hero does not use this color.
     if cmd == "needsupdate":
         n = 0
-        for y in range(40, 200):
-            for x in range(30, 500):
-                if near(pix(rows, x, y), (0xFC, 0xF5, 0xE6), 8):
-                    n += 1
-        print(n)
-        return
-    # Hold-to-edit on Schedules is dusk plum #4E3F63.
-    if cmd == "schedules":
-        n = 0
-        for y in range(340, 450):
-            for x in range(40, 520):
-                if near(pix(rows, x, y), (0x4E, 0x3F, 0x63), 12):
+        for y in range(16, 348):
+            for x in range(16, 392):
+                if near(pix(rows, x, y), (0xA8, 0x43, 0x2A), 8):
                     n += 1
         print(n)
         return
@@ -360,6 +346,59 @@ kiosk() {
         >"$TMP/kiosk.out" 2>"$TMP/kiosk.err"
 }
 
+# Background host so a test can flip the stub control file. ZK_HERO_LOG prints
+# "HERO headline | secondary" and flushes, so stderr shows the stop sentence.
+kiosk_bg() {
+    local dur=$1
+    local script=$2
+    local limit=$3
+    shift 3
+    stop_kiosk
+    ZK_HERO_LOG=1 timeout "$limit" env -u ZAN_API -u ZK_POLL_MS_STATUS \
+        -u ZK_POWER_FORCE -u ZAN_DIM_AFTER_SEC -u ZAN_OFF_AFTER_SEC \
+        -u ZAN_DIM_LEVEL -u ZAN_BACKLIGHT \
+        "$BIN" \
+        --api "http://127.0.0.1:${PORT}" \
+        "$@" \
+        --script "$script" \
+        --duration "$dur" \
+        >"$TMP/kiosk.out" 2>"$TMP/kiosk.err" &
+    KIOSK_PID=$!
+}
+
+wait_err() {
+    local phrase=$1
+    local ticks=${2:-80}
+    local i
+    for i in $(seq 1 "$ticks"); do
+        if grep -F "$phrase" "$TMP/kiosk.err" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [[ -n "${KIOSK_PID}" ]] && ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            return 1
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
+wait_posts() {
+    local want=$1
+    local ticks=${2:-80}
+    local i n
+    for i in $(seq 1 "$ticks"); do
+        n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+        if [[ "$n" -ge "$want" ]]; then
+            return 0
+        fi
+        if [[ -n "${KIOSK_PID}" ]] && ! kill -0 "$KIOSK_PID" 2>/dev/null; then
+            return 1
+        fi
+        sleep 0.25
+    done
+    return 1
+}
+
 show_kiosk_err() {
     echo "--- kiosk stderr ---" >&2
     cat "$TMP/kiosk.err" >&2 || true
@@ -370,6 +409,63 @@ post_lines() {
         return 0
     fi
     sed -e 's/\r$//' -e 's/[[:space:]]*$//' "$LOG" | sed '/^$/d' | grep '^POST ' || true
+}
+
+cancel_count() {
+    post_lines | grep -c '^POST /api/run/cancel' || true
+}
+
+# Monotonic seconds, same clock as the stub's <log>.ts lines.
+mono_now() {
+    python3 -c 'import time; print("%.6f" % time.monotonic())'
+}
+
+# POST /api/run/cancel lines in <log>.ts with t0 <= ts < t1.
+cancel_between() {
+    local t0=$1 t1=$2
+    python3 - "$LOG.ts" "$t0" "$t1" <<'PY'
+import sys
+path, t0, t1 = sys.argv[1:]
+t0 = float(t0)
+t1 = float(t1)
+n = 0
+try:
+    fh = open(path, encoding="utf-8")
+except OSError:
+    print(0)
+    raise SystemExit(0)
+with fh:
+    for line in fh:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            ts = float(parts[0])
+        except ValueError:
+            continue
+        if ts < t0 or ts >= t1:
+            continue
+        if parts[1] == "POST" and parts[2] == "/api/run/cancel":
+            n += 1
+print(n)
+PY
+}
+
+first_cancel_ts() {
+    python3 - "$LOG.ts" <<'PY'
+import sys
+path = sys.argv[1]
+try:
+    fh = open(path, encoding="utf-8")
+except OSError:
+    raise SystemExit(0)
+with fh:
+    for line in fh:
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "POST" and parts[2] == "/api/run/cancel":
+            print(parts[0])
+            break
+PY
 }
 
 assert_posts() {
@@ -425,15 +521,9 @@ case_b() {
 case_c() {
     start_stub "$FIX/home-rain" || return 1
     kiosk 4 \
-        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_DAYS2_X},${CHIP_DAYS2_Y};wait:400;tap:${OK_X},${OK_Y};wait:700" \
+        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:700" \
         12 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts 'POST /api/pause {"days":2,"reason":"kiosk"}' || return 1
-
-    start_stub "$FIX/home-rain" || return 1
-    kiosk 4 \
-        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_TOMORROW_X},${CHIP_TOMORROW_Y};wait:400;tap:${OK_X},${OK_Y};wait:700" \
-        12 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts 'POST /api/pause {"until":"tomorrow_morning","reason":"kiosk"}' || return 1
+    assert_posts 'POST /api/pause {"until":"tomorrow_morning","reason":"rain"}' || return 1
 }
 
 case_d() {
@@ -450,15 +540,15 @@ case_e() {
     local a=$TMP/e1.png b=$TMP/e2.png
     local c1 c2
     start_stub "$FIX/home-rain" || return 1
-    # Second shot is after a tap on the rail Pause point while confirm-STOP is up.
+    # Second shot is after a tap on a tile point. The full sheet covers it.
     kiosk 5 \
-        "wait:900;tap:${STOP_X},${STOP_Y};wait:500;shot:${a};tap:${SLOT_X},${SLOT_Y};wait:500;shot:${b}" \
+        "wait:900;tap:${STOP_X},${STOP_Y};wait:500;shot:${a};tap:${TILE0_X},${TILE0_Y};wait:500;shot:${b}" \
         12 --allow-writes || { show_kiosk_err; return 1; }
     assert_posts "" || return 1
     [[ -f "$a" && -f "$b" ]] || { echo "missing modal shots" >&2; return 1; }
     c1=$(python3 "$TMP/png.py" stopok "$a")
     c2=$(python3 "$TMP/png.py" stopok "$b")
-    # OK button fill, above the STOP label. Home at this point is not this color.
+    # Stop all button fill (left of its label). Home at this point is not this color.
     if [[ "$c1" != "181 54 26" || "$c2" != "181 54 26" ]]; then
         echo "confirm STOP not held open (pixels $c1 / $c2)" >&2
         return 1
@@ -523,13 +613,13 @@ case_g() {
     fi
 }
 
-# Pause OK, then stray taps at OK and on the 1-week chip: still one pause POST.
+# One Pause, then a second Pause inside the 300 ms debounce: still one POST.
 case_h() {
     start_stub "$FIX/home-rain" || return 1
-    kiosk 6 \
-        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_DAYS2_X},${CHIP_DAYS2_Y};wait:400;tap:${OK_X},${OK_Y};wait:100;tap:${OK_X},${OK_Y};wait:150;tap:${CHIP_WEEK_X},${CHIP_WEEK_Y};wait:50;tap:${OK_X},${OK_Y};wait:900" \
+    kiosk 4 \
+        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:100;tap:${SLOT_X},${SLOT_Y};wait:900" \
         12 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts 'POST /api/pause {"days":2,"reason":"kiosk"}' || return 1
+    assert_posts 'POST /api/pause {"until":"tomorrow_morning","reason":"rain"}' || return 1
 }
 
 # Two STOP+OK sequences while the first POST is still held by the stub.
@@ -597,7 +687,19 @@ PY
         return 1
     fi
     KIOSK_PID=
-    assert_posts "POST /api/run/cancel" || return 1
+    # The slow GET never delivers an all-off snapshot, so the stop stays pending
+    # and the 2s timer retries. The first POST is the timing check above.
+    n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+    if [[ "$n" -lt 1 || "$n" -gt 4 ]]; then
+        echo "case j: $n cancels" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    if post_lines | grep -v '^POST /api/run/cancel' | grep -q .; then
+        echo "case j: unexpected POST" >&2
+        post_lines >&2 || true
+        return 1
+    fi
 }
 
 # Tile tap opens the station sheet. Writes stay off.
@@ -612,22 +714,16 @@ case_k() {
     [[ "$(png_size "$png")" == "800x480" ]] || return 1
 }
 
-# Schedules button opens Schedules; Close (slot) returns.
+# Idle hero is not a target. A tap there leaves the screen unchanged.
 case_l() {
-    local a=$TMP/l-sched.png b=$TMP/l-home.png
-    local n
+    local a=$TMP/l-before.png b=$TMP/l-after.png
     start_stub "$FIX/home-rain" || return 1
-    kiosk 5 "wait:800;tap:${SCHED_X},${SCHED_Y};wait:400;shot:${a};tap:${SLOT_X},${SLOT_Y};wait:400;shot:${b}" 12 || {
+    kiosk 5 "wait:800;shot:${a};tap:${HERO_X},${HERO_Y};wait:400;shot:${b}" 12 || {
         show_kiosk_err
         return 1
     }
-    n=$(python3 "$TMP/png.py" schedules "$a")
-    if [[ "$n" -lt 80 ]]; then
-        echo "schedules screen plum pixels $n" >&2
-        return 1
-    fi
-    if cmp -s "$a" "$b"; then
-        echo "Close did not leave Schedules" >&2
+    if ! cmp -s "$a" "$b"; then
+        echo "hero tap changed the idle screen" >&2
         return 1
     fi
 }
@@ -656,7 +752,18 @@ case_n() {
         echo "needs-update cream pixels $n" >&2
         return 1
     fi
-    assert_posts "POST /api/run/cancel" || return 1
+    # 2xx is not the ack. The kiosk stays pending and retries on the 2s timer.
+    n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+    if [[ "$n" -lt 1 || "$n" -gt 3 ]]; then
+        echo "needs-update stop posted $n cancels" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    if post_lines | grep -v '^POST /api/run/cancel' | grep -q .; then
+        echo "needs-update stop posted something else" >&2
+        post_lines >&2 || true
+        return 1
+    fi
 }
 
 trim_file() {
@@ -727,14 +834,12 @@ nearcount() {
     python3 "$TMP/png.py" nearcount "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
 }
 
-# Home with the rain strip is #CFE6E1. The gap between tile rows is #EFDDBE.
-# The station sheet paints that gap cream, so a swallowed tile tap stays beige.
+# The 12 px gap between the 4-up tile rows is page sand. A sheet covers it.
 home_rain_ok() {
-    local png=$1 rain gap
-    rain=$(nearcount "$png" 300 520 140 180 207 230 225 12)
-    gap=$(nearcount "$png" 30 200 325 334 239 221 190 12)
-    if [[ "$rain" -lt 400 || "$gap" -lt 400 ]]; then
-        echo "home layout not held (rain=$rain gap=$gap) $png" >&2
+    local png=$1 gap
+    gap=$(nearcount "$png" 420 760 178 186 251 236 214 12)
+    if [[ "$gap" -lt 1500 ]]; then
+        echo "home layout not held (gap=$gap) $png" >&2
         return 1
     fi
 }
@@ -890,7 +995,7 @@ PY
         trace_fail
         return 1
     fi
-    n=$(nearcount "$png" 300 520 200 320 15 94 92 16)
+    n=$(nearcount "$png" 610 770 30 150 15 110 108 16)
     if [[ "$n" -lt 200 ]]; then
         echo "running screen teal pixels $n" >&2
         return 1
@@ -933,9 +1038,9 @@ PY
         trace_fail
         return 1
     fi
-    n=$(nearcount "$fault" 20 500 135 180 181 54 26 16)
+    n=$(nearcount "$fault" 40 300 40 140 255 250 238 12)
     if [[ "$n" -lt 400 ]]; then
-        echo "fault banner red pixels $n" >&2
+        echo "fault screen hero cream pixels $n" >&2
         return 1
     fi
 
@@ -1052,7 +1157,7 @@ run_isolated() {
         "$@"
 }
 
-# home-norain: background (2,2), STOP face (580,40), soil fill on tile 0 (34,248).
+# home-norain: page sand (2,2), STOP border (594,361), hero cream (40,40).
 panel_case() {
     local bpp=$1
     local fmt=$2
@@ -1135,11 +1240,11 @@ PY
     fi
     [[ -f "$mem" && -f "$shot" ]] || { echo "missing png" >&2; return 1; }
     python3 "$TMP/png.py" close "$mem" "$shot" 2 2 "$tol" || return 1
-    python3 "$TMP/png.py" close "$mem" "$shot" 580 40 "$tol" || return 1
-    python3 "$TMP/png.py" close "$mem" "$shot" 34 248 "$tol" || return 1
+    python3 "$TMP/png.py" close "$mem" "$shot" 594 361 "$tol" || return 1
+    python3 "$TMP/png.py" close "$mem" "$shot" 40 40 "$tol" || return 1
     p1=$(python3 "$TMP/png.py" pix "$mem" 2 2)
-    p2=$(python3 "$TMP/png.py" pix "$mem" 580 40)
-    p3=$(python3 "$TMP/png.py" pix "$mem" 34 248)
+    p2=$(python3 "$TMP/png.py" pix "$mem" 594 361)
+    p3=$(python3 "$TMP/png.py" pix "$mem" 40 40)
     python3 -c 'import sys
 ps = [tuple(int(x) for x in s.split()) for s in sys.argv[1:]]
 if len(set(ps)) != 3:
@@ -1367,8 +1472,363 @@ case_z() {
     stride_case 16 RGB565 2 1664 || return 1
 }
 
-# Rows 474..479 used to be a COL_STOP (#B5361A) bar and dashes. They are
-# screen background now (COL_BG #EFDDBE). Row 470 is the same band.
+# Running tile (600,16 184x160) opens the status sheet. The old Stop station
+# rect (400,232 364x96) is empty. OK (36,232 352x96) closes it. No POST.
+case_ab() {
+    local sheet=$TMP/ab-sheet.png ghost=$TMP/ab-ghost.png home=$TMP/ab-home.png
+    local red teal
+    start_stub "$FIX/running" || return 1
+    kiosk 8 \
+        "wait:900;tap:692,96;wait:500;shot:${sheet};tap:582,280;wait:500;shot:${ghost};tap:212,280;wait:500;shot:${home}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "" || return 1
+    [[ -f "$sheet" && -f "$ghost" && -f "$home" ]] || { echo "missing running-sheet shots" >&2; return 1; }
+    if ! cmp -s "$sheet" "$ghost"; then
+        echo "old Stop station point changed the running sheet" >&2
+        return 1
+    fi
+    if cmp -s "$sheet" "$home"; then
+        echo "Cancel did not close the running sheet" >&2
+        return 1
+    fi
+    red=$(nearcount "$sheet" 400 764 232 328 181 54 26 12)
+    if [[ "$red" -ne 0 ]]; then
+        echo "Stop station ink still in the empty slot ($red)" >&2
+        return 1
+    fi
+    teal=$(nearcount "$home" 610 770 30 150 15 110 108 16)
+    if [[ "$teal" -lt 200 ]]; then
+        echo "home after Cancel is not the running screen ($teal)" >&2
+        return 1
+    fi
+}
+
+# 2xx while the snapshot still shows water is not the ack. Stay on
+# "Stop not confirmed yet", keep re-POSTing, and never say "Watering stopped"
+# until the stub flips to all valves off.
+case_ac() {
+    local ctl=$TMP/ac.ctl
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
+    kiosk_bg 20 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:16000" \
+        28 --allow-writes || return 1
+    if ! wait_err "Stop not confirmed yet" 40; then
+        echo "ac: never Stop not confirmed yet" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if ! wait_posts 2 48; then
+        echo "ac: did not re-POST while water was still on" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "ac: Watering stopped before valves were off" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=clear\nreach=up\n' >"$ctl"
+    if ! wait_err "Watering stopped" 48; then
+        echo "ac: all-off snapshot did not confirm" >&2
+        show_kiosk_err
+        post_lines >&2 || true
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
+# A tile tap during a pending stop is not a target: the screen does not change
+# and Run's point does not POST /api/stations.
+case_af() {
+    local before=$TMP/af-before.png after=$TMP/af-after.png
+    local ctl=$TMP/af.ctl
+    local n stations
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
+    ZK_HERO_LOG=1 kiosk 8 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:1200;shot:${before};tap:496,96;wait:400;tap:676,280;wait:500;shot:${after}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    if ! grep -F "Stop not confirmed yet" "$TMP/kiosk.err" >/dev/null; then
+        echo "af: pending copy missing" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "af: Watering stopped during a pending tile tap" >&2
+        show_kiosk_err
+        return 1
+    fi
+    stations=$(post_lines | grep -c '/api/stations/' || true)
+    if [[ "$stations" -ne 0 ]]; then
+        echo "af: tile tap posted a station run" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    n=$(post_lines | grep -c '^POST /api/run/cancel' || true)
+    if [[ "$n" -lt 1 ]]; then
+        echo "af: stop was not posted" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    [[ -f "$before" && -f "$after" ]] || { echo "af: missing shots" >&2; return 1; }
+    if ! cmp -s "$before" "$after"; then
+        echo "af: tile tap changed the pending screen" >&2
+        return 1
+    fi
+}
+
+# 2xx, then the controller drops out: stay pending with the offline sentence.
+# Bringing it back with every valve off confirms.
+case_ag() {
+    local ctl=$TMP/ag.ctl
+    local last
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --control "$ctl" || return 1
+    kiosk_bg 24 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:20000" \
+        32 --allow-writes || return 1
+    if ! wait_posts 1 40; then
+        echo "ag: cancel was not posted" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    sleep 0.8
+    if ! grep -F "Stop not confirmed yet" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: reachable pending copy missing after 2xx" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: Watering stopped on the 2xx" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=stay\nreach=down\n' >"$ctl"
+    if ! wait_err "Can't reach controller. Retrying…" 48; then
+        echo "ag: offline pending copy missing" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    last=$(grep '^HERO ' "$TMP/kiosk.err" | tail -n 1 || true)
+    if ! printf '%s\n' "$last" | grep -F "Stop not confirmed yet" >/dev/null; then
+        echo "ag: offline headline is not Stop not confirmed yet [$last]" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Stop not sent yet" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: retired sent-yet copy" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "NO REPLY YET" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: retired no-reply label" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    if grep -F "Watering stopped" "$TMP/kiosk.err" >/dev/null; then
+        echo "ag: Watering stopped while unreachable" >&2
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=clear\nreach=up\n' >"$ctl"
+    if ! wait_err "Watering stopped" 48; then
+        echo "ag: all-off snapshot did not confirm" >&2
+        show_kiosk_err
+        post_lines >&2 || true
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
+# Open Stop all and leave it. Past the idle threshold the sheet returns to
+# Home, no cancel is posted, and the hero is not the pending sentence.
+case_ah() {
+    local sheet=$TMP/ah-sheet.png home=$TMP/ah-home.png
+    local red sand cream
+    start_stub "$FIX/dc-watering-4" || return 1
+    ZK_IDLE_HOME_MS=800 ZK_HERO_LOG=1 kiosk 6 \
+        "wait:400;tap:${STOP_X},${STOP_Y};wait:300;shot:${sheet};wait:2000;shot:${home}" \
+        14 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "" || return 1
+    [[ -f "$sheet" && -f "$home" ]] || { echo "ah: missing shots" >&2; return 1; }
+    red=$(nearcount "$sheet" 420 500 332 356 181 54 26 12)
+    if [[ "$red" -lt 1000 ]]; then
+        echo "ah: Stop all was not open ($red)" >&2
+        return 1
+    fi
+    red=$(nearcount "$home" 420 500 332 356 181 54 26 12)
+    sand=$(nearcount "$home" 588 596 36 44 251 236 214 8)
+    cream=$(nearcount "$home" 588 596 36 44 255 250 238 8)
+    if [[ "$red" -gt 20 || "$sand" -lt 40 || "$cream" -ne 0 ]]; then
+        echo "ah: idle did not return Home (red $red sand $sand cream $cream)" >&2
+        return 1
+    fi
+    if grep -F "Stop not confirmed" "$TMP/kiosk.err" >/dev/null; then
+        echo "ah: hero went pending without a confirm" >&2
+        show_kiosk_err
+        return 1
+    fi
+    if ! grep -F "Front Yard Drip Emitters" "$TMP/kiosk.err" >/dev/null; then
+        echo "ah: home hero missing" >&2
+        show_kiosk_err
+        return 1
+    fi
+}
+
+# Instant ack, water stays on. Over the 10 s after the first cancel, POSTs
+# stay at or under one per 2 s (ceil(10/2)+1) and at least one retry fires.
+case_ai() {
+    local t0 n
+    start_stub "$FIX/dc-watering-4" --post-delay 0 --stay-watering || return 1
+    # 400 ms between taps: a 250 ms wait plus the 50 ms hold lands inside the
+    # 300 ms debounce, so Stop all is swallowed and nothing is posted.
+    kiosk_bg 18 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:400;tap:${OK_X},${OK_Y};wait:15000" \
+        24 --allow-writes || return 1
+    if ! wait_posts 1 40; then
+        echo "ai: no cancel" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    t0=$(first_cancel_ts)
+    if [[ -z "$t0" ]]; then
+        echo "ai: missing timestamp" >&2
+        stop_kiosk
+        return 1
+    fi
+    sleep 10.3
+    n=$(cancel_between "$t0" "$(python3 -c "print('%.6f' % ($t0 + 10))")")
+    echo "ai: POST /api/run/cancel in 10s from first send: $n"
+    if [[ "$n" -lt 2 || "$n" -gt 6 ]]; then
+        echo "ai: expected 2..6 cancels, got $n" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
+# Outage, then water still on. The 10 s after reach comes back has the same bound.
+case_aj() {
+    local ctl=$TMP/aj.ctl
+    local t0 n
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --post-delay 0 --control "$ctl" || return 1
+    # Same gap as case_ai. 250 ms loses the confirm to the 300 ms debounce.
+    kiosk_bg 26 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:400;tap:${OK_X},${OK_Y};wait:22000" \
+        34 --allow-writes || return 1
+    if ! wait_posts 1 40; then
+        echo "aj: no cancel" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=stay\nreach=down\n' >"$ctl"
+    sleep 3
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    t0=$(mono_now)
+    sleep 10.3
+    n=$(cancel_between "$t0" "$(python3 -c "print('%.6f' % ($t0 + 10))")")
+    echo "aj: POST /api/run/cancel in 10s after recovery: $n"
+    if [[ "$n" -lt 2 || "$n" -gt 6 ]]; then
+        echo "aj: expected 2..6 cancels after recovery, got $n" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
+# Reachable controller, ack slower than the 5s HTTP timeout. Pending copy, STOP stays filled.
+case_ad() {
+    local png=$TMP/ad.png
+    local red n posts
+    start_stub "$FIX/dc-watering-4" --post-delay 6 --stay-watering || return 1
+    # Exit before the retry itself times out and posts a third cancel.
+    kiosk 10 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:7500;shot:${png}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    posts=$(post_lines | grep -c '^POST /api/run/cancel$' || true)
+    if [[ "$posts" -lt 2 ]]; then
+        echo "slow ack did not retry ($posts POST)" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    [[ -f "$png" ]] || { echo "missing ad shot" >&2; return 1; }
+    n=$(python3 "$TMP/png.py" stale "$png")
+    if [[ "$n" -lt 80 ]]; then
+        echo "slow ack did not show the pending border ($n)" >&2
+        return 1
+    fi
+    red=$(nearcount "$png" 420 500 370 450 181 54 26 12)
+    if [[ "$red" -lt 80 ]]; then
+        echo "STOP went outline while the stop was still pending ($red)" >&2
+        return 1
+    fi
+}
+
+# Schedules opens the read-only list. STOP still confirms. Cancel returns to the
+# list. Next pages. Home returns. None of those taps POST.
+case_ae() {
+    local sheet=$TMP/ae-sheet.png stop=$TMP/ae-stop.png back=$TMP/ae-back.png home=$TMP/ae-home.png
+    local cream sand red
+    start_stub "$FIX/home-rain" || return 1
+    kiosk 8 \
+        "wait:700;tap:76,412;wait:500;shot:${sheet};tap:${STOP_X},${STOP_Y};wait:400;shot:${stop};tap:${CANCEL_X},${CANCEL_Y};wait:400;shot:${back};tap:582,280;wait:500;tap:76,412;wait:400;shot:${home}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "" || return 1
+    [[ -f "$sheet" && -f "$stop" && -f "$back" && -f "$home" ]] || { echo "missing schedules shots" >&2; return 1; }
+    # Tile gap is sand on Home and covered by the cream list.
+    cream=$(nearcount "$sheet" 588 596 36 44 255 250 238 8)
+    sand=$(nearcount "$sheet" 588 596 36 44 251 236 214 8)
+    if [[ "$cream" -lt 40 || "$sand" -ne 0 ]]; then
+        echo "schedules list did not cover the tile gap (cream $cream sand $sand)" >&2
+        return 1
+    fi
+    # Left fill of Stop all (408,328), above the bar. The outline STOP glyph
+    # sits in the old 500,700,380,420 sample and stays red on the list.
+    red=$(nearcount "$stop" 420 500 332 356 181 54 26 12)
+    if [[ "$red" -lt 1000 ]]; then
+        echo "STOP on the schedules screen did not open Stop all ($red)" >&2
+        return 1
+    fi
+    cream=$(nearcount "$back" 588 596 36 44 255 250 238 8)
+    red=$(nearcount "$back" 420 500 332 356 181 54 26 12)
+    if [[ "$cream" -lt 40 || "$red" -gt 20 ]]; then
+        echo "Cancel did not return to the schedules list (cream $cream red $red)" >&2
+        return 1
+    fi
+    sand=$(nearcount "$home" 588 596 36 44 251 236 214 8)
+    cream=$(nearcount "$home" 588 596 36 44 255 250 238 8)
+    if [[ "$sand" -lt 40 || "$cream" -ne 0 ]]; then
+        echo "Home did not leave the schedules list (sand $sand cream $cream)" >&2
+        return 1
+    fi
+}
+
+# Rows 474..479 sit below the bottom bar (it ends at y=464) and stay page sand.
 case_aa() {
     local fix png fb rc red bg
     for fix in home-norain running; do
@@ -1414,7 +1874,7 @@ case_aa() {
             echo "aa $fix COL_STOP pixels in rows 474..479: $red" >&2
             return 1
         fi
-        bg=$(nearcount "$png" 0 800 470 471 239 221 190 8)
+        bg=$(nearcount "$png" 0 800 470 471 251 236 214 8)
         if [[ "$bg" -ne 800 ]]; then
             echo "aa $fix row 470 is not COL_BG: $bg/800" >&2
             return 1
@@ -1453,6 +1913,15 @@ run_case x case_x
 run_case y case_y
 run_case z case_z
 run_case aa case_aa
+run_case ab case_ab
+run_case ac case_ac
+run_case ad case_ad
+run_case ae case_ae
+run_case af case_af
+run_case ag case_ag
+run_case ah case_ah
+run_case ai case_ai
+run_case aj case_aj
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

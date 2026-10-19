@@ -114,6 +114,8 @@ Timezone for all wall-clock math: `America/Phoenix` (no DST).
 
 `GET /api/kiosk` is the server-computed snapshot (schema and pause/DST/soil rules are in the README). It does not write pause or config files. `GET /api/events` status payloads keep `Phase`, `CurrentStation`, `StationsOn`, and `LastError`, and also send `phase`, `current_station`, `stations_on`, and `last_error`.
 
+The wall kiosk (`native-kiosk/`, C and LVGL, 800×480) is a client of this API. Direction C puts a status hero on the left, up to six station tiles on the right, and a fixed bottom bar (Schedules, Pause for rain or Resume, and STOP). A tile never opens a valve on the first tap: Run on the confirm sheet is what calls `POST /api/stations/{id}/run`. STOP always confirms, then calls `POST /api/run/cancel`. The daemon still stops as soon as that request arrives. If the controller cannot be reached, the kiosk keeps retrying that same cancel and shows "Watering stopped" only after the controller acknowledges it. Dry / OK / Wet on a tile are display-only cuts configured on the kiosk (defaults 30 and 80), not daemon settings.
+
 Auth: LAN bind only for MVP. No GraphiQL.
 
 ## Packaging

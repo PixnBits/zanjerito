@@ -2,57 +2,6 @@
 
 #include <string.h>
 
-#define PAD_TOP     12
-#define PAD_SIDE    14
-#define PAD_BOT     20
-#define MAIN_RAIL_GAP 14
-#define RAIL_W      236
-#define RAIL_X      550
-#define MAIN_X      14
-#define MAIN_Y      12
-#define MAIN_W      522
-#define MAIN_H      448 /* y 12..460 */
-#define MAIN_BOTTOM 460
-
-#define STOP_H      264
-#define STOP_H_RUN  304
-#define SLOT_GAP    16
-#define SLOT_H      168
-#define SLOT_H_RUN  128
-
-#define HDR_H       108
-#define RAIN_H      58
-#define GAP         10
-#define TILE_GAP    10
-#define BANNER_H    118
-#define TITLE_H     50
-#define CHIP_GAP    12
-#define HOLD_H      114
-#define SCHED_HDR_H 72
-#define SCHED_ROW_H 50
-/* Wide enough for "Schedules" at 26 px with 12 px of label inset on each side. */
-#define SCHED_BTN_W 134
-#define SCHED_BTN_H 108
-
-#define MODAL_W     620
-#define MODAL_H     300
-#define MODAL_X     90
-#define MODAL_Y     90
-#define BTN_W       270
-#define BTN_H       130
-#define BTN_GAP     20
-
-static int clampi(int v, int lo, int hi)
-{
-    if (v < lo) {
-        return lo;
-    }
-    if (v > hi) {
-        return hi;
-    }
-    return v;
-}
-
 static zk_rect R(int x, int y, int w, int h)
 {
     zk_rect r;
@@ -63,261 +12,226 @@ static zk_rect R(int x, int y, int w, int h)
     return r;
 }
 
-static int rect_empty(zk_rect r)
+static int sheet_of(enum zk_screen screen)
 {
-    return r.w <= 0 || r.h <= 0;
+    switch (screen) {
+    case ZK_SCREEN_SHEET_RUN:
+        return ZK_SHEET_RUN;
+    case ZK_SCREEN_SHEET_ANYWAY:
+        return ZK_SHEET_ANYWAY;
+    case ZK_SCREEN_SHEET_STOP_STATION:
+        return ZK_SHEET_STOP_STATION;
+    case ZK_SCREEN_SHEET_STOP_ALL:
+        return ZK_SHEET_STOP_ALL;
+    case ZK_SCREEN_SHEET_OVERLAP:
+        return ZK_SHEET_OVERLAP;
+    default:
+        return ZK_SHEET_NONE;
+    }
 }
 
-static void add_tgt(zk_target *out, int max, int *n, enum zk_target_id id, zk_rect r, enum zk_target_kind kind)
+int zk_layout_shown(int n_stations)
 {
-    if (rect_empty(r)) {
+    if (n_stations < 0) {
+        return 0;
+    }
+    if (n_stations > ZK_MAX_SHOWN) {
+        return ZK_MAX_SHOWN;
+    }
+    return n_stations;
+}
+
+static int rows_for(int n)
+{
+    return n > 4 ? 3 : 2;
+}
+
+void zk_layout_slot(int n_stations, int index, zk_rect *out)
+{
+    int n;
+    int col;
+    int row;
+    int x;
+    int y;
+    if (!out) {
         return;
     }
-    if (*n < max && out) {
-        out[*n].id = id;
-        out[*n].rect = r;
-        out[*n].kind = kind;
+    memset(out, 0, sizeof *out);
+    n = zk_layout_shown(n_stations);
+    if (index < 0 || index >= n) {
+        return;
     }
-    (*n)++;
-}
-
-static void rail_geometry(enum zk_screen screen, zk_rect *stop, zk_rect *slot)
-{
-    int stop_h = (screen == ZK_SCREEN_RUNNING) ? STOP_H_RUN : STOP_H;
-    int slot_h = (screen == ZK_SCREEN_RUNNING) ? SLOT_H_RUN : SLOT_H;
-    int slot_y = PAD_TOP + stop_h + SLOT_GAP;
-    *stop = R(RAIL_X, PAD_TOP, RAIL_W, stop_h);
-    if (screen == ZK_SCREEN_NEEDS_UPDATE) {
-        *slot = R(0, 0, 0, 0);
+    col = index % 2;
+    row = index / 2;
+    x = (col ? ZK_TILE_X1 : ZK_TILE_X0) + ZK_SLOT_INSET;
+    if (n > 4) {
+        y = ZK_SLOT_Y6 + row * ZK_SLOT_STRIDE6;
     } else {
-        *slot = R(RAIL_X, slot_y, RAIL_W, slot_h);
+        y = (row ? 188 : ZK_GRID_Y) + ZK_SLOT_DY4;
     }
+    *out = R(x, y, ZK_SLOT_W, ZK_SLOT_H);
 }
 
-static zk_rect schedules_btn(void)
+static void place_tiles(int n, zk_layout_rects *out)
 {
-    return R(MAIN_X + MAIN_W - SCHED_BTN_W, MAIN_Y, SCHED_BTN_W, SCHED_BTN_H);
-}
-
-static void home_tiles(const zk_layout_in *in, zk_layout_rects *out)
-{
-    int rain = in && in->rain_visible;
-    int nst = in ? clampi(in->n_stations, 0, 8) : 0;
-    int y0 = MAIN_Y + HDR_H + GAP;
-    int avail;
-    int tile_h, tile_w;
-    int n_show, n_rows, cols;
     int i;
-    if (rain) {
-        y0 += RAIN_H + GAP;
+    int rows;
+    int h;
+    int y0[3];
+    out->n_tiles = n;
+    rows = rows_for(n);
+    h = rows == 3 ? ZK_TILE_H6 : ZK_TILE_H4;
+    out->tile_h = n > 0 ? h : 0;
+    y0[0] = ZK_GRID_Y;
+    y0[1] = rows == 3 ? 130 : 188;
+    y0[2] = 244;
+    for (i = 0; i < ZK_MAX_SHOWN; i++) {
+        out->tiles[i] = R(0, 0, 0, 0);
+        out->slots[i] = R(0, 0, 0, 0);
     }
-    avail = MAIN_BOTTOM - y0;
-    /* 2-row cell height matches the mockup (126 with rain, 160 without). */
-    tile_h = (avail - TILE_GAP) / 2;
-    if (tile_h < 1) {
-        tile_h = 1;
-    }
-    n_show = nst;
-    n_rows = 2;
-    cols = 2;
-    if (n_show <= 2) {
-        n_rows = 1;
-    }
-    if (n_show == 1) {
-        cols = 1;
-        tile_w = MAIN_W;
-    } else if (n_show <= 4) {
-        cols = 2;
-        tile_w = (MAIN_W - TILE_GAP) / 2;
-    } else if (n_show <= 6) {
-        cols = 3;
-        n_rows = 2;
-        tile_w = (MAIN_W - 2 * TILE_GAP) / 3;
-    } else {
-        cols = 4;
-        n_rows = 2;
-        tile_w = (MAIN_W - 3 * TILE_GAP) / 4;
-    }
-    if (tile_w < 1) {
-        tile_w = 1;
-    }
-    out->n_tiles = 0;
-    for (i = 0; i < n_show && i < 8; i++) {
-        int row = (cols == 1) ? 0 : (i / cols);
-        int col = (cols == 1) ? 0 : (i % cols);
-        if (n_rows == 1) {
-            row = 0;
-        }
-        out->tiles[i] = R(MAIN_X + col * (tile_w + TILE_GAP),
-                          y0 + row * (tile_h + TILE_GAP),
-                          tile_w, tile_h);
-        out->n_tiles++;
+    for (i = 0; i < n; i++) {
+        int col = i % 2;
+        int row = i / 2;
+        out->tiles[i] = R(col ? ZK_TILE_X1 : ZK_TILE_X0, y0[row], ZK_TILE_W, h);
+        zk_layout_slot(n > 4 ? 6 : 4, i, &out->slots[i]);
     }
 }
 
 void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout_rects *out)
 {
-    int rain = in && in->rain_visible;
-    int n_sched;
-    int i;
+    int n;
+    int sheet;
+    zk_layout_in dummy;
     if (!out) {
         return;
     }
-    memset(out, 0, sizeof(*out));
+    memset(out, 0, sizeof *out);
+    if (!in) {
+        memset(&dummy, 0, sizeof dummy);
+        in = &dummy;
+    }
+    n = zk_layout_shown(in->n_stations);
+    sheet = sheet_of(screen);
     out->screen = R(0, 0, ZK_SCREEN_W, ZK_SCREEN_H);
-    out->main = R(MAIN_X, MAIN_Y, MAIN_W, MAIN_H);
-    out->rail = R(RAIL_X, PAD_TOP, RAIL_W, MAIN_H);
-    rail_geometry(screen, &out->stop, &out->slot);
+    out->hero = R(ZK_HERO_X, ZK_HERO_Y, ZK_HERO_W, ZK_HERO_H);
+    out->sched = R(ZK_SCHED_X, ZK_BAR_Y, ZK_SCHED_W, ZK_SCHED_H);
+    out->pause = R(ZK_PAUSE_X, ZK_BAR_Y, ZK_PAUSE_W, ZK_PAUSE_H);
+    out->stop = R(ZK_STOP_X, ZK_BAR_Y, ZK_STOP_W, ZK_STOP_H);
+    out->next = R(ZK_NEXT_X, ZK_NEXT_Y, ZK_NEXT_W, ZK_NEXT_H);
+    out->rain = R(ZK_RAIN_X, ZK_RAIN_Y, ZK_RAIN_W, ZK_RAIN_H);
+    out->label = R(ZK_LABEL_X, ZK_LABEL_Y, ZK_LABEL_W, ZK_LABEL_H);
+    place_tiles(n, out);
+    if (sheet == ZK_SHEET_STOP_ALL) {
+        out->sheet = R(ZK_SHEET_X, ZK_SHEET_Y, ZK_SHEET_W, ZK_FULL_H);
+        out->cancel = R(40, 328, 352, 112);
+        out->stop_all = R(408, 328, 352, 112);
+        out->sheet_title = R(36, 62, 728, 120);
+    } else if (sheet != ZK_SHEET_NONE) {
+        out->sheet = R(ZK_SHEET_X, ZK_SHEET_Y, ZK_SHEET_W, ZK_SHEET_H);
+        out->sheet_title = R(36, 62, 728, 80);
+        if (sheet == ZK_SHEET_RUN || sheet == ZK_SHEET_ANYWAY) {
+            out->minus = R(36, 232, 96, 96);
+            out->value = R(144, 232, 132, 96);
+            out->plus = R(288, 232, 96, 96);
+            out->cancel = R(408, 232, 168, 96);
+            out->run = R(588, 232, 176, 96);
+        } else if (sheet == ZK_SHEET_STOP_STATION) {
+            out->ok = R(36, 232, 352, 96);
+        } else if (sheet == ZK_SHEET_OVERLAP) {
+            out->ok = R(524, 232, 240, 96);
+        }
+    }
+    if (screen == ZK_SCREEN_SCHEDULES) {
+        out->sheet = R(ZK_SHEET_X, ZK_SHEET_Y, ZK_SHEET_W, ZK_SHEET_H);
+    }
+}
 
-    if (screen == ZK_SCREEN_CONFIRM_STOP || screen == ZK_SCREEN_CONFIRM_PAUSE) {
-        int inner = MODAL_W - 2 * BTN_W - BTN_GAP;
-        int side = inner / 2;
-        int by = MODAL_Y + MODAL_H - 20 - BTN_H;
-        out->modal = R(MODAL_X, MODAL_Y, MODAL_W, MODAL_H);
-        out->modal_ok = R(MODAL_X + side, by, BTN_W, BTN_H);
-        out->modal_cancel = R(MODAL_X + side + BTN_W + BTN_GAP, by, BTN_W, BTN_H);
-        return;
+static int push(zk_target *out, int n, int max, enum zk_target_id id, zk_rect r, enum zk_target_kind kind)
+{
+    if (n >= max || r.w <= 0 || r.h <= 0) {
+        return n;
     }
-
-    switch (screen) {
-    case ZK_SCREEN_HOME:
-        out->schedules = schedules_btn();
-        out->header = R(MAIN_X, MAIN_Y, MAIN_W - SCHED_BTN_W - GAP, HDR_H);
-        if (rain) {
-            out->rain = R(MAIN_X, MAIN_Y + HDR_H + GAP, MAIN_W, RAIN_H);
-        }
-        home_tiles(in, out);
-        break;
-    case ZK_SCREEN_RUNNING:
-        out->header = R(MAIN_X, MAIN_Y, MAIN_W, HDR_H);
-        break;
-    case ZK_SCREEN_PAUSED: {
-        int y = MAIN_Y;
-        int info_h;
-        int left_w = MAIN_W - SCHED_BTN_W - GAP;
-        out->schedules = schedules_btn();
-        out->banner = R(MAIN_X, y, left_w, BANNER_H);
-        y += BANNER_H + GAP;
-        if (rain) {
-            out->rain = R(MAIN_X, y, MAIN_W, RAIN_H);
-            y += RAIN_H + GAP;
-        }
-        info_h = MAIN_BOTTOM - y;
-        if (info_h < ZK_MIN_TAP) {
-            info_h = ZK_MIN_TAP;
-        }
-        /* STOP must remain the tallest target on non-modal screens. */
-        if (info_h > STOP_H) {
-            info_h = STOP_H;
-        }
-        out->info = R(MAIN_X, y, MAIN_W, info_h);
-        break;
-    }
-    case ZK_SCREEN_PICKER: {
-        int y = MAIN_Y + TITLE_H + GAP;
-        int avail = MAIN_BOTTOM - y;
-        int ch = (avail - CHIP_GAP) / 2;
-        int cw = (MAIN_W - CHIP_GAP) / 2;
-        out->title = R(MAIN_X, MAIN_Y, MAIN_W, TITLE_H);
-        out->chips[0] = R(MAIN_X, y, cw, ch);
-        out->chips[1] = R(MAIN_X + cw + CHIP_GAP, y, cw, ch);
-        out->chips[2] = R(MAIN_X, y + ch + CHIP_GAP, cw, ch);
-        out->chips[3] = R(MAIN_X + cw + CHIP_GAP, y + ch + CHIP_GAP, cw, ch);
-        break;
-    }
-    case ZK_SCREEN_SCHEDULES: {
-        int y = MAIN_Y + TITLE_H + GAP;
-        int card_h = MAIN_BOTTOM - y;
-        int row_space;
-        out->title = R(MAIN_X, MAIN_Y, MAIN_W, TITLE_H);
-        out->card = R(MAIN_X, y, MAIN_W, card_h);
-        out->sched_header = R(MAIN_X, y, MAIN_W, SCHED_HDR_H);
-        out->hold_edit = R(MAIN_X, y + card_h - HOLD_H, MAIN_W, HOLD_H);
-        row_space = card_h - SCHED_HDR_H - HOLD_H;
-        if (row_space < 0) {
-            row_space = 0;
-        }
-        n_sched = in ? in->n_schedules : 0;
-        if (n_sched < 0) {
-            n_sched = 0;
-        }
-        out->n_sched_rows = row_space / SCHED_ROW_H;
-        if (out->n_sched_rows > 5) {
-            out->n_sched_rows = 5;
-        }
-        if (n_sched > 0 && out->n_sched_rows > n_sched) {
-            out->n_sched_rows = n_sched;
-        }
-        for (i = 0; i < out->n_sched_rows; i++) {
-            out->sched_rows[i] = R(MAIN_X, y + SCHED_HDR_H + i * SCHED_ROW_H, MAIN_W, SCHED_ROW_H);
-        }
-        break;
-    }
-    case ZK_SCREEN_STATION:
-        out->title = R(MAIN_X, MAIN_Y, MAIN_W, TITLE_H);
-        out->card = R(MAIN_X, MAIN_Y + TITLE_H + GAP, MAIN_W, MAIN_BOTTOM - (MAIN_Y + TITLE_H + GAP));
-        break;
-    case ZK_SCREEN_NEEDS_UPDATE:
-        out->card = R(MAIN_X, MAIN_Y, MAIN_W, MAIN_H);
-        break;
-    default:
-        break;
-    }
+    out[n].id = id;
+    out[n].rect = r;
+    out[n].kind = kind;
+    return n + 1;
 }
 
 int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target out[], int max)
 {
     zk_layout_rects L;
+    zk_layout_in dummy;
+    int sheet;
     int n = 0;
     int i;
-    if (max < 0) {
-        max = 0;
+    if (!out || max <= 0) {
+        return 0;
+    }
+    if (!in) {
+        memset(&dummy, 0, sizeof dummy);
+        in = &dummy;
     }
     zk_layout_rects_of(screen, in, &L);
-
-    if (screen == ZK_SCREEN_CONFIRM_STOP || screen == ZK_SCREEN_CONFIRM_PAUSE) {
-        add_tgt(out, max, &n, ZK_TARGET_MODAL_OK, L.modal_ok, ZK_KIND_MODAL);
-        add_tgt(out, max, &n, ZK_TARGET_MODAL_CANCEL, L.modal_cancel, ZK_KIND_MODAL);
-        return n;
-    }
-
-    add_tgt(out, max, &n, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
-
-    switch (screen) {
-    case ZK_SCREEN_HOME:
-        add_tgt(out, max, &n, ZK_TARGET_PAUSE, L.slot, ZK_KIND_BUTTON);
-        add_tgt(out, max, &n, ZK_TARGET_HEADER_NEXT, L.header, ZK_KIND_HEADER);
-        add_tgt(out, max, &n, ZK_TARGET_SCHEDULES, L.schedules, ZK_KIND_BUTTON);
-        for (i = 0; i < L.n_tiles; i++) {
-            add_tgt(out, max, &n, (enum zk_target_id)(ZK_TARGET_TILE0 + i), L.tiles[i], ZK_KIND_TILE);
+    sheet = sheet_of(screen);
+    /* A pending stop locks the screen the same way offline does, reachable or not. */
+    {
+        int locked = in->offline || in->stop_pending;
+        if (screen == ZK_SCREEN_SCHEDULES) {
+            /* The list covers the hero and tiles. The bar stays live. */
+            n = push(out, n, max, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
+            n = push(out, n, max, ZK_TARGET_HOME, L.sched, ZK_KIND_BUTTON);
+            if (!locked) {
+                if (in->paused) {
+                    n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
+                } else {
+                    n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
+                }
+            }
+            if (in->n_schedules > 2) {
+                n = push(out, n, max, ZK_TARGET_SCHED_NEXT, L.next, ZK_KIND_BUTTON);
+            }
+            return n;
         }
-        break;
-    case ZK_SCREEN_RUNNING:
-        add_tgt(out, max, &n, ZK_TARGET_PAUSE, L.slot, ZK_KIND_BUTTON);
-        break;
-    case ZK_SCREEN_PAUSED:
-        add_tgt(out, max, &n, ZK_TARGET_RESUME, L.slot, ZK_KIND_BUTTON);
-        add_tgt(out, max, &n, ZK_TARGET_INFO_CARD, L.info, ZK_KIND_CARD);
-        add_tgt(out, max, &n, ZK_TARGET_SCHEDULES, L.schedules, ZK_KIND_BUTTON);
-        break;
-    case ZK_SCREEN_PICKER:
-        add_tgt(out, max, &n, ZK_TARGET_BACK, L.slot, ZK_KIND_BUTTON);
-        add_tgt(out, max, &n, ZK_TARGET_CHIP0, L.chips[0], ZK_KIND_CHIP);
-        add_tgt(out, max, &n, ZK_TARGET_CHIP1, L.chips[1], ZK_KIND_CHIP);
-        add_tgt(out, max, &n, ZK_TARGET_CHIP2, L.chips[2], ZK_KIND_CHIP);
-        add_tgt(out, max, &n, ZK_TARGET_CHIP3, L.chips[3], ZK_KIND_CHIP);
-        break;
-    case ZK_SCREEN_SCHEDULES:
-        add_tgt(out, max, &n, ZK_TARGET_BACK, L.slot, ZK_KIND_BUTTON);
-        add_tgt(out, max, &n, ZK_TARGET_HOLD_EDIT, L.hold_edit, ZK_KIND_BUTTON);
-        break;
-    case ZK_SCREEN_STATION:
-        add_tgt(out, max, &n, ZK_TARGET_BACK, L.slot, ZK_KIND_BUTTON);
-        break;
-    case ZK_SCREEN_NEEDS_UPDATE:
-        break;
-    default:
-        break;
+        if (sheet == ZK_SHEET_RUN || sheet == ZK_SHEET_ANYWAY) {
+            if (in->minutes > 1) {
+                n = push(out, n, max, ZK_TARGET_MINUS, L.minus, ZK_KIND_SHEET);
+            }
+            n = push(out, n, max, ZK_TARGET_PLUS, L.plus, ZK_KIND_SHEET);
+            n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
+            n = push(out, n, max, ZK_TARGET_RUN, L.run, ZK_KIND_SHEET);
+        } else if (sheet == ZK_SHEET_STOP_STATION) {
+            n = push(out, n, max, ZK_TARGET_OK, L.ok, ZK_KIND_SHEET);
+        } else if (sheet == ZK_SHEET_STOP_ALL) {
+            n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
+            n = push(out, n, max, ZK_TARGET_STOP_ALL, L.stop_all, ZK_KIND_SHEET);
+            return n;
+        } else if (sheet == ZK_SHEET_OVERLAP) {
+            n = push(out, n, max, ZK_TARGET_OK, L.ok, ZK_KIND_SHEET);
+        }
+        /* Partial sheet: STOP stays live. Resume stays live while paused
+         * and the controller is reachable with no stop in flight.
+         * Full sheet returned above. */
+        n = push(out, n, max, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
+        if (sheet == ZK_SHEET_NONE && !locked && in->overlap) {
+            n = push(out, n, max, ZK_TARGET_HERO, L.hero, ZK_KIND_HERO);
+        }
+        if (sheet == ZK_SHEET_NONE && !locked) {
+            for (i = 0; i < L.n_tiles; i++) {
+                n = push(out, n, max, (enum zk_target_id)(ZK_TARGET_TILE0 + i), L.tiles[i], ZK_KIND_TILE);
+            }
+            if (in->paused) {
+                n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
+            } else {
+                n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
+            }
+            n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+        } else if (sheet == ZK_SHEET_NONE && in->stop_pending) {
+            n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+        } else if (sheet == ZK_SHEET_NONE && in->offline && in->sched_cached) {
+            n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+        } else if (sheet != ZK_SHEET_NONE && in->paused && !locked) {
+            n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
+        }
     }
     return n;
 }
@@ -343,11 +257,10 @@ enum zk_target_id zk_hit_test(const zk_target *targets, int n, int x, int y)
 
 int zk_layout_hit_is_stop(enum zk_screen screen, const zk_layout_in *in, int x, int y)
 {
-    zk_target tg[32];
-    int n = zk_layout_targets(screen, in, tg, 32);
-
-    if (n > 32) {
-        n = 32;
+    zk_target tg[24];
+    int n = zk_layout_targets(screen, in, tg, 24);
+    if (n > 24) {
+        n = 24;
     }
     return zk_hit_test(tg, n, x, y) == ZK_TARGET_STOP;
 }

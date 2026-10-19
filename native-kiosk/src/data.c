@@ -21,7 +21,10 @@ enum {
     BODY_MAX = 768,
     BASE_MAX = 128,
     SLOW_POLL_MS = 30000,
-    HTTP_TIMEOUT_MS = 5000
+    HTTP_TIMEOUT_MS = 5000,
+    /* A forced /api/kiosk poll waits until this long after the previous one started.
+     * The scheduled cadence is not delayed. */
+    STATUS_FORCE_MIN_MS = 500
 };
 
 typedef struct {
@@ -38,6 +41,10 @@ typedef struct {
     zk_schedules_t schedules;
     int have_schedules;
     zk_api_state_t api_state;
+    zk_soil_doc_t soil_doc;
+    int have_soil_doc;
+    zk_last_run_t lasts[ZK_MAX_STATIONS];
+    int n_lasts;
 } store_t;
 
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
@@ -49,6 +56,7 @@ static pthread_t g_act_th;
 
 static store_t g_snap;
 static uint32_t g_version;
+static uint32_t g_kiosk_gen;
 static int g_wall_seen;
 static zk_wall_t g_wall_pub;
 static int g_stale_seen;
@@ -61,6 +69,7 @@ static uint32_t g_seq;
 static uint32_t g_latest;
 static zk_action_result_t g_res;
 static int g_force_status;
+static int64_t g_status_at; /* monotonic ms when the last /api/kiosk poll started */
 
 static int g_stop;
 static int g_running;
@@ -178,6 +187,7 @@ static void reset_locked(void)
 {
     memset(&g_snap, 0, sizeof g_snap);
     g_version = 0;
+    g_kiosk_gen = 0;
     g_wall_seen = 0;
     memset(&g_wall_pub, 0, sizeof g_wall_pub);
     g_stale_seen = 0;
@@ -188,6 +198,7 @@ static void reset_locked(void)
     g_latest = 0;
     memset(&g_res, 0, sizeof g_res);
     g_force_status = 0;
+    g_status_at = 0;
     g_stop = 0;
     g_running = 0;
     g_poll_alive = 0;
@@ -212,6 +223,7 @@ static void remember_kiosk(const zk_kiosk_t *k, int64_t mono)
     g_snap.api_state = ZK_API_OK;
     g_snap.status_mono_ms = mono;
     g_snap.have_mono = 1;
+    g_kiosk_gen++;
     if (changed) {
         g_version++;
     }
@@ -222,6 +234,36 @@ static void remember_schedules(const zk_schedules_t *v)
     int changed = !g_snap.have_schedules || memcmp(&g_snap.schedules, v, sizeof *v) != 0;
     g_snap.schedules = *v;
     g_snap.have_schedules = 1;
+    if (changed) {
+        g_version++;
+    }
+}
+
+static void remember_soil_locked(const zk_soil_doc_t *doc)
+{
+    int changed = !g_snap.have_soil_doc || memcmp(&g_snap.soil_doc, doc, sizeof *doc) != 0;
+    g_snap.soil_doc = *doc;
+    g_snap.have_soil_doc = 1;
+    if (changed) {
+        g_version++;
+    }
+}
+
+static void remember_lasts_locked(const zk_last_run_t *lasts, int n)
+{
+    int changed;
+    if (n < 0) {
+        n = 0;
+    }
+    if (n > ZK_MAX_STATIONS) {
+        n = ZK_MAX_STATIONS;
+    }
+    changed = g_snap.n_lasts != n || (n > 0 && memcmp(g_snap.lasts, lasts, sizeof(*lasts) * (size_t)n) != 0);
+    memset(g_snap.lasts, 0, sizeof g_snap.lasts);
+    if (n > 0 && lasts) {
+        memcpy(g_snap.lasts, lasts, sizeof(*lasts) * (size_t)n);
+    }
+    g_snap.n_lasts = n;
     if (changed) {
         g_version++;
     }
@@ -303,6 +345,37 @@ static void poll_kiosk(char *buf)
     call_platform_wake();
 }
 
+static void poll_soil(char *buf)
+{
+    zk_soil_doc_t doc;
+    if (fetch(buf, "/api/soil", NULL) != ZK_OK) {
+        return;
+    }
+    if (zk_parse_soil_doc(buf, &doc) != ZK_OK) {
+        return;
+    }
+    pthread_mutex_lock(&g_mu);
+    remember_soil_locked(&doc);
+    arm_wake_locked();
+    pthread_mutex_unlock(&g_mu);
+    call_platform_wake();
+}
+
+static void poll_history(char *buf)
+{
+    zk_last_run_t lasts[ZK_MAX_STATIONS];
+    int n;
+    if (fetch(buf, "/api/history?limit=50", NULL) != ZK_OK) {
+        return;
+    }
+    n = zk_parse_history_lasts(buf, lasts, ZK_MAX_STATIONS);
+    pthread_mutex_lock(&g_mu);
+    remember_lasts_locked(lasts, n);
+    arm_wake_locked();
+    pthread_mutex_unlock(&g_mu);
+    call_platform_wake();
+}
+
 static void poll_schedules(char *buf)
 {
     zk_schedules_t v;
@@ -336,6 +409,8 @@ static int dispatch_action(int allow, const char *base, zk_act_kind_t kind, cons
         return zk_action_pause(&a, body, http_status);
     case ZK_ACT_RESUME:
         return zk_action_resume(&a, http_status);
+    case ZK_ACT_RUN:
+        return zk_action_run(&a, body, http_status);
     default:
         return ZK_ERR_ARG;
     }
@@ -375,7 +450,7 @@ static int act_same(zk_act_kind_t ak, const char *abody, zk_act_kind_t bk, const
     if (ak != bk) {
         return 0;
     }
-    if (ak == ZK_ACT_PAUSE) {
+    if (ak == ZK_ACT_PAUSE || ak == ZK_ACT_RUN) {
         if (!abody) {
             abody = "";
         }
@@ -486,14 +561,31 @@ static void *worker_main(void *arg)
         }
         {
             int64_t now = mono_ms();
-            if (g_force_status || now >= next_status) {
+            int scheduled = now >= next_status;
+            int force_ready = 0;
+            if (g_force_status) {
+                if (g_status_at <= 0 || now < g_status_at ||
+                    (now - g_status_at) >= (int64_t)STATUS_FORCE_MIN_MS) {
+                    force_ready = 1;
+                }
+            }
+            if (scheduled || force_ready) {
                 g_force_status = 0;
+                g_status_at = now;
                 do_status = 1;
             } else if (now >= next_slow) {
                 do_slow = 1;
             } else {
-                int64_t wait_ms = (next_status < next_slow ? next_status : next_slow) - now;
+                int64_t wake_at = next_status < next_slow ? next_status : next_slow;
+                int64_t wait_ms;
                 struct timespec dl;
+                if (g_force_status && g_status_at > 0) {
+                    int64_t force_at = g_status_at + (int64_t)STATUS_FORCE_MIN_MS;
+                    if (force_at < wake_at) {
+                        wake_at = force_at;
+                    }
+                }
+                wait_ms = wake_at - now;
                 if (wait_ms < 0) {
                     wait_ms = 0;
                 }
@@ -511,6 +603,8 @@ static void *worker_main(void *arg)
             continue;
         }
         if (do_slow) {
+            poll_soil(buf);
+            poll_history(buf);
             poll_schedules(buf);
             next_slow = mono_ms() + SLOW_POLL_MS;
         }
@@ -584,13 +678,35 @@ static void load_fixture(const char *dir)
     if (load_named(dir, "schedules.json", &sched_b) == ZK_OK && zk_parse_schedules(sched_b, &schedules) == ZK_OK) {
         ok_sch = 1;
     }
-    mono = mono_ms();
-    pthread_mutex_lock(&g_mu);
-    if (ok_k) {
-        remember_kiosk(&kiosk, mono);
-    }
-    if (ok_sch) {
-        remember_schedules(&schedules);
+    {
+        char *soil_b = NULL;
+        char *hist_b = NULL;
+        zk_soil_doc_t soil;
+        zk_last_run_t lasts[ZK_MAX_STATIONS];
+        int n_lasts = 0;
+        int ok_soil = 0;
+        if (load_named(dir, "soil.json", &soil_b) == ZK_OK && zk_parse_soil_doc(soil_b, &soil) == ZK_OK) {
+            ok_soil = 1;
+        }
+        if (load_named(dir, "history.json", &hist_b) == ZK_OK) {
+            n_lasts = zk_parse_history_lasts(hist_b, lasts, ZK_MAX_STATIONS);
+        }
+        mono = mono_ms();
+        pthread_mutex_lock(&g_mu);
+        if (ok_k) {
+            remember_kiosk(&kiosk, mono);
+        }
+        if (ok_sch) {
+            remember_schedules(&schedules);
+        }
+        if (ok_soil) {
+            remember_soil_locked(&soil);
+        }
+        if (hist_b) {
+            remember_lasts_locked(lasts, n_lasts);
+        }
+        free(soil_b);
+        free(hist_b);
     }
     if (ok_k || ok_sch) {
         arm_wake_locked();
@@ -734,6 +850,10 @@ void zk_data_get(zk_snapshot_t *out)
     out->schedules = g_snap.schedules;
     out->have_schedules = g_snap.have_schedules;
     out->api_state = g_snap.api_state;
+    out->soil_doc = g_snap.soil_doc;
+    out->have_soil_doc = g_snap.have_soil_doc;
+    memcpy(out->lasts, g_snap.lasts, sizeof out->lasts);
+    out->n_lasts = g_snap.n_lasts;
     if (!g_snap.have_mono) {
         out->status_age_s = 1.0e9;
     } else {
@@ -773,6 +893,7 @@ void zk_data_get(zk_snapshot_t *out)
     g_stale_pub = out->stale;
     g_stale_seen = 1;
     out->version = g_version;
+    out->kiosk_gen = g_kiosk_gen;
     pthread_mutex_unlock(&g_mu);
 }
 
@@ -790,7 +911,7 @@ void zk_data_submit_action(zk_act_kind_t kind, const char *json_body)
     int running;
 
     ensure_init();
-    if (kind != ZK_ACT_STOP && kind != ZK_ACT_PAUSE && kind != ZK_ACT_RESUME) {
+    if (kind != ZK_ACT_STOP && kind != ZK_ACT_PAUSE && kind != ZK_ACT_RESUME && kind != ZK_ACT_RUN) {
         fail_submit(kind, ZK_ERR_ARG);
         return;
     }

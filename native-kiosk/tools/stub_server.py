@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -13,7 +14,70 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 GET_MAP = {
     "/api/kiosk": "kiosk.json",
     "/api/schedules": "schedules.json",
+    "/api/soil": "soil.json",
+    "/api/history": "history.json",
 }
+
+
+def _clear_watering(raw: bytes | None) -> bytes | None:
+    """Drop the running state after a cancel ack. Does not touch the fixture file."""
+    if not raw:
+        return raw
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError):
+        return raw
+    if not isinstance(doc, dict):
+        return raw
+    doc["phase"] = "Idle"
+    doc["current_station"] = ""
+    doc["stations_on"] = []
+    doc["run"] = None
+    stations = doc.get("stations")
+    if isinstance(stations, list):
+        for st in stations:
+            if not isinstance(st, dict):
+                continue
+            st["on"] = False
+            if st.get("state") in ("on", "running"):
+                st["state"] = "idle"
+    return json.dumps(doc).encode("utf-8")
+
+
+def _control(server) -> tuple[str, str]:
+    """watering=stay|clear|post and reach=up|down|get-down.
+
+    post (the default) serves the stored body on GET. POST /api/run/cancel
+    then replaces that body with every valve off. stay never clears.
+    clear serves every valve off on GET even before another POST, so a test
+    can flip a control file. reach=down (control file) is GET 404 and POST 503.
+    --kiosk-404 with no control file is GET 404 only (get-down); POSTs still ack.
+    """
+    watering = "stay" if server.stay_watering else "post"
+    reach = "up"
+    path = getattr(server, "control_path", "") or ""
+    from_file = False
+    if path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key, val = key.strip(), val.strip()
+            if key == "watering" and val in ("stay", "clear"):
+                watering = val
+                from_file = True
+            elif key == "reach" and val in ("up", "down"):
+                reach = val
+                from_file = True
+    if not from_file and server.kiosk_404:
+        reach = "get-down"
+    return watering, reach
 
 
 def _nap(seconds: float) -> None:
@@ -58,19 +122,31 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         _nap(self.server.get_delay)
-        if getattr(self.server, "kiosk_404", False) and self.path.split("?", 1)[0] == "/api/kiosk":
-            try:
-                self.send_error(404)
-            except (BrokenPipeError, ConnectionResetError, OSError):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/kiosk":
+            watering, reach = _control(self.server)
+            if reach == "down" or reach == "get-down":
+                try:
+                    self.send_error(404)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    return
                 return
+            with self.server.kiosk_lock:
+                data = self.server.kiosk_body
+            if data is None:
+                self.send_error(404)
+                return
+            if watering == "clear":
+                data = _clear_watering(data)
+            self._send(data)
             return
-        name = GET_MAP.get(self.path)
+        name = GET_MAP.get(path)
         if not name:
             self.send_error(404)
             return
-        path = os.path.join(self.server.fixture_dir, name)
+        file_path = os.path.join(self.server.fixture_dir, name)
         try:
-            with open(path, "rb") as f:
+            with open(file_path, "rb") as f:
                 data = f.read()
         except OSError:
             self.send_error(404)
@@ -78,8 +154,19 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self._send(data)
 
     def do_POST(self) -> None:
+        path = self.path.split("?", 1)[0]
         self._record()
         _nap(self.server.post_delay)
+        watering, reach = _control(self.server)
+        if reach == "down":
+            try:
+                self.send_error(503)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+            return
+        if path == "/api/run/cancel" and watering != "stay":
+            with self.server.kiosk_lock:
+                self.server.kiosk_body = _clear_watering(self.server.kiosk_body)
         self._send(b"{}")
 
     def do_PUT(self) -> None:
@@ -102,15 +189,34 @@ def main() -> int:
     p.add_argument("--get-delay", type=float, default=0, help="seconds to hold each GET")
     p.add_argument("--post-delay", type=float, default=0, help="seconds to hold each POST after logging it")
     p.add_argument("--kiosk-404", action="store_true", help="GET /api/kiosk returns 404")
+    p.add_argument(
+        "--stay-watering",
+        action="store_true",
+        help="keep the fixture's watering snapshot after POST /api/run/cancel",
+    )
+    p.add_argument(
+        "--control",
+        default="",
+        help="reread each request: watering=stay|clear and reach=up|down (reach=down is GET 404 and POST 503)",
+    )
     args = p.parse_args()
 
     httpd = FixtureServer(("127.0.0.1", args.port), FixtureHandler)
     httpd.fixture_dir = os.path.abspath(args.dir)
     httpd.log_path = args.log
     httpd.log_lock = threading.Lock()
+    httpd.kiosk_lock = threading.Lock()
     httpd.get_delay = args.get_delay if args.get_delay > 0 else 0.0
     httpd.post_delay = args.post_delay if args.post_delay > 0 else 0.0
     httpd.kiosk_404 = bool(args.kiosk_404)
+    httpd.stay_watering = bool(args.stay_watering)
+    httpd.control_path = args.control
+    kiosk_path = os.path.join(httpd.fixture_dir, "kiosk.json")
+    try:
+        with open(kiosk_path, "rb") as f:
+            httpd.kiosk_body = f.read()
+    except OSError:
+        httpd.kiosk_body = None
     log_dir = os.path.dirname(os.path.abspath(args.log))
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
