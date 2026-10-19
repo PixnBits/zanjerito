@@ -75,6 +75,16 @@ static const shot_t k_shots[] = {
     {"dc-schedules-3", "C-schedules-3-p2.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, 2},
     {"dc-schedules-4", "C-schedules-4.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
     {"dc-schedules-6", "C-schedules-6.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-schedules-longname", "C-schedules-longname.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, 0},
+    {"dc-schedules-longname", "C-schedules-longname-p2.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1, 0, 2},
+    {"dc-wide-4", "C-wide-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-wide-4", "S3-wide-4.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 2, 0, 0, -1, 0, -1},
+    {"dc-wide-4-idle", "C-wide-4-idle.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-wide-6", "C-wide-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-wide-6-idle", "C-wide-6-idle.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-icon-meadow-6", "C-icon-meadow-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-icon-w-4", "C-icon-w-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
+    {"dc-icon-w-6", "C-icon-w-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1, 0, -1},
 };
 
 static int join2(char *dst, size_t cap, const char *a, const char *b)

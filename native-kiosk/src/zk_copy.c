@@ -717,6 +717,7 @@ static void fill_sched_row(const zk_schedule_t *sch, zk_sched_row_t *row)
     }
     snprintf(row->meta, sizeof row->meta, "%s " ZK_MID " %s " ZK_MID " %d %s " ZK_MID " %d min " ZK_MID " %s", days, when,
              steps, steps == 1 ? "step" : "steps", mins, sch->enabled ? "Enabled" : "Disabled");
+    zk_utf8_seal(row->meta);
     row->enabled = sch->enabled ? 1 : 0;
     row->on = 1;
 }

@@ -1,0 +1,33 @@
+{
+ "schedules": [
+  {
+   "enabled": true,
+   "id": "weekdays",
+   "name": "Lawn A + B \u00b7 Weekdays AM",
+   "start": "06:10",
+   "steps": [
+    {
+     "minutes": 6,
+     "station_id": "lawn-a"
+    },
+    {
+     "minutes": 6,
+     "station_id": "lawn-b"
+    },
+    {
+     "minutes": 6,
+     "station_id": "drip"
+    }
+   ],
+   "weekdays": [
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun"
+   ]
+  }
+ ]
+}

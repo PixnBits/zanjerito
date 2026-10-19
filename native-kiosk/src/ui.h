@@ -51,6 +51,8 @@ typedef struct {
     int border_w;
     uint32_t border;
     int drop_visible;
+    int drop_x, drop_y, drop_w, drop_h;
+    int line1_pad;
     int title_w;
     int tile_w;
     uint32_t name_rgb;

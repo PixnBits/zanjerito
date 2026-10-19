@@ -2,6 +2,7 @@
 #include "zk_console.h"
 #include "zk_logic.h"
 #include "zk_model.h"
+#include "zk_text.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -380,6 +381,9 @@ static void test_console_cursor(void)
     unsetenv("ZK_TTY");
 }
 
+static void test_display_fold(void);
+static void test_utf8_caps(void);
+
 int main(void)
 {
     const char *scen[] = {
@@ -400,5 +404,161 @@ int main(void)
     test_wall_parse();
     test_wall_advance();
     test_console_cursor();
+    test_display_fold();
+    test_utf8_caps();
     return zk_test_report("test_json");
+}
+
+static int utf8_closed(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)(s ? s : "");
+    while (*p) {
+        int need;
+        int i;
+        if (*p < 0x80) {
+            need = 1;
+        } else if ((*p & 0xE0) == 0xC0) {
+            need = 2;
+        } else if ((*p & 0xF0) == 0xE0) {
+            need = 3;
+        } else if ((*p & 0xF8) == 0xF0) {
+            need = 4;
+        } else {
+            return 0;
+        }
+        for (i = 1; i < need; i++) {
+            if ((p[i] & 0xC0) != 0x80) {
+                return 0;
+            }
+        }
+        p += need;
+    }
+    return 1;
+}
+
+static void test_display_fold(void)
+{
+    char dst[128];
+    char again[128];
+    const char *folded = "Drip \u2013 \"Thu\" \u00b7 Jard\u00edn";
+    zk_schedules_t sch;
+    const char *json =
+        "{\"schedules\":[{\"id\":\"fold\",\"name\":\"Drip \\u2014 \\u201cThu\\u201d \\u2022 \\ud83d\\udca7 Jard\\u00edn\\u00ad\"}]}";
+    TEQ_I(zk_text_display(dst, sizeof dst, "Drip \u2014 \u201cThu\u201d \u2022 \U0001F4A7 Jard\u00edn\u00ad"), 0);
+    TEQ_S(dst, folded);
+    TEQ_I((int)strlen(dst), 25); /* 21 chars; en dash, middot, and í are multibyte */
+    TEQ_I(zk_text_display(again, sizeof again, dst), 0);
+    TEQ_S(again, dst);
+    TEQ_I(zk_text_display(dst, sizeof dst, "Jardi\u0301n"), 0);
+    TEQ_S(dst, "Jard\u00edn");
+    TEQ_I(zk_text_display(dst, sizeof dst, "\u0151"), 0);
+    TEQ_S(dst, "o");
+    TEQ_I(zk_text_display(dst, sizeof dst, "\u0142"), 0);
+    TEQ_S(dst, "l");
+    TEQ_I(zk_text_display(dst, sizeof dst, "\u010d"), 0);
+    TEQ_S(dst, "c");
+    TEQ_I(zk_text_display(dst, sizeof dst, "o\u030b"), 0);
+    TEQ_S(dst, "o");
+    TEQ_I(zk_text_display(dst, sizeof dst, "A\u00d7B"), 0);
+    TEQ_S(dst, "AxB");
+    TEQ_I(zk_text_display(dst, sizeof dst, "A\u200b\u200c\u200d\u2060\uFEFF\uFE0FB"), 0);
+    TEQ_S(dst, "AB");
+    TEQ_I(zk_text_display(dst, sizeof dst, "A\t\tB"), 0);
+    TEQ_S(dst, "A B");
+    TEQ_I(zk_text_display(dst, sizeof dst, "\nA\n"), 0);
+    TEQ_S(dst, "A");
+    TEQ_I(zk_text_display(dst, sizeof dst, "A\xFF" "\xFE" "B"), 0);
+    TEQ_S(dst, "AB");
+    TEQ_I(zk_text_display(dst, sizeof dst, "A\xC2" "B"), 0);
+    TEQ_S(dst, "AB");
+    TEQ_I(zk_text_display(dst, sizeof dst, NULL), 0);
+    TEQ_S(dst, "");
+    TEQ_I(zk_text_display(NULL, 4, "A"), -1);
+    TEQ_I(zk_parse_schedules(json, &sch), ZK_OK);
+    TEQ_S(sch.items[0].name, folded);
+    TCHECK(utf8_closed(sch.items[0].name), "folded name utf8");
+    TCHECK(strstr(sch.items[0].name, "\xF0\x9F") == NULL, "emoji left in the name");
+}
+
+static void test_utf8_caps(void)
+{
+    char src[160];
+    char dst[160];
+    char json[320];
+    zk_schedules_t sch;
+    int cap;
+    int bad = 0;
+    memset(src, 'A', 94);
+    memcpy(src + 94, "\xC2\xB7", 2);
+    src[96] = 0;
+    zk_str_copy(dst, 96, src);
+    TCHECK(utf8_closed(dst), "94+middot [%s]", dst);
+    TEQ_I((int)strlen(dst), 94);
+    memset(src, 'A', 93);
+    memcpy(src + 93, "\xC2\xB7", 2);
+    src[95] = 0;
+    zk_str_copy(dst, 96, src);
+    TEQ_S(dst, src);
+    memset(src, 'A', 93);
+    memcpy(src + 93, "\xE2\x80\x93", 3);
+    src[96] = 0;
+    zk_str_copy(dst, 96, src);
+    TCHECK(utf8_closed(dst), "93+dash [%s]", dst);
+    TEQ_I((int)strlen(dst), 93);
+    memset(src, 'A', 92);
+    memcpy(src + 92, "\xE2\x80\x93", 3);
+    src[95] = 0;
+    zk_str_copy(dst, 96, src);
+    TEQ_S(dst, src);
+    for (cap = 1; cap <= 96; cap++) {
+        int start;
+        for (start = 0; start <= 80; start++) {
+            char raw[128];
+            memset(raw, 'B', 100);
+            raw[start] = '\xC2';
+            raw[start + 1] = '\xB7';
+            if (start + 4 < 100) {
+                raw[start + 3] = '\xE2';
+                raw[start + 4] = '\x80';
+                raw[start + 5] = '\x93';
+            }
+            raw[100] = 0;
+            zk_utf8_ncopy(dst, (size_t)cap, raw, 100);
+            zk_str_copy(src, (size_t)cap, raw);
+            if (!utf8_closed(dst) || !utf8_closed(src) || (int)strlen(dst) >= cap || (int)strlen(src) >= cap ||
+                strcmp(dst, src) != 0) {
+                bad++;
+                if (bad <= 3) {
+                    TCHECK(0, "cap %d start %d dst [%s] copy [%s]", cap, start, dst, src);
+                }
+            }
+            zk_text_display(dst, (size_t)cap, raw);
+            if (!utf8_closed(dst) || (int)strlen(dst) >= cap) {
+                bad++;
+                if (bad <= 3) {
+                    TCHECK(0, "display cap %d start %d [%s]", cap, start, dst);
+                }
+            }
+        }
+    }
+    TCHECK(bad == 0, "utf8 cap failures %d", bad);
+    memset(src, 'A', 94);
+    memcpy(src + 94, "\xC2\xB7", 2);
+    src[96] = 0;
+    snprintf(json, sizeof json, "{\"schedules\":[{\"id\":\"p\",\"name\":\"%s\"}]}", src);
+    TEQ_I(zk_parse_schedules(json, &sch), ZK_OK);
+    TCHECK(utf8_closed(sch.items[0].name), "parsed 94+middot");
+    TEQ_I((int)strlen(sch.items[0].name), 94);
+    memset(src, 'A', 93);
+    memcpy(src + 93, "\xC2\xB7", 2);
+    src[95] = 0;
+    snprintf(json, sizeof json, "{\"schedules\":[{\"id\":\"p\",\"name\":\"%s\"}]}", src);
+    TEQ_I(zk_parse_schedules(json, &sch), ZK_OK);
+    TEQ_S(sch.items[0].name, src);
+    memset(src, 'A', 92);
+    memcpy(src + 92, "\xE2\x80\x93", 3);
+    src[95] = 0;
+    snprintf(json, sizeof json, "{\"schedules\":[{\"id\":\"p\",\"name\":\"%s\"}]}", src);
+    TEQ_I(zk_parse_schedules(json, &sch), ZK_OK);
+    TEQ_S(sch.items[0].name, src);
 }
