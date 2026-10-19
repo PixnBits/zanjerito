@@ -51,7 +51,7 @@ enum {
     COL_ON_FILL = 0xBFEDE6
 };
 
-enum { HIT_N = ZK_TARGET_OK + 1, TG_MAX = 24 };
+enum { HIT_N = ZK_TARGET_SCHED_NEXT + 1, TG_MAX = 24 };
 
 typedef struct {
     lv_obj_t *hero;
@@ -75,6 +75,9 @@ typedef struct {
     lv_obj_t *bar[ZK_MAX_SHOWN];
     lv_obj_t *fill[ZK_MAX_SHOWN];
     lv_obj_t *slot_tx[ZK_MAX_SHOWN];
+    lv_obj_t *sched_btn;
+    lv_obj_t *sched_ic;
+    lv_obj_t *sched_tx;
     lv_obj_t *pause;
     lv_obj_t *pause_ic;
     lv_obj_t *pause_tx;
@@ -96,14 +99,20 @@ typedef struct {
     lv_obj_t *run;
     lv_obj_t *run_ic;
     lv_obj_t *run_tx;
-    lv_obj_t *stop_st;
-    lv_obj_t *stop_st_ic;
-    lv_obj_t *stop_st_tx;
     lv_obj_t *stop_all;
     lv_obj_t *stop_all_ic;
     lv_obj_t *stop_all_tx;
     lv_obj_t *ok;
     lv_obj_t *ok_tx;
+    lv_obj_t *sched;
+    lv_obj_t *sc_label;
+    lv_obj_t *sc_name[2];
+    lv_obj_t *sc_meta[2];
+    lv_obj_t *sc_note;
+    lv_obj_t *sc_empty;
+    lv_obj_t *sc_empty_body;
+    lv_obj_t *next;
+    lv_obj_t *next_tx;
     lv_obj_t *hit[HIT_N];
     int n_tiles;
 } widgets_t;
@@ -149,6 +158,8 @@ static int g_ready;
 static int g_override = -1;
 static int g_pressed;
 static enum zk_screen g_screen;
+static enum zk_screen g_under;
+static int g_sched_i;
 static int g_station;
 static int g_minutes = 10;
 static int g_min_key = -999;
@@ -165,7 +176,7 @@ static int64_t g_last_retry;
 static int64_t g_last_tap;
 static uint32_t g_seen_seq;
 static int g_seen_ok;
-static uint32_t g_ack_version;
+static uint32_t g_ack_gen;
 static int g_confirmed_reachable;
 static int g_have_prev_flags;
 static int g_prev_paused;
@@ -178,18 +189,20 @@ static zk_soil_cfg_t g_soil;
 
 static uint8_t g_oct44[44 * 44];
 static uint8_t g_oct40[40 * 40];
-static uint8_t g_oct30[30 * 30];
 static uint8_t g_play30[30 * 30];
 static uint8_t g_play28[28 * 28];
 static uint8_t g_drop22[22 * 22];
 static uint8_t g_warn22[22 * 22];
+static uint8_t g_cal28[28 * 28];
+static uint8_t g_back28[28 * 28];
 static lv_image_dsc_t g_oct44_dsc;
 static lv_image_dsc_t g_oct40_dsc;
-static lv_image_dsc_t g_oct30_dsc;
 static lv_image_dsc_t g_play30_dsc;
 static lv_image_dsc_t g_play28_dsc;
 static lv_image_dsc_t g_drop22_dsc;
 static lv_image_dsc_t g_warn_dsc;
+static lv_image_dsc_t g_cal28_dsc;
+static lv_image_dsc_t g_back28_dsc;
 
 static lv_color_t hex(uint32_t c)
 {
@@ -591,83 +604,211 @@ static uint32_t utf8_next(const char *s, uint32_t i)
     return i + 1;
 }
 
-/* Bytes of the next line that fit in max_w, breaking on spaces.
- * 0 when the first word is wider than the line. */
-static uint32_t wrap_line(const char *s, const lv_font_t *font, int max_w)
+/* Bytes of the next line inside s[0, nbytes) that fit in max_w.
+ * Breaks on the last space that fits. A word wider than the line breaks
+ * on a character boundary. Returns at least one character when nbytes > 0
+ * so the caller always advances. */
+static uint32_t wrap_line(const char *s, uint32_t nbytes, const lv_font_t *font, int max_w)
 {
     uint32_t i = 0;
     uint32_t last_space = 0;
+    uint32_t last_fit = 0;
     int have_space = 0;
-    if (!s || !s[0] || !font || max_w < 1) {
+    if (!s || nbytes == 0 || !font || max_w < 1) {
         return 0;
     }
-    while (s[i]) {
+    while (i < nbytes && s[i]) {
         uint32_t n = utf8_next(s, i);
         int w;
-        if (n == i) {
+        if (n == i || n > nbytes) {
             break;
         }
         w = (int)lv_text_get_width(s, n, font, 0);
         if (w > max_w) {
-            if (have_space) {
+            if (have_space && last_space > 0) {
                 return last_space;
             }
-            return 0;
+            if (last_fit > 0) {
+                return last_fit;
+            }
+            return n;
         }
+        last_fit = n;
         if (s[n - 1] == ' ') {
             last_space = n;
             have_space = 1;
         }
         i = n;
     }
-    return i;
+    return i > 0 ? i : 0;
 }
 
-typedef struct {
-    int nlines;
-    uint32_t line1;
-    int overflow;
-} wrap_info_t;
-
-/* Hanging indent: line 1 uses first_w, later lines use rest_w. */
-static wrap_info_t measure_wrap(const char *s, const lv_font_t *font, int first_w, int rest_w, int max_lines)
+/* Insert newlines inside words wider than max_w. Spaced text is left for LVGL. */
+static void break_long_words(char *dst, size_t cap, const char *src, const lv_font_t *font, int max_w)
 {
-    wrap_info_t info;
-    const char *p;
-    int line = 0;
-    memset(&info, 0, sizeof info);
-    if (!s || !s[0] || max_lines < 1) {
-        return info;
+    size_t o = 0;
+    const char *p = src ? src : "";
+    if (!dst || cap == 0) {
+        return;
     }
-    p = s;
-    while (*p && line < max_lines) {
-        uint32_t adv;
-        int w = line == 0 ? first_w : rest_w;
-        while (*p == ' ') {
-            p++;
+    dst[0] = 0;
+    if (!font || max_w < 1) {
+        copy_cap(dst, cap, p);
+        return;
+    }
+    while (*p && o + 1 < cap) {
+        uint32_t n = 0;
+        uint32_t i = 0;
+        if (*p == ' ' || *p == '\n') {
+            dst[o++] = *p++;
+            dst[o] = 0;
+            continue;
         }
-        if (!*p) {
+        while (p[n] && p[n] != ' ' && p[n] != '\n') {
+            uint32_t nx = utf8_next(p, n);
+            if (nx == n) {
+                break;
+            }
+            n = nx;
+        }
+        while (i < n && o + 1 < cap) {
+            uint32_t adv = wrap_line(p + i, n - i, font, max_w);
+            uint32_t take;
+            if (adv == 0 || adv > n - i) {
+                break;
+            }
+            take = adv;
+            if (i > 0 && o + 1 < cap) {
+                dst[o++] = '\n';
+            }
+            if (take >= cap - o) {
+                take = (uint32_t)(cap - o - 1);
+            }
+            memcpy(dst + o, p + i, take);
+            o += take;
+            dst[o] = 0;
+            i += adv;
+            if (take < adv) {
+                break;
+            }
+        }
+        p += n;
+    }
+}
+
+/* Visual lines for a tile name.
+ * Spaced wraps stay in the original string so LVGL can break them.
+ * A word wider than the line gets a newline (character break).
+ * Ellipsis is added only on the last line, and only when text remains.
+ * Returns 1 when that ellipsis was used. *nlines_out is at least 1 for
+ * a non-empty source. */
+static int fit_wrapped(char *dst, size_t cap, const char *src, const lv_font_t *font, int first_w, int rest_w,
+                       int max_lines, int *nlines_out)
+{
+    enum { SEG_MAX = 8 };
+    struct {
+        uint32_t off;
+        uint32_t n;
+        int hard;
+    } seg[SEG_MAX];
+    const char *p;
+    int nlines = 0;
+    int overflow = 0;
+    int any_hard = 0;
+    int i;
+    if (!dst || cap == 0) {
+        return 0;
+    }
+    dst[0] = 0;
+    if (!src) {
+        src = "";
+    }
+    if (!font || max_lines < 1 || first_w < 1) {
+        copy_cap(dst, cap, src);
+        if (nlines_out) {
+            *nlines_out = src[0] ? 1 : 0;
+        }
+        return 0;
+    }
+    if (max_lines > SEG_MAX) {
+        max_lines = SEG_MAX;
+    }
+    p = src;
+    while (*p && nlines < max_lines) {
+        int w = nlines == 0 ? first_w : rest_w;
+        uint32_t adv;
+        if (w < 1) {
+            w = first_w;
+        }
+        adv = wrap_line(p, (uint32_t)strlen(p), font, w);
+        if (adv == 0) {
             break;
         }
-        adv = wrap_line(p, font, w);
-        if (adv == 0) {
-            info.overflow = 1;
-            return info;
-        }
-        if (line == 0) {
-            info.line1 = (uint32_t)(p - s) + adv;
-        }
+        seg[nlines].off = (uint32_t)(p - src);
+        seg[nlines].n = adv;
+        seg[nlines].hard = (p[adv] != '\0' && p[adv - 1] != ' ') ? 1 : 0;
+        any_hard |= seg[nlines].hard;
         p += adv;
-        line++;
+        nlines++;
     }
-    while (*p == ' ') {
-        p++;
+    overflow = *p != '\0';
+    if (nlines < 1) {
+        copy_cap(dst, cap, src);
+        if (nlines_out) {
+            *nlines_out = src[0] ? 1 : 0;
+        }
+        return 0;
     }
-    info.nlines = line > 0 ? line : 1;
-    if (*p) {
-        info.overflow = 1;
+    /* A narrower first line (the running tile's inline drop) needs explicit
+     * breaks so the hanging indent wraps the same way it was measured. */
+    if (!overflow && !any_hard && (first_w == rest_w || nlines <= 1)) {
+        copy_cap(dst, cap, src);
+        if (nlines_out) {
+            *nlines_out = nlines;
+        }
+        return 0;
     }
-    return info;
+    {
+        size_t used = 0;
+        int last = overflow ? nlines - 1 : nlines;
+        int clamped = overflow ? 1 : 0;
+        for (i = 0; i < last; i++) {
+            uint32_t n = seg[i].n;
+            const char *s = src + seg[i].off;
+            while (n > 0 && s[n - 1] == ' ') {
+                n--;
+            }
+            if (used && used + 1 < cap) {
+                dst[used++] = '\n';
+            }
+            if (n >= cap - used) {
+                n = (uint32_t)(cap - used - 1);
+            }
+            memcpy(dst + used, s, n);
+            used += n;
+            dst[used] = 0;
+        }
+        if (overflow) {
+            char ell[ZK_TITLE_MAX];
+            uint32_t n;
+            int w = nlines <= 1 ? first_w : rest_w;
+            fit_text(ell, sizeof ell, src + seg[nlines - 1].off, font, 0, w, 1);
+            if (used && used + 1 < cap) {
+                dst[used++] = '\n';
+            }
+            n = (uint32_t)strlen(ell);
+            if (n >= cap - used) {
+                n = (uint32_t)(cap - used - 1);
+            }
+            memcpy(dst + used, ell, n);
+            used += n;
+            dst[used] = 0;
+        }
+        if (nlines_out) {
+            *nlines_out = nlines;
+        }
+        return clamped;
+    }
 }
 
 static void copy_span(char *dst, size_t cap, const char *s, uint32_t n)
@@ -687,50 +828,6 @@ static void copy_span(char *dst, size_t cap, const char *s, uint32_t n)
     }
     memcpy(dst, s, n);
     dst[n] = 0;
-}
-
-/* Remainder after line 1, with our breaks so LVGL does not reflow it. */
-static void rest_with_breaks(char *dst, size_t cap, const char *s, const lv_font_t *font, int rest_w, int max_lines)
-{
-    const char *p;
-    size_t used = 0;
-    int line = 0;
-    if (!dst || cap == 0) {
-        return;
-    }
-    dst[0] = 0;
-    if (!s || !font || max_lines < 1) {
-        return;
-    }
-    p = s;
-    while (*p == ' ') {
-        p++;
-    }
-    while (*p && line < max_lines && used + 1 < cap) {
-        uint32_t adv = wrap_line(p, font, rest_w);
-        uint32_t n;
-        if (adv == 0) {
-            break;
-        }
-        n = adv;
-        while (n > 0 && p[n - 1] == ' ') {
-            n--;
-        }
-        if (used && used + 1 < cap) {
-            dst[used++] = '\n';
-        }
-        if (n >= cap - used) {
-            n = (uint32_t)(cap - used - 1);
-        }
-        memcpy(dst + used, p, n);
-        used += n;
-        dst[used] = 0;
-        p += adv;
-        while (*p == ' ') {
-            p++;
-        }
-        line++;
-    }
 }
 
 static void center_pair(lv_obj_t *btn, lv_obj_t *icon, int iw, int ih, lv_obj_t *word, int gap)
@@ -790,6 +887,63 @@ static void center_pair(lv_obj_t *btn, lv_obj_t *icon, int iw, int ih, lv_obj_t 
     }
 }
 
+/* Icon over the word. The 120 px Schedules button cannot fit them side by side. */
+static void stack_pair(lv_obj_t *btn, lv_obj_t *icon, int iw, int ih, lv_obj_t *word, int gap)
+{
+    int bw;
+    int bh;
+    int tw;
+    int th;
+    int total;
+    int x;
+    int y;
+    if (!btn || !word) {
+        return;
+    }
+    lv_obj_update_layout(btn);
+    bw = (int)lv_obj_get_width(btn);
+    bh = (int)lv_obj_get_height(btn);
+    tw = text_width(word);
+    th = (int)lv_font_get_line_height(lv_obj_get_style_text_font(word, LV_PART_MAIN));
+    if (tw < 1) {
+        tw = 1;
+    }
+    if (th < 1) {
+        th = 1;
+    }
+    if (tw > bw - 8) {
+        tw = bw - 8;
+    }
+    if (tw < 1) {
+        tw = 1;
+    }
+    lv_label_set_long_mode(word, LV_LABEL_LONG_CLIP);
+    lv_obj_set_size(word, tw, th);
+    total = (icon && iw > 0 ? ih + gap : 0) + th;
+    y = (bh - total) / 2;
+    if (y < 2) {
+        y = 2;
+    }
+    x = (bw - tw) / 2;
+    if (x < 2) {
+        x = 2;
+    }
+    if (icon && iw > 0) {
+        int ix = (bw - iw) / 2;
+        if (ix < 0) {
+            ix = 0;
+        }
+        lv_obj_set_pos(icon, ix, y);
+        lv_obj_set_pos(word, x, y + ih + gap);
+        show(icon, 1);
+    } else {
+        lv_obj_set_pos(word, x, y);
+        if (icon) {
+            show(icon, 0);
+        }
+    }
+}
+
 static int listed(enum zk_target_id id)
 {
     int i;
@@ -813,6 +967,12 @@ static enum zk_target_id wid_of(const lv_obj_t *o)
     if (o == g_w.pause) {
         return g_paused ? ZK_TARGET_RESUME : ZK_TARGET_PAUSE;
     }
+    if (o == g_w.sched_btn) {
+        return g_screen == ZK_SCREEN_SCHEDULES ? ZK_TARGET_HOME : ZK_TARGET_SCHEDULES;
+    }
+    if (o == g_w.next) {
+        return ZK_TARGET_SCHED_NEXT;
+    }
     if (o == g_w.stop) {
         return ZK_TARGET_STOP;
     }
@@ -827,9 +987,6 @@ static enum zk_target_id wid_of(const lv_obj_t *o)
     }
     if (o == g_w.run) {
         return ZK_TARGET_RUN;
-    }
-    if (o == g_w.stop_st) {
-        return ZK_TARGET_STOP_STATION;
     }
     if (o == g_w.stop_all) {
         return ZK_TARGET_STOP_ALL;
@@ -863,6 +1020,12 @@ static int sheet_kind_of(enum zk_screen screen)
     }
 }
 
+/* Hero, rain, and tiles hide under a confirm sheet and under the schedules list. */
+static int top_covered(void)
+{
+    return sheet_kind_of(g_screen) != ZK_SHEET_NONE || g_screen == ZK_SCREEN_SCHEDULES;
+}
+
 static int unreachable_of(const zk_snapshot_t *s)
 {
     return !s->have_kiosk || s->api_state != ZK_API_OK || s->stale;
@@ -889,7 +1052,7 @@ static int manual_of(const zk_snapshot_t *s)
     return strcmp(s->kiosk.run.program, "manual") == 0;
 }
 
-static void note_actions(uint32_t version)
+static void note_actions(const zk_snapshot_t *s)
 {
     zk_action_result_t r;
     zk_data_action_result(&r);
@@ -905,37 +1068,51 @@ static void note_actions(uint32_t version)
         return;
     }
     zk_stop_http(&g_stop, r.code == ZK_OK);
-    if (g_stop.phase == ZK_STOP_WAIT) {
-        g_ack_version = version;
+    if (g_stop.phase == ZK_STOP_WAIT && s) {
+        g_ack_gen = s->kiosk_gen;
     }
+}
+
+static void submit_stop_now(void)
+{
+    zk_data_submit_action(ZK_ACT_STOP, NULL);
+    g_last_retry = zk_platform_mono_ms();
+    g_last_retry_set = 1;
 }
 
 static void advance_stop(const zk_snapshot_t *s, int unreachable, int watering)
 {
-    if (g_stop_hold >= 0) {
+    int send;
+    if (g_stop_hold >= 0 || !s) {
         return;
     }
     if (g_stop.phase != ZK_STOP_WAIT) {
         return;
     }
     if (unreachable) {
-        zk_stop_snapshot(&g_stop, ZK_STOP_SNAP_UNAVAILABLE);
+        send = zk_stop_snapshot(&g_stop, ZK_STOP_SNAP_UNAVAILABLE);
         if (g_stop.phase == ZK_STOP_CONFIRMED) {
             g_confirmed_reachable = 0;
             g_confirmed_at = s->wall;
             g_has_confirmed_at = 1;
         }
+        if (send) {
+            submit_stop_now();
+        }
         return;
     }
-    /* Same snapshot as the ack is not a decision yet. A newer poll is. */
-    if (s->version == g_ack_version) {
+    /* The poll visible at ack time is not a decision. A later parse is. */
+    if (s->kiosk_gen == g_ack_gen) {
         return;
     }
-    zk_stop_snapshot(&g_stop, watering ? ZK_STOP_SNAP_STILL_ON : ZK_STOP_SNAP_CLEAR);
+    send = zk_stop_snapshot(&g_stop, watering ? ZK_STOP_SNAP_STILL_ON : ZK_STOP_SNAP_CLEAR);
     if (g_stop.phase == ZK_STOP_CONFIRMED) {
         g_confirmed_reachable = 1;
         g_confirmed_at = s->wall;
         g_has_confirmed_at = 1;
+    }
+    if (send) {
+        submit_stop_now();
     }
 }
 
@@ -949,11 +1126,13 @@ static void maybe_clear_confirmed(int unreachable, int watering, int manual, int
     if (watering || manual || paused != g_prev_paused || lost) {
         g_stop.phase = ZK_STOP_IDLE;
         g_stop.inflight = 0;
+        g_stop.again = 0;
+        g_stop.failed = 0;
         g_has_confirmed_at = 0;
     }
 }
 
-static void maybe_retry(uint32_t version)
+static void maybe_retry(void)
 {
     int64_t now;
     if (g_stop_hold >= 0 || g_stop.phase != ZK_STOP_QUEUED || g_stop.inflight) {
@@ -966,11 +1145,9 @@ static void maybe_retry(uint32_t version)
     if (!zk_stop_retry(&g_stop)) {
         return;
     }
-    zk_data_submit_action(ZK_ACT_STOP, NULL);
-    g_last_retry = now;
-    g_last_retry_set = 1;
+    submit_stop_now();
     g_retry_pulse = 1;
-    note_actions(version);
+    note_actions(&g_snap);
 }
 
 static void apply_id(enum zk_target_id id)
@@ -1015,13 +1192,26 @@ static void apply_id(enum zk_target_id id)
         g_screen = ZK_SCREEN_SHEET_STOP_STATION;
         break;
     case ZK_TAP_OPEN_STOP_ALL:
+        g_under = g_screen == ZK_SCREEN_SCHEDULES ? ZK_SCREEN_SCHEDULES : ZK_SCREEN_HOME;
         g_screen = ZK_SCREEN_SHEET_STOP_ALL;
         break;
     case ZK_TAP_OPEN_OVERLAP:
         g_screen = ZK_SCREEN_SHEET_OVERLAP;
         break;
-    case ZK_TAP_CLOSE:
+    case ZK_TAP_OPEN_SCHEDULES:
+        g_sched_i = 0;
+        g_screen = ZK_SCREEN_SCHEDULES;
+        break;
+    case ZK_TAP_HOME:
         g_screen = ZK_SCREEN_HOME;
+        g_under = ZK_SCREEN_HOME;
+        break;
+    case ZK_TAP_SCHED_NEXT:
+        g_sched_i++;
+        break;
+    case ZK_TAP_CLOSE:
+        g_screen = g_under;
+        g_under = ZK_SCREEN_HOME;
         break;
     case ZK_TAP_STEPPER:
         g_minutes += out.minutes_delta;
@@ -1044,18 +1234,18 @@ static void apply_id(enum zk_target_id id)
             zk_data_submit_action(ZK_ACT_RUN, body);
         }
         g_screen = ZK_SCREEN_HOME;
-        note_actions(g_snap.version);
+        g_under = ZK_SCREEN_HOME;
+        note_actions(&g_snap);
         break;
     }
     case ZK_TAP_SUBMIT_STOP:
         if (g_stop_hold < 0 && zk_stop_confirm(&g_stop)) {
-            zk_data_submit_action(ZK_ACT_STOP, NULL);
-            g_last_retry = now;
-            g_last_retry_set = 1;
-            note_actions(g_snap.version);
+            submit_stop_now();
+            note_actions(&g_snap);
             advance_stop(&g_snap, unreachable_of(&g_snap), watering_of(&g_snap));
         }
-        g_screen = ZK_SCREEN_HOME;
+        g_screen = g_under;
+        g_under = ZK_SCREEN_HOME;
         break;
     case ZK_TAP_SUBMIT_PAUSE:
         zk_data_submit_action(ZK_ACT_PAUSE, ZK_PAUSE_BODY);
@@ -1105,6 +1295,10 @@ static int pick_event(const frame_t *prev, const frame_t *now, zk_repaint_ctx_t 
             return ZK_EVT_OFFLINE_CONFIRM;
         }
         return ZK_EVT_CLOSE_FULL_SHEET;
+    }
+    if (prev->screen != now->screen &&
+        (prev->screen == (int)ZK_SCREEN_SCHEDULES || now->screen == (int)ZK_SCREEN_SCHEDULES)) {
+        return ZK_EVT_SCHEDULES;
     }
     if (prev->screen != now->screen) {
         return ZK_EVT_SHEET;
@@ -1217,6 +1411,62 @@ static void capture(frame_t *f)
     }
 }
 
+/* Wrapped block height at this width. 0 for empty text. */
+static int text_block_h(const char *text, const lv_font_t *font, int letter_sp, int line_sp, int max_w)
+{
+    lv_point_t sz;
+    if (!text || !text[0] || !font || max_w < 1) {
+        return 0;
+    }
+    lv_text_get_size(&sz, text, font, letter_sp, line_sp, max_w, LV_TEXT_FLAG_NONE);
+    return (int)sz.y;
+}
+
+/* Column width for a headline that must stay within 3 lines.
+ * Literata 48 at the 332 px column can wrap a name onto a fourth line
+ * even when the glyphs fit in three ("North Orchard" is 353 px). The hero's
+ * children sit inside the 2 px border, so the line may grow up to that inner
+ * width. The column x stays 22 unless the extra pixels have to come from the
+ * left padding. */
+static int headline_width(const char *text, const lv_font_t *font, int *x_out)
+{
+    int inner = ZK_HERO_W - 4;
+    int max_h;
+    int w;
+    int x = 22;
+    if (x_out) {
+        *x_out = 22;
+    }
+    if (!font || inner < 332) {
+        return 332;
+    }
+    max_h = (int)lv_font_get_line_height(font) * 3;
+    if (max_h < 1) {
+        return 332;
+    }
+    if (text_block_h(text, font, 0, 0, 332) <= max_h) {
+        return 332;
+    }
+    for (w = 333; w <= inner; w++) {
+        if (text_block_h(text, font, 0, 0, w) <= max_h) {
+            if (22 + w > inner) {
+                x = inner - w;
+                if (x < 0) {
+                    x = 0;
+                }
+            }
+            if (x_out) {
+                *x_out = x;
+            }
+            return w;
+        }
+    }
+    if (x_out) {
+        *x_out = 0;
+    }
+    return inner;
+}
+
 static void apply_hero(void)
 {
     const zk_hero_copy_t *h = &g_view.hero;
@@ -1227,14 +1477,30 @@ static void apply_hero(void)
     uint32_t sc = COL_MUTED;
     uint32_t tc = COL_TEXT;
     char fitted[192];
+    char broken[384];
+    const char *head_txt;
     int clamped;
     int head_h;
+    int head_x;
+    int head_w;
     int y;
     int sub_x;
     int sub_w;
-    lv_point_t sz;
+    int sub_h;
+    int label_lines;
+    int label_h;
+    int label_ls;
+    int label_lh;
+    int time_on;
+    int time_h;
+    int time_lh;
+    int sub_on;
+    int gap;
+    int lead;
+    int line_sp;
+    int rain_top;
     const lv_font_t *hf = &zk_font_lit_48;
-    int sheet = sheet_kind_of(g_screen) != ZK_SHEET_NONE;
+    const lv_font_t *sf;
 
     switch (h->style) {
     case ZK_HERO_PAUSED:
@@ -1266,72 +1532,184 @@ static void apply_hero(void)
     default:
         break;
     }
-    show(g_w.hero, !sheet);
+    show(g_w.hero, !top_covered());
     paint_box(g_w.hero, bg, edge, 2, 16, LV_BORDER_SIDE_FULL);
     /* CSS label tracking is 1.4 px. 2 px is what wraps "WEEKDAYS AM" onto
      * the second line inside the 332 px slot, matching the spec screens. */
     use_font(g_w.h_label, &zk_font_sb_18, 2);
-    lv_obj_set_style_text_line_space(g_w.h_label, 4, 0);
     text_color(g_w.h_label, lc);
     clamped = fit_text(fitted, sizeof fitted, h->label, &zk_font_sb_18, 2, 332, 2);
     set_tracked(g_w.h_label, fitted, clamped);
     {
         int label_w = (int)lv_text_get_width(fitted, (uint32_t)strlen(fitted), &zk_font_sb_18, 2);
-        int label_lines = label_w > 332 ? 2 : 1;
-        place(g_w.h_label, 22, 18, 332, label_lines * 22);
-        /* Flex: 22 px label pitch, 8 px gap. +9 px compensates LVGL glyphs
-         * sitting at the top of the line box (CSS line-height 1.2 leads). */
-        y = 18 + label_lines * 22 + 8 + 9;
+        label_lines = label_w > 332 ? 2 : 1;
     }
+    label_ls = 4;
+    label_lh = (int)lv_font_get_line_height(&zk_font_sb_18);
+    /* 22 px is the label line box used on every screen that fits (18 px face + 4 px gap). */
+    label_h = label_lines * 22;
+    time_lh = (int)lv_font_get_line_height(&zk_font_sb_36);
+    time_h = 40;
 
+    /* Unspaced words break on characters. The string is not ellipsized.
+     * Width grows past 332 only so a spaced name stays inside 3 lines. */
+    head_x = 22;
+    head_w = headline_width(h->headline, hf, &head_x);
+    break_long_words(broken, sizeof broken, h->headline, hf, head_w);
+    head_txt = broken[0] ? broken : h->headline;
     use_font(g_w.h_head, hf, 0);
     text_color(g_w.h_head, hc);
-    set_tracked(g_w.h_head, h->headline, 0);
-    lv_obj_set_style_text_line_space(g_w.h_head, 6, 0);
-    lv_text_get_size(&sz, h->headline[0] ? h->headline : " ", hf, 0, 6, 332, LV_TEXT_FLAG_NONE);
-    head_h = (int)sz.y;
-    if (head_h < 52) {
-        head_h = 52;
-    }
-    if (head_h > 52 * 3 + 12) {
-        head_h = 52 * 3 + 12;
-    }
-    place(g_w.h_head, 22, y, 332, head_h);
+    set_tracked(g_w.h_head, broken[0] ? broken : h->headline, 0);
 
-    y = y + head_h + 8;
-    if (h->time_line[0]) {
-        use_font(g_w.h_time, &zk_font_sb_36, 0);
-        text_color(g_w.h_time, tc);
-        set_tracked(g_w.h_time, h->time_line, 0);
-        place(g_w.h_time, 22, y, 332, 40);
-        show(g_w.h_time, 1);
-        y += 44;
-    } else {
-        show(g_w.h_time, 0);
-    }
     sub_x = 22;
     sub_w = 332;
+    sub_on = h->secondary[0] ? 1 : 0;
     if (h->style == ZK_HERO_OVERLAP) {
         sub_x = 48;
         sub_w = 306;
-        use_font(g_w.h_sub, &zk_font_sb_24, 0);
-        place(g_w.warn, 22, y, 22, 22);
-        recolor(g_w.warn, COL_TERRA_INK);
-        show(g_w.warn, h->secondary[0] ? 1 : 0);
+        sf = &zk_font_sb_24;
     } else {
-        use_font(g_w.h_sub, &zk_font_r_26, 0);
-        show(g_w.warn, 0);
+        sf = &zk_font_r_26;
     }
+    use_font(g_w.h_sub, sf, 0);
     text_color(g_w.h_sub, sc);
     set_tracked(g_w.h_sub, h->secondary, 0);
-    place(g_w.h_sub, sub_x, y, sub_w, 80);
-    show(g_w.h_sub, h->secondary[0] ? 1 : 0);
+    sub_h = (int)lv_font_get_line_height(sf);
+    if (sub_on) {
+        lv_point_t sz;
+        lv_text_get_size(&sz, h->secondary, sf, 0, 0, sub_w, LV_TEXT_FLAG_NONE);
+        if ((int)sz.y > sub_h) {
+            sub_h = (int)sz.y;
+        }
+    }
+    if (sub_h < 26) {
+        sub_h = 26;
+    }
+
+    time_on = h->time_line[0] ? 1 : 0;
+    if (time_on) {
+        use_font(g_w.h_time, &zk_font_sb_36, 0);
+        text_color(g_w.h_time, tc);
+        set_tracked(g_w.h_time, h->time_line, 0);
+    }
+
+    /* Rain stays at screen y 264. Children sit inside the hero's 2 px border,
+     * so the local limit is 264 - (hero y + border). The headline box is never
+     * shorter than its text. Drop the secondary first. If the time still
+     * crosses the rain, drop the label's extra line gap and the time box's
+     * slack (the face is 36 px). */
+    rain_top = ZK_RAIN_Y - (ZK_HERO_Y + 2);
+    lead = 9;
+    gap = 8;
+    line_sp = 6;
+    {
+        int label_gap = 8;
+        int guard = 0;
+        while (guard < 6) {
+            int bottom;
+            int y_time;
+            int y_sub;
+            y = 18 + label_h + label_gap + lead;
+            lv_obj_set_style_text_line_space(g_w.h_head, line_sp, 0);
+            head_h = text_block_h(head_txt && head_txt[0] ? head_txt : " ", hf, 0, line_sp, head_w);
+            if (head_h < 52) {
+                head_h = 52;
+            }
+            y_time = y + head_h + gap;
+            y_sub = time_on ? y_time + time_h + gap : y + head_h + gap;
+            bottom = y + head_h;
+            if (time_on) {
+                bottom = y_time + time_h;
+            }
+            if (sub_on) {
+                bottom = y_sub + sub_h;
+            }
+            if (!h->rain || bottom <= rain_top) {
+                break;
+            }
+            if (lead != 0 || line_sp != 0 || gap > 4 || label_gap != 0) {
+                lead = 0;
+                line_sp = 0;
+                gap = 4;
+                label_gap = 0;
+                guard++;
+                continue;
+            }
+            if (sub_on) {
+                sub_on = 0;
+                guard++;
+                continue;
+            }
+            if (label_ls != 0 || gap != 0 || time_h != time_lh) {
+                label_ls = 0;
+                label_h = label_lines * (label_lh > 0 ? label_lh : 18);
+                if (label_h < 1) {
+                    label_h = 1;
+                }
+                time_h = time_lh > 0 ? time_lh : 36;
+                gap = 0;
+                guard++;
+                continue;
+            }
+            /* More than three lines (a run of 40 M's). Keep whole lines that
+             * fit above the time. The label still holds the full string. */
+            {
+                int y0 = 18 + label_h + label_gap + lead;
+                int room = rain_top - y0;
+                int lh = (int)lv_font_get_line_height(hf);
+                int lines;
+                int whole;
+                if (time_on) {
+                    room -= time_h + gap;
+                }
+                if (lh < 1) {
+                    lh = 52;
+                }
+                if (room < 1) {
+                    room = 1;
+                }
+                lines = room / lh;
+                if (lines < 1) {
+                    head_h = room;
+                } else {
+                    whole = lines * lh;
+                    if (line_sp > 0) {
+                        whole += (lines - 1) * line_sp;
+                    }
+                    if (whole > room || head_h > whole) {
+                        head_h = whole > room ? room : whole;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    lv_obj_set_style_text_line_space(g_w.h_label, label_ls, 0);
+    place(g_w.h_label, 22, 18, 332, label_h);
+    place(g_w.h_head, head_x, y, head_w, head_h);
+    y = y + head_h + gap;
+    if (time_on) {
+        place(g_w.h_time, 22, y, 332, time_h);
+        show(g_w.h_time, 1);
+        y += time_h + gap;
+    } else {
+        show(g_w.h_time, 0);
+    }
+    if (h->style == ZK_HERO_OVERLAP) {
+        place(g_w.warn, 22, y, 22, 22);
+        recolor(g_w.warn, COL_TERRA_INK);
+        show(g_w.warn, sub_on);
+    } else {
+        show(g_w.warn, 0);
+    }
+    place(g_w.h_sub, sub_x, y, sub_w, sub_on ? sub_h : 26);
+    show(g_w.h_sub, sub_on);
     clickable(g_w.hero, listed(ZK_TARGET_HERO));
 }
 
 static void apply_rain(void)
 {
-    int show_it = g_view.hero.rain && sheet_kind_of(g_screen) == ZK_SHEET_NONE;
+    int show_it = g_view.hero.rain && !top_covered();
     int inner;
     int fw;
     show(g_w.rain, show_it);
@@ -1360,7 +1738,7 @@ static void apply_tiles(const zk_layout_rects *L)
     int six = L->n_tiles > 4;
     const lv_font_t *nf = six ? &zk_font_lit_20 : &zk_font_lit_26;
     int lines = six ? 2 : 3;
-    int sheet = sheet_kind_of(g_screen) != ZK_SHEET_NONE;
+    int sheet = top_covered();
     g_w.n_tiles = L->n_tiles;
     for (i = 0; i < ZK_MAX_SHOWN; i++) {
         const zk_tile_copy_t *c;
@@ -1370,13 +1748,15 @@ static void apply_tiles(const zk_layout_rects *L)
         int y0;
         int lh;
         int gap = 6;
-        int slot_h = 24;
-        int block;
         int on;
         int un;
-        char fitted[ZK_TITLE_MAX];
+        char wrapped[256];
         int clamped;
+        int nlines;
+        int slot_x;
+        int slot_y;
         int slot_w;
+        int slot_h;
         uint32_t bg;
         uint32_t bd;
         uint32_t nc;
@@ -1414,58 +1794,90 @@ static void apply_tiles(const zk_layout_rects *L)
         text_color(g_w.title_ln[i], nc);
         text_color(g_w.title_rest[i], nc);
         lh = (int)lv_font_get_line_height(nf);
+        slot_x = L->slots[i].x - L->tiles[i].x;
+        slot_y = L->slots[i].y - L->tiles[i].y;
+        slot_w = L->slots[i].w;
+        slot_h = L->slots[i].h;
+        if (slot_w <= 0 || slot_h <= 0) {
+            slot_x = ZK_SLOT_INSET;
+            slot_y = six ? (ZK_SLOT_Y6 - ZK_GRID_Y) : ZK_SLOT_DY4;
+            slot_w = ZK_SLOT_W;
+            slot_h = ZK_SLOT_H;
+        }
+        /* LVGL places children inside the 2 px border. Shift so the slot's
+         * screen rect is the layout slot (tile x+14, 156x24), not after the name. */
+        slot_x -= 2;
+        slot_y -= 2;
+        if (slot_x < 0) {
+            slot_x = 0;
+        }
+        if (slot_y < 0) {
+            slot_y = 0;
+        }
         {
             int first_w = title_w - pad;
             int rest_w = title_w;
-            const char *shown = c->name;
-            wrap_info_t wr;
+            int name_bottom = slot_y - gap;
+            int max_fit;
             int hang;
+            const char *nl;
             if (first_w < 40) {
                 first_w = 40;
             }
-            wr = measure_wrap(shown, nf, first_w, rest_w, lines);
-            clamped = 0;
-            if (wr.overflow || !shown[0]) {
-                int spaced = shown[0] && strchr(shown, ' ') != NULL;
-                clamped = fit_text(fitted, sizeof fitted, shown, nf, 0, first_w, spaced ? lines : 1);
-                shown = fitted;
-                wr = measure_wrap(shown, nf, first_w, rest_w, lines);
+            if (name_bottom < lh) {
+                name_bottom = lh;
             }
-            if (wr.nlines < 1) {
-                wr.nlines = 1;
-            }
-            if (wr.nlines > lines) {
-                wr.nlines = lines;
-            }
-            set_tracked(g_w.title[i], shown, clamped);
-            hang = on && wr.nlines > 1 && wr.line1 > 0 && shown[wr.line1];
-            th = lh * wr.nlines;
-            block = th + gap + slot_h;
-            y0 = (L->tiles[i].h - block) / 2;
-            if (y0 < 8) {
-                y0 = 8;
-            }
-            if (y0 + block > L->tiles[i].h - 6) {
-                th = L->tiles[i].h - 6 - y0 - gap - slot_h;
-                if (th < lh) {
-                    th = lh;
+            {
+                /* Spec clamp: 3 lines (4 stations) or 2 lines (6). A name that
+                 * needs more lines than fit above the slot pushes the slot down,
+                 * as the spec screens do, but never past the tile's inner bottom.
+                 * The shift depends only on the name, so soil on/off never moves it. */
+                const int top_min = 6;
+                int inner_h = L->tiles[i].h - 4;
+                int slot_max = inner_h - slot_h - 4;
+                int room = (slot_max > slot_y ? slot_max : slot_y) - gap - top_min;
+                max_fit = room / lh;
+                if (max_fit < 1) {
+                    max_fit = 1;
+                }
+                if (max_fit > lines) {
+                    max_fit = lines;
+                }
+                clamped = fit_wrapped(wrapped, sizeof wrapped, c->name, nf, first_w, rest_w, max_fit, &nlines);
+                if (nlines < 1) {
+                    nlines = 1;
+                }
+                if (nlines > max_fit) {
+                    nlines = max_fit;
+                }
+                th = lh * nlines;
+                /* Bottom-align against the fixed slot so a one-line name stays put. */
+                y0 = name_bottom - th;
+                if (y0 < top_min) {
+                    int shift = top_min - y0;
+                    y0 = top_min;
+                    slot_y += shift;
+                    if (slot_y > slot_max && slot_max > 0) {
+                        slot_y = slot_max;
+                    }
                 }
             }
+            set_tracked(g_w.title[i], wrapped[0] ? wrapped : " ", clamped);
+            nl = strchr(wrapped, '\n');
+            hang = on && nl && nl[1];
             lv_obj_set_style_pad_left(g_w.title[i], hang ? 0 : pad, 0);
-            lv_obj_set_style_text_opa(g_w.title[i], hang ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
             lv_label_set_long_mode(g_w.title[i], LV_LABEL_LONG_WRAP);
             place(g_w.title[i], 14, y0, title_w, th);
+            show(g_w.title[i], hang ? 0 : 1);
             if (hang) {
                 char line1[ZK_TITLE_MAX];
-                char rest[ZK_TITLE_MAX];
-                copy_span(line1, sizeof line1, shown, wr.line1);
-                rest_with_breaks(rest, sizeof rest, shown + wr.line1, nf, rest_w, lines - 1);
-                lv_label_set_text(g_w.title_ln[i], line1[0] ? line1 : " ");
-                lv_label_set_text(g_w.title_rest[i], rest);
+                copy_span(line1, sizeof line1, wrapped, (uint32_t)(nl - wrapped));
+                set_tracked(g_w.title_ln[i], line1[0] ? line1 : " ", 0);
+                set_tracked(g_w.title_rest[i], nl + 1, clamped);
                 place(g_w.title_ln[i], 14 + pad, y0, first_w, lh);
                 place(g_w.title_rest[i], 14, y0 + lh, rest_w, th > lh ? th - lh : lh);
                 show(g_w.title_ln[i], 1);
-                show(g_w.title_rest[i], rest[0] ? 1 : 0);
+                show(g_w.title_rest[i], 1);
             } else {
                 show(g_w.title_ln[i], 0);
                 show(g_w.title_rest[i], 0);
@@ -1479,11 +1891,7 @@ static void apply_tiles(const zk_layout_rects *L)
             show(g_w.drop[i], 0);
         }
 
-        slot_w = L->tiles[i].w - 20;
-        if (slot_w < title_w) {
-            slot_w = title_w;
-        }
-        place(g_w.slot[i], 14, y0 + th + gap, slot_w, slot_h);
+        place(g_w.slot[i], slot_x, slot_y, slot_w, slot_h);
         show(g_w.slot[i], c->slot[0] ? 1 : 0);
         sc = on ? COL_WHITE : (c->muted_slot || un ? COL_MUTED : COL_TEXT);
         if (c->soil == ZK_SOIL_VALUE && !on) {
@@ -1496,12 +1904,35 @@ static void apply_tiles(const zk_layout_rects *L)
         text_color(g_w.slot_tx[i], sc);
         set_tracked(g_w.slot_tx[i], c->slot, 0);
         if (c->soil == ZK_SOIL_NONE) {
+            int bar_w = 20;
+            int text_gap = 4;
+            int tw = text_width(g_w.slot_tx[i]);
+            int tx;
+            int lw;
+            if (tw < 0) {
+                tw = 0;
+            }
+            /* The words stay fully inside the 156 px slot. Shrink the gap, then the empty bar. */
+            while (bar_w + text_gap + tw > slot_w && text_gap > 0) {
+                text_gap--;
+            }
+            while (bar_w + text_gap + tw > slot_w && bar_w > 0) {
+                bar_w--;
+            }
+            tx = bar_w + text_gap;
+            lw = tw > 0 ? tw : slot_w - tx;
+            if (tx >= slot_w) {
+                tx = 0;
+                lw = slot_w;
+            } else if (lw > slot_w - tx) {
+                lw = slot_w - tx;
+            }
             paint_box(g_w.bar[i], COL_CREAM, on ? COL_WHITE : COL_LINE, 2, 2, LV_BORDER_SIDE_FULL);
             lv_obj_set_style_bg_opa(g_w.bar[i], LV_OPA_TRANSP, 0);
-            place(g_w.bar[i], 0, 7, 20, 10);
-            show(g_w.bar[i], 1);
+            place(g_w.bar[i], 0, 7, bar_w > 0 ? bar_w : 1, 10);
+            show(g_w.bar[i], bar_w > 0);
             show(g_w.fill[i], 0);
-            place(g_w.slot_tx[i], 26, 1, slot_w - 26, 22);
+            place(g_w.slot_tx[i], tx, 3, lw, 18);
         } else if (c->soil == ZK_SOIL_VALUE || c->soil == ZK_SOIL_STALE) {
             int bw = 56;
             int fw = c->percent < 0 ? 0 : c->percent * bw / 100;
@@ -1536,6 +1967,7 @@ static void apply_bar(const zk_layout_rects *L)
     int ih;
     show(g_w.pause, !full);
     show(g_w.stop, !full);
+    show(g_w.sched_btn, !full);
     if (full) {
         return;
     }
@@ -1588,6 +2020,31 @@ static void apply_bar(const zk_layout_rects *L)
     recolor(g_w.stop_ic, fg);
     center_pair(g_w.stop, g_w.stop_ic, 44, 44, g_w.stop_tx, 12);
     clickable(g_w.stop, listed(ZK_TARGET_STOP));
+
+    {
+        int on_list = g_screen == ZK_SCREEN_SCHEDULES;
+        int dim = g_lin.offline && !g_lin.sched_cached && !on_list;
+        const char *word = on_list ? ZK_WORD_HOME : ZK_WORD_SCHEDULES;
+        const void *icon = on_list ? (const void *)&g_back28_dsc : (const void *)&g_cal28_dsc;
+        place(g_w.sched_btn, L->sched.x, L->sched.y, L->sched.w, L->sched.h);
+        if (dim) {
+            bg = COL_DIM;
+            fg = COL_MUTED;
+            bd = COL_DIM;
+        } else {
+            bg = COL_CREAM;
+            fg = COL_INK;
+            bd = COL_LINE;
+        }
+        paint_box(g_w.sched_btn, bg, bd, 2, 16, LV_BORDER_SIDE_FULL);
+        use_font(g_w.sched_tx, &zk_font_r_22, 0);
+        text_color(g_w.sched_tx, fg);
+        set_tracked(g_w.sched_tx, word, 0);
+        lv_image_set_src(g_w.sched_ic, icon);
+        recolor(g_w.sched_ic, fg);
+        stack_pair(g_w.sched_btn, g_w.sched_ic, 28, 28, g_w.sched_tx, 4);
+        clickable(g_w.sched_btn, listed(on_list ? ZK_TARGET_HOME : ZK_TARGET_SCHEDULES));
+    }
 }
 
 static void rel(const zk_rect *sheet, const zk_rect *r, lv_obj_t *o)
@@ -1644,7 +2101,6 @@ static void apply_sheet(const zk_layout_rects *L)
     show(g_w.value_box, run);
     show(g_w.value, run);
     show(g_w.run, run);
-    show(g_w.stop_st, kind == ZK_SHEET_STOP_STATION);
     show(g_w.stop_all, full);
     show(g_w.ok, kind == ZK_SHEET_OVERLAP);
     show(g_w.cancel, kind != ZK_SHEET_OVERLAP);
@@ -1677,13 +2133,6 @@ static void apply_sheet(const zk_layout_rects *L)
     }
     if (kind == ZK_SHEET_STOP_STATION) {
         rel(&L->sheet, &L->cancel, g_w.cancel);
-        rel(&L->sheet, &L->stop_station, g_w.stop_st);
-        paint_box(g_w.stop_st, COL_CREAM, COL_STOP, 2, 16, LV_BORDER_SIDE_FULL);
-        text_color(g_w.stop_st_tx, COL_STOP);
-        set_tracked(g_w.stop_st_tx, ZK_WORD_STOP_STATION, 0);
-        recolor(g_w.stop_st_ic, COL_STOP);
-        center_pair(g_w.stop_st, g_w.stop_st_ic, 30, 30, g_w.stop_st_tx, 8);
-        clickable(g_w.stop_st, listed(ZK_TARGET_STOP_STATION));
     }
     if (full) {
         rel(&L->sheet, &L->cancel, g_w.cancel);
@@ -1715,6 +2164,74 @@ static void apply_sheet(const zk_layout_rects *L)
     }
 }
 
+static void apply_sched(const zk_layout_rects *L)
+{
+    const zk_sched_copy_t *sc = &g_view.sched;
+    int on = g_screen == ZK_SCREEN_SCHEDULES;
+    int i;
+    static const int name_y[2] = {48, 118};
+    static const int meta_y[2] = {88, 158};
+    place(g_w.sched, ZK_SHEET_X, ZK_SHEET_Y, ZK_SHEET_W, ZK_SHEET_H);
+    /* Next is a screen sibling, not a sheet child: the sheet border would inset it by 2 px. */
+    if (L->next.w > 0) {
+        place(g_w.next, L->next.x, L->next.y, L->next.w, L->next.h);
+    }
+    show(g_w.sched, on);
+    if (!on) {
+        show(g_w.next, 0);
+        return;
+    }
+    paint_box(g_w.sched, COL_CREAM, COL_LINE, 2, 16, LV_BORDER_SIDE_FULL);
+    clickable(g_w.sched, 1);
+    use_font(g_w.sc_label, &zk_font_sb_18, 1);
+    text_color(g_w.sc_label, COL_LABEL);
+    set_tracked(g_w.sc_label, sc->label, 0);
+    place(g_w.sc_label, 20, 18, 728, 22);
+    show(g_w.sc_label, 1);
+    for (i = 0; i < 2; i++) {
+        int row = i < sc->n_rows && sc->rows[i].on;
+        show(g_w.sc_name[i], row);
+        show(g_w.sc_meta[i], row);
+        if (!row) {
+            continue;
+        }
+        use_font(g_w.sc_name[i], &zk_font_lit_32, 0);
+        text_color(g_w.sc_name[i], sc->rows[i].enabled ? COL_INK : COL_MUTED);
+        set_tracked(g_w.sc_name[i], sc->rows[i].name, 0);
+        place(g_w.sc_name[i], 20, name_y[i], 728, 36);
+        use_font(g_w.sc_meta[i], &zk_font_r_22, 0);
+        text_color(g_w.sc_meta[i], COL_MUTED);
+        set_tracked(g_w.sc_meta[i], sc->rows[i].meta, 0);
+        place(g_w.sc_meta[i], 20, meta_y[i], 728, 22);
+    }
+    show(g_w.sc_empty, sc->n_rows == 0);
+    show(g_w.sc_empty_body, sc->n_rows == 0);
+    if (sc->n_rows == 0) {
+        use_font(g_w.sc_empty, &zk_font_lit_32, 0);
+        text_color(g_w.sc_empty, COL_INK);
+        set_tracked(g_w.sc_empty, sc->empty_title, 0);
+        place(g_w.sc_empty, 20, 48, 728, 36);
+        use_font(g_w.sc_empty_body, &zk_font_r_22, 0);
+        text_color(g_w.sc_empty_body, COL_MUTED);
+        set_tracked(g_w.sc_empty_body, sc->empty_body, 0);
+        place(g_w.sc_empty_body, 20, 88, 728, 22);
+    }
+    use_font(g_w.sc_note, &zk_font_r_22, 0);
+    text_color(g_w.sc_note, COL_MUTED);
+    set_tracked(g_w.sc_note, sc->note, 0);
+    place(g_w.sc_note, 20, 188, 728, 22);
+    show(g_w.sc_note, 1);
+    show(g_w.next, sc->next_on);
+    if (sc->next_on) {
+        paint_box(g_w.next, COL_CREAM, COL_LINE, 2, 16, LV_BORDER_SIDE_FULL);
+        use_font(g_w.next_tx, &zk_font_m_26, 0);
+        text_color(g_w.next_tx, COL_INK);
+        set_tracked(g_w.next_tx, ZK_WORD_NEXT, 0);
+        center_pair(g_w.next, NULL, 0, 0, g_w.next_tx, 0);
+        clickable(g_w.next, listed(ZK_TARGET_SCHED_NEXT));
+    }
+}
+
 static void sync_hits(void)
 {
     int i;
@@ -1723,11 +2240,13 @@ static void sync_hits(void)
     g_w.hit[ZK_TARGET_PAUSE] = g_w.pause;
     g_w.hit[ZK_TARGET_RESUME] = g_w.pause;
     g_w.hit[ZK_TARGET_STOP] = g_w.stop;
+    g_w.hit[ZK_TARGET_SCHEDULES] = g_w.sched_btn;
+    g_w.hit[ZK_TARGET_HOME] = g_w.sched_btn;
+    g_w.hit[ZK_TARGET_SCHED_NEXT] = g_w.next;
     g_w.hit[ZK_TARGET_MINUS] = g_w.minus;
     g_w.hit[ZK_TARGET_PLUS] = g_w.plus;
     g_w.hit[ZK_TARGET_CANCEL] = g_w.cancel;
     g_w.hit[ZK_TARGET_RUN] = g_w.run;
-    g_w.hit[ZK_TARGET_STOP_STATION] = g_w.stop_st;
     g_w.hit[ZK_TARGET_STOP_ALL] = g_w.stop_all;
     g_w.hit[ZK_TARGET_OK] = g_w.ok;
     for (i = 0; i < ZK_MAX_SHOWN; i++) {
@@ -1740,10 +2259,11 @@ static void build_tree(lv_obj_t *scr)
     int i;
     blit_a8(&zk_icon_stop_oct_84, 44, 44, g_oct44, &g_oct44_dsc);
     blit_a8(&zk_icon_stop_oct_84, 40, 40, g_oct40, &g_oct40_dsc);
-    blit_a8(&zk_icon_stop_oct_84, 30, 30, g_oct30, &g_oct30_dsc);
     blit_a8(&zk_icon_play_44, 30, 30, g_play30, &g_play30_dsc);
     blit_a8(&zk_icon_play_44, 28, 28, g_play28, &g_play28_dsc);
     blit_a8(&zk_icon_drop_30, 22, 22, g_drop22, &g_drop22_dsc);
+    blit_a8(&zk_icon_list_52, 28, 28, g_cal28, &g_cal28_dsc);
+    blit_a8(&zk_icon_back_44, 28, 28, g_back28, &g_back28_dsc);
     build_warn();
     tracks_reset();
 
@@ -1815,6 +2335,47 @@ static void build_tree(lv_obj_t *scr)
     g_w.stop_tx = make_label(g_w.stop, &zk_font_b_36, COL_STOP);
     lv_label_set_long_mode(g_w.stop_tx, LV_LABEL_LONG_CLIP);
 
+    g_w.sched_btn = make_box(scr);
+    listen(g_w.sched_btn);
+    g_w.sched_ic = make_icon(g_w.sched_btn, &g_cal28_dsc);
+    mark_lab("sched_word", 0);
+    g_w.sched_tx = make_label(g_w.sched_btn, &zk_font_r_22, COL_INK);
+    lv_label_set_long_mode(g_w.sched_tx, LV_LABEL_LONG_CLIP);
+
+    g_w.sched = make_box(scr);
+    listen(g_w.sched);
+    mark_lab("sched_label", 0);
+    g_w.sc_label = make_label(g_w.sched, &zk_font_sb_18, COL_LABEL);
+    lv_label_set_long_mode(g_w.sc_label, LV_LABEL_LONG_CLIP);
+    mark_lab("sched_name0", 0);
+    g_w.sc_name[0] = make_label(g_w.sched, &zk_font_lit_32, COL_INK);
+    lv_label_set_long_mode(g_w.sc_name[0], LV_LABEL_LONG_CLIP);
+    mark_lab("sched_meta0", 0);
+    g_w.sc_meta[0] = make_label(g_w.sched, &zk_font_r_22, COL_MUTED);
+    lv_label_set_long_mode(g_w.sc_meta[0], LV_LABEL_LONG_CLIP);
+    mark_lab("sched_name1", 0);
+    g_w.sc_name[1] = make_label(g_w.sched, &zk_font_lit_32, COL_INK);
+    lv_label_set_long_mode(g_w.sc_name[1], LV_LABEL_LONG_CLIP);
+    mark_lab("sched_meta1", 0);
+    g_w.sc_meta[1] = make_label(g_w.sched, &zk_font_r_22, COL_MUTED);
+    lv_label_set_long_mode(g_w.sc_meta[1], LV_LABEL_LONG_CLIP);
+    mark_lab("sched_note", 0);
+    g_w.sc_note = make_label(g_w.sched, &zk_font_r_22, COL_MUTED);
+    lv_label_set_long_mode(g_w.sc_note, LV_LABEL_LONG_CLIP);
+    mark_lab("sched_empty", 0);
+    g_w.sc_empty = make_label(g_w.sched, &zk_font_lit_32, COL_INK);
+    lv_label_set_long_mode(g_w.sc_empty, LV_LABEL_LONG_CLIP);
+    mark_lab("sched_empty_body", 0);
+    g_w.sc_empty_body = make_label(g_w.sched, &zk_font_r_22, COL_MUTED);
+    lv_label_set_long_mode(g_w.sc_empty_body, LV_LABEL_LONG_CLIP);
+    g_w.next = make_box(scr);
+    listen(g_w.next);
+    mark_lab("next_word", 0);
+    g_w.next_tx = make_label(g_w.next, &zk_font_m_26, COL_INK);
+    lv_label_set_long_mode(g_w.next_tx, LV_LABEL_LONG_CLIP);
+    show(g_w.next, 0);
+    show(g_w.sched, 0);
+
     g_w.sheet = make_box(scr);
     listen(g_w.sheet);
     mark_lab("sheet_label", 0);
@@ -1844,10 +2405,6 @@ static void build_tree(lv_obj_t *scr)
     listen(g_w.run);
     g_w.run_ic = make_icon(g_w.run, &g_play28_dsc);
     g_w.run_tx = make_label(g_w.run, &zk_font_sb_26, COL_WHITE);
-    g_w.stop_st = make_box(g_w.sheet);
-    listen(g_w.stop_st);
-    g_w.stop_st_ic = make_icon(g_w.stop_st, &g_oct30_dsc);
-    g_w.stop_st_tx = make_label(g_w.stop_st, &zk_font_sb_26, COL_STOP);
     g_w.stop_all = make_box(g_w.sheet);
     listen(g_w.stop_all);
     g_w.stop_all_ic = make_icon(g_w.stop_all, &g_oct40_dsc);
@@ -1876,6 +2433,7 @@ static void paint(void)
     apply_rain();
     apply_tiles(&L);
     apply_bar(&L);
+    apply_sched(&L);
     apply_sheet(&L);
     sync_hits();
     for (i = 1; i < HIT_N; i++) {
@@ -2001,6 +2559,9 @@ void zk_ui_debug_set_view(int screen, int pressed_target, int pick_chip)
     } else {
         g_screen = ZK_SCREEN_HOME;
     }
+    if (g_screen == ZK_SCREEN_SCHEDULES) {
+        g_sched_i = 0;
+    }
     g_min_key = -999;
 }
 
@@ -2029,9 +2590,9 @@ void zk_ui_tick(void)
     manual = manual_of(&g_snap);
     paused = (g_snap.have_kiosk && g_snap.kiosk.pause.paused) ? 1 : 0;
     maybe_clear_confirmed(unreachable, watering, manual, paused);
-    note_actions(g_snap.version);
+    note_actions(&g_snap);
     advance_stop(&g_snap, unreachable, watering);
-    maybe_retry(g_snap.version);
+    maybe_retry();
     advance_stop(&g_snap, unreachable, watering);
 
     if (g_override >= 0) {
@@ -2061,12 +2622,24 @@ void zk_ui_tick(void)
     vin.station_index = g_station;
     vin.minutes = g_minutes;
     vin.stop_phase = phase;
-    vin.offline_pending = (phase == ZK_STOP_QUEUED || phase == ZK_STOP_WAIT) && unreachable;
+    {
+        /* Retrying after a failed attempt, including a reachable controller
+         * that has not acked within the HTTP timeout. A debug hold of QUEUED
+         * is the same pending hero (slow-ack shot). The first in-flight
+         * attempt while reachable stays on the watering hero. */
+        int retrying = g_stop_hold >= 0 ? g_stop_hold == ZK_STOP_QUEUED
+                                        : (g_stop.phase == ZK_STOP_QUEUED && g_stop.failed);
+        vin.offline_pending = retrying || ((phase == ZK_STOP_QUEUED || phase == ZK_STOP_WAIT) && unreachable);
+    }
     if (g_stop_hold < 0 && g_has_confirmed_at) {
         vin.confirmed_at = g_confirmed_at;
         vin.has_confirmed_at = 1;
     }
     vin.soil_cfg = &g_soil;
+    if (!g_snap.have_schedules || g_snap.schedules.n <= 0 || g_sched_i < 0 || g_sched_i >= g_snap.schedules.n) {
+        g_sched_i = 0;
+    }
+    vin.sched_index = g_sched_i;
     zk_view_build(&src, &vin, &g_view);
 
     memset(&g_lin, 0, sizeof g_lin);
@@ -2075,6 +2648,8 @@ void zk_ui_tick(void)
     g_lin.offline = unreachable;
     g_lin.overlap = g_view.overlap;
     g_lin.minutes = g_minutes;
+    g_lin.sched_cached = g_snap.have_schedules ? 1 : 0;
+    g_lin.n_schedules = g_snap.have_schedules ? g_snap.schedules.n : 0;
     g_paused = paused;
     g_prev_paused = paused;
     g_prev_unreach = unreachable;
@@ -2116,6 +2691,8 @@ void zk_ui_init(lv_display_t *disp, const zk_app_t *app)
     g_override = -1;
     g_pressed = 0;
     g_screen = ZK_SCREEN_HOME;
+    g_under = ZK_SCREEN_HOME;
+    g_sched_i = 0;
     g_station = 0;
     g_minutes = 10;
     g_min_key = -999;

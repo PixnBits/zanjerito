@@ -65,6 +65,9 @@ static void check_targets(enum zk_screen sc, const zk_layout_in *in, const char 
         TCHECK(r.x >= 0 && r.y >= 0 && r.x + r.w <= ZK_SCREEN_W && r.y + r.h <= ZK_SCREEN_H,
                "%s id=%d outside %d,%d %dx%d", tag, (int)t[i].id, r.x, r.y, r.w, r.h);
         TCHECK(short_side(r) >= ZK_MIN_TAP, "%s id=%d short %d", tag, (int)t[i].id, short_side(r));
+        if (sc == ZK_SCREEN_HOME || sc == ZK_SCREEN_SCHEDULES) {
+            TCHECK(short_side(r) >= 96, "%s id=%d short %d < 96", tag, (int)t[i].id, short_side(r));
+        }
         TEQ_I((int)zk_hit_test(t, n, r.x, r.y), (int)t[i].id);
         TEQ_I((int)zk_hit_test(t, n, r.x + r.w - 1, r.y + r.h - 1), (int)t[i].id);
         TEQ_I((int)zk_hit_test(t, n, r.x + r.w, r.y), (int)ZK_TARGET_NONE);
@@ -89,7 +92,7 @@ static void test_every_screen(void)
 {
     static const enum zk_screen screens[] = {
         ZK_SCREEN_HOME,           ZK_SCREEN_SHEET_RUN, ZK_SCREEN_SHEET_ANYWAY,
-        ZK_SCREEN_SHEET_STOP_STATION, ZK_SCREEN_SHEET_STOP_ALL, ZK_SCREEN_SHEET_OVERLAP};
+        ZK_SCREEN_SHEET_STOP_STATION, ZK_SCREEN_SHEET_STOP_ALL, ZK_SCREEN_SHEET_OVERLAP, ZK_SCREEN_SCHEDULES};
     static const int counts[] = {0, 1, 4, 5, 6, 8};
     int s, c, paused, offline, overlap, minutes;
     for (s = 0; s < (int)(sizeof screens / sizeof screens[0]); s++) {
@@ -106,6 +109,8 @@ static void test_every_screen(void)
                             in.offline = offline;
                             in.overlap = overlap;
                             in.minutes = minutes;
+                            in.sched_cached = paused;
+                            in.n_schedules = minutes > 1 ? 3 : 1;
                             snprintf(tag, sizeof tag, "sc=%d n=%d p=%d off=%d ov=%d m=%d", (int)screens[s],
                                      counts[c], paused, offline, overlap, minutes);
                             check_targets(screens[s], &in, tag);
@@ -214,10 +219,16 @@ static void test_bar_and_sheets(void)
     TEQ_I(R.hero.y, 16);
     TEQ_I(R.hero.w, 376);
     TEQ_I(R.hero.h, 332);
-    TEQ_I(R.pause.x, 16);
+    TEQ_I(R.sched.x, 16);
+    TEQ_I(R.sched.y, 360);
+    TEQ_I(R.sched.w, 120);
+    TEQ_I(R.sched.h, 104);
+    TEQ_I(R.pause.x, 148);
     TEQ_I(R.pause.y, 360);
-    TEQ_I(R.pause.w, 376);
+    TEQ_I(R.pause.w, 244);
     TEQ_I(R.pause.h, 104);
+    TEQ_I(R.pause.x - (R.sched.x + R.sched.w), 12);
+    TEQ_I(R.stop.x - (R.pause.x + R.pause.w), 12);
     TEQ_I(R.stop.x, 404);
     TEQ_I(R.stop.y, 360);
     TEQ_I(R.stop.w, 380);
@@ -229,7 +240,9 @@ static void test_bar_and_sheets(void)
 
     n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
     TCHECK(has_id(t, n, ZK_TARGET_PAUSE), "pause");
+    TCHECK(has_id(t, n, ZK_TARGET_SCHEDULES), "schedules");
     TCHECK(has_id(t, n, ZK_TARGET_STOP), "stop");
+    TEQ_I((int)zk_hit_test(t, n, 76, 412), (int)ZK_TARGET_SCHEDULES);
     TCHECK(!has_id(t, n, ZK_TARGET_HERO), "hero is not a target until overlap");
     in.overlap = 1;
     n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
@@ -247,6 +260,13 @@ static void test_bar_and_sheets(void)
     TCHECK(has_id(t, n, ZK_TARGET_STOP), "offline STOP");
     TCHECK(!has_id(t, n, ZK_TARGET_TILE0), "offline tiles are not targets");
     TCHECK(!has_id(t, n, ZK_TARGET_PAUSE), "offline pause is not a target");
+    TCHECK(!has_id(t, n, ZK_TARGET_SCHEDULES), "offline schedules with no cache");
+    in.sched_cached = 1;
+    n = zk_layout_targets(ZK_SCREEN_HOME, &in, t, 32);
+    TCHECK(has_id(t, n, ZK_TARGET_SCHEDULES), "offline schedules when cached");
+    TCHECK(has_id(t, n, ZK_TARGET_STOP), "offline STOP stays");
+    TCHECK(!has_id(t, n, ZK_TARGET_PAUSE), "offline pause stays disabled");
+    in.sched_cached = 0;
 
     in.offline = 0;
     in.minutes = 1;
@@ -282,6 +302,27 @@ static void test_bar_and_sheets(void)
     TEQ_I(R.stop_all.h, 112);
     TEQ_I(R.cancel.h, 112);
 
+    n = zk_layout_targets(ZK_SCREEN_SHEET_STOP_STATION, &in, t, 32);
+    TCHECK(has_id(t, n, ZK_TARGET_CANCEL), "running sheet cancel");
+    TCHECK(has_id(t, n, ZK_TARGET_STOP), "running sheet STOP");
+    TCHECK(!has_id(t, n, ZK_TARGET_STOP_ALL), "running sheet is not stop-all");
+    TCHECK(!has_id(t, n, ZK_TARGET_RUN), "running sheet does not run");
+    TEQ_I((int)zk_hit_test(t, n, 582, 280), (int)ZK_TARGET_NONE);
+    TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_SHEET_STOP_STATION, &in, 594, 412), 1);
+    zk_layout_rects_of(ZK_SCREEN_SHEET_STOP_STATION, &in, &R);
+    TEQ_I(R.sheet.x, 16);
+    TEQ_I(R.sheet.y, 16);
+    TEQ_I(R.sheet.w, 768);
+    TEQ_I(R.sheet.h, 332);
+    TEQ_I(R.cancel.x, 36);
+    TEQ_I(R.cancel.y, 232);
+    TEQ_I(R.cancel.w, 352);
+    TEQ_I(R.cancel.h, 96);
+    TEQ_I(R.sheet_title.x, 36);
+    TEQ_I(R.sheet_title.y, 62);
+    TEQ_I(R.sheet_title.w, 728);
+    TEQ_I(R.sheet_title.h, 80);
+
     in.n_stations = 4;
     TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_HOME, &in, 594, 412), 1);
     TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_HOME, &in, 404, 360), 1);
@@ -292,8 +333,8 @@ static void test_bar_and_sheets(void)
 
 static void test_dimmed_stop_passes(void)
 {
-    static const enum zk_screen screens[] = {ZK_SCREEN_HOME, ZK_SCREEN_SHEET_RUN, ZK_SCREEN_SHEET_STOP_ALL,
-                                              ZK_SCREEN_SHEET_OVERLAP};
+    static const enum zk_screen screens[] = {ZK_SCREEN_HOME, ZK_SCREEN_SHEET_RUN, ZK_SCREEN_SHEET_STOP_STATION,
+                                              ZK_SCREEN_SHEET_STOP_ALL, ZK_SCREEN_SHEET_OVERLAP, ZK_SCREEN_SCHEDULES};
     char absent[64];
     int s;
     snprintf(absent, sizeof absent, "/tmp/zk-layout-power-absent-%d", (int)getpid());
@@ -304,6 +345,7 @@ static void test_dimmed_stop_passes(void)
         memset(&in, 0, sizeof in);
         in.n_stations = 4;
         in.minutes = 6;
+        in.n_schedules = 3;
         if (screens[s] == ZK_SCREEN_HOME && s == 0) {
             in.offline = 0;
         }
@@ -338,11 +380,99 @@ static void test_dimmed_stop_passes(void)
     }
 }
 
+static int same_rect(zk_rect a, zk_rect b)
+{
+    return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+static void test_schedules_layout(void)
+{
+    zk_layout_in in;
+    zk_layout_rects a;
+    zk_layout_rects b;
+    zk_target t[32];
+    int n;
+    memset(&in, 0, sizeof in);
+    in.n_stations = 4;
+    in.n_schedules = 2;
+    zk_layout_rects_of(ZK_SCREEN_SCHEDULES, &in, &a);
+    TEQ_I(a.sheet.x, 16);
+    TEQ_I(a.sheet.y, 16);
+    TEQ_I(a.sheet.w, 768);
+    TEQ_I(a.sheet.h, 332);
+    TEQ_I(a.next.x, 400);
+    TEQ_I(a.next.y, 232);
+    TEQ_I(a.next.w, 364);
+    TEQ_I(a.next.h, 96);
+    TEQ_I(a.hero.x, 16);
+    TEQ_I(a.hero.y, 16);
+    TEQ_I(a.hero.w, 376);
+    TEQ_I(a.hero.h, 332);
+    TEQ_I(a.stop.x, 404);
+    TEQ_I(a.stop.w, 380);
+    TEQ_I(a.stop.h, 104);
+    TEQ_I(a.sched.w, 120);
+    TEQ_I(a.pause.x, 148);
+    TEQ_I(a.pause.w, 244);
+    check_targets(ZK_SCREEN_SCHEDULES, &in, "schedules two");
+    n = zk_layout_targets(ZK_SCREEN_SCHEDULES, &in, t, 32);
+    TCHECK(has_id(t, n, ZK_TARGET_STOP) && has_id(t, n, ZK_TARGET_HOME), "schedules bar");
+    TCHECK(has_id(t, n, ZK_TARGET_PAUSE) && has_id(t, n, ZK_TARGET_SCHED_NEXT), "schedules pause and next");
+    TCHECK(!has_id(t, n, ZK_TARGET_SCHEDULES) && !has_id(t, n, ZK_TARGET_TILE0), "no home entry or tiles");
+    TEQ_I((int)zk_hit_test(t, n, 76, 412), (int)ZK_TARGET_HOME);
+    TEQ_I((int)zk_hit_test(t, n, 582, 280), (int)ZK_TARGET_SCHED_NEXT);
+    TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_SCHEDULES, &in, 594, 412), 1);
+    TEQ_I(zk_layout_hit_is_stop(ZK_SCREEN_SCHEDULES, &in, 76, 412), 0);
+
+    in.n_schedules = 1;
+    n = zk_layout_targets(ZK_SCREEN_SCHEDULES, &in, t, 32);
+    TCHECK(!has_id(t, n, ZK_TARGET_SCHED_NEXT), "one program has no Next");
+    TCHECK(has_id(t, n, ZK_TARGET_HOME) && has_id(t, n, ZK_TARGET_PAUSE), "one program still has the bar");
+
+    in.n_schedules = 2;
+    in.paused = 1;
+    n = zk_layout_targets(ZK_SCREEN_SCHEDULES, &in, t, 32);
+    TCHECK(has_id(t, n, ZK_TARGET_RESUME) && !has_id(t, n, ZK_TARGET_PAUSE), "schedules resume");
+
+    in.paused = 0;
+    in.offline = 1;
+    n = zk_layout_targets(ZK_SCREEN_SCHEDULES, &in, t, 32);
+    TCHECK(has_id(t, n, ZK_TARGET_HOME) && has_id(t, n, ZK_TARGET_STOP), "offline schedules can go home");
+    TCHECK(has_id(t, n, ZK_TARGET_SCHED_NEXT), "offline browse stays live");
+    TCHECK(!has_id(t, n, ZK_TARGET_PAUSE), "offline pause is not a target on the list");
+
+    in.offline = 0;
+    in.n_schedules = 3;
+    in.n_stations = 4;
+    zk_layout_rects_of(ZK_SCREEN_SCHEDULES, &in, &a);
+    in.n_stations = 6;
+    zk_layout_rects_of(ZK_SCREEN_SCHEDULES, &in, &b);
+    TCHECK(same_rect(a.sched, b.sched) && same_rect(a.pause, b.pause) && same_rect(a.stop, b.stop),
+           "station count moves the schedules bar");
+    TCHECK(same_rect(a.sheet, b.sheet) && same_rect(a.next, b.next) && same_rect(a.hero, b.hero),
+           "station count moves the schedules sheet");
+    TEQ_I(a.n_tiles, 4);
+    TEQ_I(b.n_tiles, 6);
+    in.n_stations = 4;
+    zk_layout_rects_of(ZK_SCREEN_HOME, &in, &a);
+    in.n_stations = 6;
+    zk_layout_rects_of(ZK_SCREEN_HOME, &in, &b);
+    TCHECK(same_rect(a.sched, b.sched) && same_rect(a.pause, b.pause) && same_rect(a.stop, b.stop),
+           "station count moves the home bar");
+    TCHECK(same_rect(a.hero, b.hero), "station count moves the hero");
+
+    in.n_stations = 4;
+    in.minutes = 6;
+    n = zk_layout_targets(ZK_SCREEN_SHEET_RUN, &in, t, 32);
+    TCHECK(!has_id(t, n, ZK_TARGET_SCHEDULES) && !has_id(t, n, ZK_TARGET_HOME), "sheet covers schedules");
+}
+
 int main(void)
 {
     test_min_tap_constant();
     test_grids();
     test_bar_and_sheets();
+    test_schedules_layout();
     test_every_screen();
     test_dimmed_stop_passes();
     return zk_test_report("test_layout");

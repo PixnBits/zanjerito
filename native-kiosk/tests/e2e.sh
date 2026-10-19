@@ -28,6 +28,10 @@
 #   y  --fbshot without --fb exits 2
 #   z  padded stride keeps the sentinel and matches an unpadded fbshot
 #   aa bottom rows 474..479 are background, not the old red step strip
+#   ab a running tile tap, the old Stop station point, and Cancel post nothing
+#   ac ack that still shows watering: a second Stop all posts a second cancel
+#   ad a slow ack (longer than the HTTP timeout) shows pending and stays filled
+#   ae Schedules, Stop all, Cancel, Next, and Home send no POST
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -37,7 +41,8 @@ BIN=$ROOT/build/zan-kiosk-host
 STUB=$ROOT/tools/stub_server.py
 FIX=$ROOT/tests/fixtures
 
-# Direction C centers. STOP (404,360 380x104), Pause (16,360 376x104).
+# Direction C centers. STOP (404,360 380x104), Pause (148,360 244x104).
+# Schedules / Home is (16,360 120x104). Next on the schedules list is (400,232 364x96).
 # Tile 0 on the 4-up grid is (404,16 184x160).
 # Stop all sheet: Cancel (40,328 352x112), Stop all (408,328 352x112).
 # Idle hero is not a target. Its center must not open a sheet.
@@ -1329,6 +1334,127 @@ case_z() {
     stride_case 16 RGB565 2 1664 || return 1
 }
 
+# Running tile (600,16 184x160) opens the status sheet. The old Stop station
+# rect (400,232 364x96) is empty. Cancel (36,232 352x96) closes it. No POST.
+case_ab() {
+    local sheet=$TMP/ab-sheet.png ghost=$TMP/ab-ghost.png home=$TMP/ab-home.png
+    local red teal
+    start_stub "$FIX/running" || return 1
+    kiosk 8 \
+        "wait:900;tap:692,96;wait:500;shot:${sheet};tap:582,280;wait:500;shot:${ghost};tap:212,280;wait:500;shot:${home}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "" || return 1
+    [[ -f "$sheet" && -f "$ghost" && -f "$home" ]] || { echo "missing running-sheet shots" >&2; return 1; }
+    if ! cmp -s "$sheet" "$ghost"; then
+        echo "old Stop station point changed the running sheet" >&2
+        return 1
+    fi
+    if cmp -s "$sheet" "$home"; then
+        echo "Cancel did not close the running sheet" >&2
+        return 1
+    fi
+    red=$(nearcount "$sheet" 400 764 232 328 181 54 26 12)
+    if [[ "$red" -ne 0 ]]; then
+        echo "Stop station ink still in the empty slot ($red)" >&2
+        return 1
+    fi
+    teal=$(nearcount "$home" 610 770 30 150 15 110 108 16)
+    if [[ "$teal" -lt 200 ]]; then
+        echo "home after Cancel is not the running screen ($teal)" >&2
+        return 1
+    fi
+}
+
+# Cancel is acknowledged, but the next snapshot still shows watering.
+# The second confirm must post again. STOP stays filled (not "Watering stopped").
+case_ac() {
+    local png=$TMP/ac.png
+    local red n
+    start_stub "$FIX/dc-watering-4" --post-delay 2 --stay-watering || return 1
+    kiosk 16 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:9000;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:1500;shot:${png}" \
+        22 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts $'POST /api/run/cancel\nPOST /api/run/cancel' || return 1
+    [[ -f "$png" ]] || { echo "missing ac shot" >&2; return 1; }
+    red=$(nearcount "$png" 420 500 370 450 181 54 26 12)
+    if [[ "$red" -lt 80 ]]; then
+        echo "STOP is not filled after the second confirm ($red)" >&2
+        return 1
+    fi
+    n=$(python3 "$TMP/png.py" stale "$png")
+    if [[ "$n" -gt 40 ]]; then
+        echo "second confirm is stuck on the pending hero ($n)" >&2
+        return 1
+    fi
+}
+
+# Reachable controller, ack slower than the 5s HTTP timeout. Pending copy, STOP stays filled.
+case_ad() {
+    local png=$TMP/ad.png
+    local red n posts
+    start_stub "$FIX/dc-watering-4" --post-delay 6 --stay-watering || return 1
+    # Exit before the retry itself times out and posts a third cancel.
+    kiosk 10 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:300;tap:${OK_X},${OK_Y};wait:7500;shot:${png}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    posts=$(post_lines | grep -c '^POST /api/run/cancel$' || true)
+    if [[ "$posts" -lt 2 ]]; then
+        echo "slow ack did not retry ($posts POST)" >&2
+        post_lines >&2 || true
+        return 1
+    fi
+    [[ -f "$png" ]] || { echo "missing ad shot" >&2; return 1; }
+    n=$(python3 "$TMP/png.py" stale "$png")
+    if [[ "$n" -lt 80 ]]; then
+        echo "slow ack did not show the pending border ($n)" >&2
+        return 1
+    fi
+    red=$(nearcount "$png" 420 500 370 450 181 54 26 12)
+    if [[ "$red" -lt 80 ]]; then
+        echo "STOP went outline while the stop was still pending ($red)" >&2
+        return 1
+    fi
+}
+
+# Schedules opens the read-only list. STOP still confirms. Cancel returns to the
+# list. Next pages. Home returns. None of those taps POST.
+case_ae() {
+    local sheet=$TMP/ae-sheet.png stop=$TMP/ae-stop.png back=$TMP/ae-back.png home=$TMP/ae-home.png
+    local cream sand red
+    start_stub "$FIX/home-rain" || return 1
+    kiosk 8 \
+        "wait:700;tap:76,412;wait:500;shot:${sheet};tap:${STOP_X},${STOP_Y};wait:400;shot:${stop};tap:${CANCEL_X},${CANCEL_Y};wait:400;shot:${back};tap:582,280;wait:500;tap:76,412;wait:400;shot:${home}" \
+        16 --allow-writes || { show_kiosk_err; return 1; }
+    assert_posts "" || return 1
+    [[ -f "$sheet" && -f "$stop" && -f "$back" && -f "$home" ]] || { echo "missing schedules shots" >&2; return 1; }
+    # Tile gap is sand on Home and covered by the cream list.
+    cream=$(nearcount "$sheet" 588 596 36 44 255 250 238 8)
+    sand=$(nearcount "$sheet" 588 596 36 44 251 236 214 8)
+    if [[ "$cream" -lt 40 || "$sand" -ne 0 ]]; then
+        echo "schedules list did not cover the tile gap (cream $cream sand $sand)" >&2
+        return 1
+    fi
+    # Left fill of Stop all (408,328), above the bar. The outline STOP glyph
+    # sits in the old 500,700,380,420 sample and stays red on the list.
+    red=$(nearcount "$stop" 420 500 332 356 181 54 26 12)
+    if [[ "$red" -lt 1000 ]]; then
+        echo "STOP on the schedules screen did not open Stop all ($red)" >&2
+        return 1
+    fi
+    cream=$(nearcount "$back" 588 596 36 44 255 250 238 8)
+    red=$(nearcount "$back" 420 500 332 356 181 54 26 12)
+    if [[ "$cream" -lt 40 || "$red" -gt 20 ]]; then
+        echo "Cancel did not return to the schedules list (cream $cream red $red)" >&2
+        return 1
+    fi
+    sand=$(nearcount "$home" 588 596 36 44 251 236 214 8)
+    cream=$(nearcount "$home" 588 596 36 44 255 250 238 8)
+    if [[ "$sand" -lt 40 || "$cream" -ne 0 ]]; then
+        echo "Home did not leave the schedules list (sand $sand cream $cream)" >&2
+        return 1
+    fi
+}
+
 # Rows 474..479 sit below the bottom bar (it ends at y=464) and stay page sand.
 case_aa() {
     local fix png fb rc red bg
@@ -1414,6 +1540,10 @@ run_case x case_x
 run_case y case_y
 run_case z case_z
 run_case aa case_aa
+run_case ab case_ab
+run_case ac case_ac
+run_case ad case_ad
+run_case ae case_ae
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

@@ -53,6 +53,7 @@ static pthread_t g_act_th;
 
 static store_t g_snap;
 static uint32_t g_version;
+static uint32_t g_kiosk_gen;
 static int g_wall_seen;
 static zk_wall_t g_wall_pub;
 static int g_stale_seen;
@@ -182,6 +183,7 @@ static void reset_locked(void)
 {
     memset(&g_snap, 0, sizeof g_snap);
     g_version = 0;
+    g_kiosk_gen = 0;
     g_wall_seen = 0;
     memset(&g_wall_pub, 0, sizeof g_wall_pub);
     g_stale_seen = 0;
@@ -216,6 +218,7 @@ static void remember_kiosk(const zk_kiosk_t *k, int64_t mono)
     g_snap.api_state = ZK_API_OK;
     g_snap.status_mono_ms = mono;
     g_snap.have_mono = 1;
+    g_kiosk_gen++;
     if (changed) {
         g_version++;
     }
@@ -868,6 +871,7 @@ void zk_data_get(zk_snapshot_t *out)
     g_stale_pub = out->stale;
     g_stale_seen = 1;
     out->version = g_version;
+    out->kiosk_gen = g_kiosk_gen;
     pthread_mutex_unlock(&g_mu);
 }
 

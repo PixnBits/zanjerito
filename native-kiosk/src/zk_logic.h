@@ -25,6 +25,10 @@ int zk_soil_low(int pct);
 int zk_weekday_matches(unsigned mask, int wday);
 int zk_in_season(const zk_schedule_t *sch, int y, int m, int d);
 
+/* First enabled fire at or after until (a fire equal to until counts).
+ * Scans the schedules already fetched. Returns 1 and writes out, or 0. */
+int zk_next_fire_after(const zk_schedules_t *schedules, zk_wall_t until, zk_wall_t *out);
+
 zk_wall_t zk_morning_cutoff(const zk_schedules_t *schedules, int y, int m, int d);
 int zk_pause_preview(const zk_schedules_t *schedules, zk_wall_t now,
                      zk_pause_kind_t kind, zk_pause_preview_t *out);

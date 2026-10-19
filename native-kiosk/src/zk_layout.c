@@ -114,8 +114,10 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
     sheet = sheet_of(screen);
     out->screen = R(0, 0, ZK_SCREEN_W, ZK_SCREEN_H);
     out->hero = R(ZK_HERO_X, ZK_HERO_Y, ZK_HERO_W, ZK_HERO_H);
+    out->sched = R(ZK_SCHED_X, ZK_BAR_Y, ZK_SCHED_W, ZK_SCHED_H);
     out->pause = R(ZK_PAUSE_X, ZK_BAR_Y, ZK_PAUSE_W, ZK_PAUSE_H);
     out->stop = R(ZK_STOP_X, ZK_BAR_Y, ZK_STOP_W, ZK_STOP_H);
+    out->next = R(ZK_NEXT_X, ZK_NEXT_Y, ZK_NEXT_W, ZK_NEXT_H);
     out->rain = R(ZK_RAIN_X, ZK_RAIN_Y, ZK_RAIN_W, ZK_RAIN_H);
     out->label = R(ZK_LABEL_X, ZK_LABEL_Y, ZK_LABEL_W, ZK_LABEL_H);
     place_tiles(n, out);
@@ -135,10 +137,12 @@ void zk_layout_rects_of(enum zk_screen screen, const zk_layout_in *in, zk_layout
             out->run = R(600, 232, 176, 96);
         } else if (sheet == ZK_SHEET_STOP_STATION) {
             out->cancel = R(36, 232, 352, 96);
-            out->stop_station = R(400, 232, 364, 96);
         } else if (sheet == ZK_SHEET_OVERLAP) {
             out->ok = R(524, 232, 240, 96);
         }
+    }
+    if (screen == ZK_SCREEN_SCHEDULES) {
+        out->sheet = R(ZK_SHEET_X, ZK_SHEET_Y, ZK_SHEET_W, ZK_SHEET_H);
     }
 }
 
@@ -169,6 +173,22 @@ int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target o
     }
     zk_layout_rects_of(screen, in, &L);
     sheet = sheet_of(screen);
+    if (screen == ZK_SCREEN_SCHEDULES) {
+        /* The list covers the hero and tiles. The bar stays live. */
+        n = push(out, n, max, ZK_TARGET_STOP, L.stop, ZK_KIND_BUTTON);
+        n = push(out, n, max, ZK_TARGET_HOME, L.sched, ZK_KIND_BUTTON);
+        if (!in->offline) {
+            if (in->paused) {
+                n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
+            } else {
+                n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
+            }
+        }
+        if (in->n_schedules > 1) {
+            n = push(out, n, max, ZK_TARGET_SCHED_NEXT, L.next, ZK_KIND_BUTTON);
+        }
+        return n;
+    }
     if (sheet == ZK_SHEET_RUN || sheet == ZK_SHEET_ANYWAY) {
         if (in->minutes > 1) {
             n = push(out, n, max, ZK_TARGET_MINUS, L.minus, ZK_KIND_SHEET);
@@ -178,7 +198,6 @@ int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target o
         n = push(out, n, max, ZK_TARGET_RUN, L.run, ZK_KIND_SHEET);
     } else if (sheet == ZK_SHEET_STOP_STATION) {
         n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
-        n = push(out, n, max, ZK_TARGET_STOP_STATION, L.stop_station, ZK_KIND_SHEET);
     } else if (sheet == ZK_SHEET_STOP_ALL) {
         n = push(out, n, max, ZK_TARGET_CANCEL, L.cancel, ZK_KIND_SHEET);
         n = push(out, n, max, ZK_TARGET_STOP_ALL, L.stop_all, ZK_KIND_SHEET);
@@ -201,6 +220,9 @@ int zk_layout_targets(enum zk_screen screen, const zk_layout_in *in, zk_target o
         } else {
             n = push(out, n, max, ZK_TARGET_PAUSE, L.pause, ZK_KIND_BUTTON);
         }
+        n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
+    } else if (sheet == ZK_SHEET_NONE && in->offline && in->sched_cached) {
+        n = push(out, n, max, ZK_TARGET_SCHEDULES, L.sched, ZK_KIND_BUTTON);
     } else if (sheet != ZK_SHEET_NONE && in->paused && !in->offline) {
         n = push(out, n, max, ZK_TARGET_RESUME, L.pause, ZK_KIND_BUTTON);
     }

@@ -23,12 +23,20 @@
 #define ZK_TILE_X0 404
 #define ZK_TILE_X1 600
 #define ZK_BAR_Y 360
-#define ZK_PAUSE_X 16
-#define ZK_PAUSE_W 376
+/* Left bar is split: Schedules | 12 px | Pause. STOP does not move. */
+#define ZK_SCHED_X 16
+#define ZK_SCHED_W 120
+#define ZK_SCHED_H 104
+#define ZK_PAUSE_X 148
+#define ZK_PAUSE_W 244
 #define ZK_PAUSE_H 104
 #define ZK_STOP_X 404
 #define ZK_STOP_W 380
 #define ZK_STOP_H 104
+#define ZK_NEXT_X 400
+#define ZK_NEXT_Y 232
+#define ZK_NEXT_W 364
+#define ZK_NEXT_H 96
 #define ZK_SHEET_X 16
 #define ZK_SHEET_Y 16
 #define ZK_SHEET_W 768
@@ -55,9 +63,10 @@ enum zk_screen {
     ZK_SCREEN_HOME = 0,
     ZK_SCREEN_SHEET_RUN,
     ZK_SCREEN_SHEET_ANYWAY,
-    ZK_SCREEN_SHEET_STOP_STATION,
+    ZK_SCREEN_SHEET_STOP_STATION, /* running tile; no per-station stop */
     ZK_SCREEN_SHEET_STOP_ALL,
-    ZK_SCREEN_SHEET_OVERLAP
+    ZK_SCREEN_SHEET_OVERLAP,
+    ZK_SCREEN_SCHEDULES
 };
 
 enum zk_sheet {
@@ -85,9 +94,11 @@ enum zk_target_id {
     ZK_TARGET_PLUS,
     ZK_TARGET_CANCEL,
     ZK_TARGET_RUN,
-    ZK_TARGET_STOP_STATION,
     ZK_TARGET_STOP_ALL,
-    ZK_TARGET_OK
+    ZK_TARGET_OK,
+    ZK_TARGET_SCHEDULES,
+    ZK_TARGET_HOME,
+    ZK_TARGET_SCHED_NEXT
 };
 
 enum zk_target_kind {
@@ -114,13 +125,17 @@ typedef struct {
     int offline; /* tiles and Pause are not targets */
     int overlap; /* hero opens the read-only sheet */
     int minutes; /* stepper; minus is live only above 1 */
+    int sched_cached; /* a schedules snapshot is already in hand, even if empty */
+    int n_schedules;
 } zk_layout_in;
 
 typedef struct {
     zk_rect screen;
     zk_rect hero;
+    zk_rect sched;
     zk_rect pause;
     zk_rect stop;
+    zk_rect next;
     zk_rect rain;
     zk_rect label;
     zk_rect tiles[ZK_MAX_SHOWN];
@@ -133,7 +148,6 @@ typedef struct {
     zk_rect plus;
     zk_rect cancel;
     zk_rect run;
-    zk_rect stop_station;
     zk_rect stop_all;
     zk_rect ok;
     zk_rect sheet_title;

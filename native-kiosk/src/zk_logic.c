@@ -291,6 +291,63 @@ static void add_days(int y, int m, int d, int n, int *oy, int *om, int *od, int 
     }
 }
 
+int zk_next_fire_after(const zk_schedules_t *schedules, zk_wall_t until, zk_wall_t *out)
+{
+    int offset;
+    int found = 0;
+    zk_wall_t best;
+    int64_t until_sec;
+    if (!out) {
+        return 0;
+    }
+    memset(out, 0, sizeof *out);
+    if (!schedules || schedules->n <= 0) {
+        return 0;
+    }
+    if (until.y < 1) {
+        return 0;
+    }
+    zk_wall_set_wday(&until);
+    until_sec = zk_wall_epoch_sec(until);
+    memset(&best, 0, sizeof best);
+    for (offset = 0; offset < 400; offset++) {
+        int y, m, d, wd;
+        int s;
+        add_days(until.y, until.m, until.d, offset, &y, &m, &d, &wd);
+        for (s = 0; s < schedules->n; s++) {
+            const zk_schedule_t *sch = &schedules->items[s];
+            zk_wall_t at;
+            int64_t sec;
+            if (!sch->enabled || sch->n_steps <= 0 || !sch->has_start) {
+                continue;
+            }
+            if (!zk_weekday_matches(sch->weekdays, wd) || !zk_in_season(sch, y, m, d)) {
+                continue;
+            }
+            memset(&at, 0, sizeof at);
+            at.y = y;
+            at.m = m;
+            at.d = d;
+            at.hh = sch->start_hh;
+            at.mm = sch->start_mm;
+            at.wday = wd;
+            sec = zk_wall_epoch_sec(at);
+            if (sec < until_sec) {
+                continue;
+            }
+            if (!found || sec < zk_wall_epoch_sec(best)) {
+                best = at;
+                found = 1;
+            }
+        }
+        if (found) {
+            *out = best;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 zk_wall_t zk_morning_cutoff(const zk_schedules_t *schedules, int y, int m, int d)
 {
     zk_wall_t w;

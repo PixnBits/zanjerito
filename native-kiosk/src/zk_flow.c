@@ -30,10 +30,6 @@ void zk_flow_tap(enum zk_target_id id, const zk_flow_tile_t *tile, zk_flow_out_t
     case ZK_TARGET_STOP_ALL:
         out->effect = ZK_TAP_SUBMIT_STOP;
         break;
-    case ZK_TARGET_STOP_STATION:
-        /* No endpoint ends one station and continues the program. */
-        out->effect = ZK_TAP_CLOSE;
-        break;
     case ZK_TARGET_PAUSE:
         out->effect = ZK_TAP_SUBMIT_PAUSE;
         break;
@@ -54,6 +50,15 @@ void zk_flow_tap(enum zk_target_id id, const zk_flow_tile_t *tile, zk_flow_out_t
     case ZK_TARGET_PLUS:
         out->effect = ZK_TAP_STEPPER;
         out->minutes_delta = 1;
+        break;
+    case ZK_TARGET_SCHEDULES:
+        out->effect = ZK_TAP_OPEN_SCHEDULES;
+        break;
+    case ZK_TARGET_HOME:
+        out->effect = ZK_TAP_HOME;
+        break;
+    case ZK_TARGET_SCHED_NEXT:
+        out->effect = ZK_TAP_SCHED_NEXT;
         break;
     default:
         break;
@@ -76,11 +81,18 @@ int zk_stop_confirm(zk_stop_flow_t *f)
     if (!f) {
         return 0;
     }
-    if (f->phase == ZK_STOP_QUEUED || f->phase == ZK_STOP_WAIT) {
+    if (f->inflight) {
+        f->again = 1;
+        return 0;
+    }
+    /* A failed attempt is already going to be retried. One POST at a time. */
+    if (f->phase == ZK_STOP_QUEUED) {
         return 0;
     }
     f->phase = ZK_STOP_QUEUED;
     f->inflight = 1;
+    f->again = 0;
+    f->failed = 0;
     return 1;
 }
 
@@ -92,19 +104,35 @@ void zk_stop_http(zk_stop_flow_t *f, int ok)
     f->inflight = 0;
     if (ok) {
         f->phase = ZK_STOP_WAIT;
+        f->failed = 0;
+        return;
     }
+    f->failed = 1;
 }
 
-void zk_stop_snapshot(zk_stop_flow_t *f, zk_stop_snap_t snap)
+int zk_stop_snapshot(zk_stop_flow_t *f, zk_stop_snap_t snap)
 {
     if (!f || f->phase != ZK_STOP_WAIT) {
-        return;
+        return 0;
     }
     if (snap == ZK_STOP_SNAP_STILL_ON) {
-        return;
+        if (f->again) {
+            f->phase = ZK_STOP_QUEUED;
+            f->inflight = 1;
+            f->again = 0;
+            f->failed = 0;
+            return 1;
+        }
+        f->phase = ZK_STOP_IDLE;
+        f->inflight = 0;
+        f->again = 0;
+        return 0;
     }
     f->phase = ZK_STOP_CONFIRMED;
     f->inflight = 0;
+    f->again = 0;
+    f->failed = 0;
+    return 0;
 }
 
 int zk_stop_retry(zk_stop_flow_t *f)

@@ -27,6 +27,7 @@ typedef struct {
     int stale; /* status_age_s > 6 */
     zk_wall_t wall; /* kiosk.now advanced by monotonic delta since that poll (frozen at kiosk.now in fixture mode unless app->live_clock) */
     uint32_t version; /* increments whenever any snapshot content changes or the wall minute/second changes when requested */
+    uint32_t kiosk_gen; /* increments on every successful /api/kiosk parse, including an identical body */
 } zk_snapshot_t;
 
 /* Fixture mode loads kiosk.json + schedules.json once, plus soil.json and

@@ -6,6 +6,8 @@
 #include "zk_copy.h"
 #include "zk_layout.h"
 
+#include "generated/zk_fonts.h"
+
 #include <sys/stat.h>
 
 static int ends_ellipsis(const char *s)
@@ -14,20 +16,52 @@ static int ends_ellipsis(const char *s)
     return n >= 3 && memcmp(s + n - 3, "\xE2\x80\xA6", 3) == 0;
 }
 
+static void strip_breaks(char *dst, size_t cap, const char *s)
+{
+    size_t o = 0;
+    if (!dst || cap == 0) {
+        return;
+    }
+    if (!s) {
+        s = "";
+    }
+    while (*s && o + 1 < cap) {
+        if (*s != '\n') {
+            dst[o++] = *s;
+        }
+        s++;
+    }
+    dst[o] = 0;
+}
+
 static int prefix_ellipsis(const char *shown, const char *full)
 {
+    char flat[ZK_UI_LABEL_TEXT_MAX];
     size_t n;
     size_t fn;
     if (!shown || !full) {
         return 0;
     }
-    n = strlen(shown);
+    strip_breaks(flat, sizeof flat, shown);
+    n = strlen(flat);
     fn = strlen(full);
-    if (n < 3 || memcmp(shown + n - 3, "\xE2\x80\xA6", 3) != 0) {
+    if (n < 3 || memcmp(flat + n - 3, "\xE2\x80\xA6", 3) != 0) {
         return 0;
     }
     n -= 3;
-    return n < fn && memcmp(shown, full, n) == 0;
+    return n < fn && memcmp(flat, full, n) == 0;
+}
+
+static size_t kept_prefix(const char *shown)
+{
+    char flat[ZK_UI_LABEL_TEXT_MAX];
+    size_t n;
+    strip_breaks(flat, sizeof flat, shown);
+    n = strlen(flat);
+    if (n >= 3 && memcmp(flat + n - 3, "\xE2\x80\xA6", 3) == 0) {
+        n -= 3;
+    }
+    return n;
 }
 
 static void make_title(char *dst, int n)
@@ -64,6 +98,9 @@ static int overlaps(const zk_ui_label_box_t *a, const zk_ui_label_box_t *b)
     }
     return 1;
 }
+
+static void assert_hero_clear_of_rain(const zk_ui_label_box_t *b, int n, const char *screen);
+static void assert_slots_fixed(const zk_ui_label_box_t *b, int n, int nstat);
 
 static int inside_parent(const zk_ui_label_box_t *a)
 {
@@ -286,6 +323,7 @@ static void test_home_long(void)
         TCHECK(t != NULL, "missing %s", id);
         if (t) {
             TCHECK(prefix_ellipsis(t->text, full), "%s text %s", id, t->text);
+            TCHECK(kept_prefix(t->text) >= 15, "%s kept %zu of %s", id, kept_prefix(t->text), t->text);
         }
         TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
         TEQ_I(tile.on, 0);
@@ -295,6 +333,7 @@ static void test_home_long(void)
         TEQ_I(tile.drop_visible, 0);
         TEQ_I(tile.title_w, tile.tile_w - 28);
     }
+    assert_slots_fixed(b, n, 4);
 }
 
 static void test_home_onoff(void)
@@ -325,7 +364,9 @@ static void test_home_onoff(void)
         TCHECK(strcmp(label->text, full) == 0 || prefix_ellipsis(label->text, full), "label %s", label->text);
     }
     if (head) {
-        TEQ_S(head->text, ms);
+        char flat[64];
+        strip_breaks(flat, sizeof flat, head->text);
+        TEQ_S(flat, ms);
         TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
     }
     if (time) {
@@ -353,6 +394,78 @@ static void test_home_onoff(void)
         TCHECK(strcmp(b[i].text, "On") != 0 && strcmp(b[i].text, "Off") != 0, "pill text %s", b[i].text);
     }
     check_stop_gap(b, n);
+    assert_hero_clear_of_rain(b, n, "home-onoff");
+}
+
+static int box_hits(const zk_ui_label_box_t *a, int x, int y, int w, int h)
+{
+    if (!a || !a->visible || a->w <= 0 || a->h <= 0 || w <= 0 || h <= 0) {
+        return 0;
+    }
+    if (a->x + a->w <= x || x + w <= a->x) {
+        return 0;
+    }
+    if (a->y + a->h <= y || y + h <= a->y) {
+        return 0;
+    }
+    return 1;
+}
+
+static void assert_hero_clear_of_rain(const zk_ui_label_box_t *b, int n, const char *screen)
+{
+    const zk_ui_label_box_t *head = find_box(b, n, "hero_headline");
+    const zk_ui_label_box_t *time = find_box(b, n, "hero_time");
+    const zk_ui_label_box_t *rain = find_box(b, n, "rain_text");
+    TCHECK(head && time && rain, "%s hero boxes", screen);
+    if (!head || !time || !rain) {
+        return;
+    }
+    TCHECK(head->visible, "%s headline hidden", screen);
+    TCHECK(time->visible, "%s time hidden", screen);
+    TEQ_I(rain->parent_x, ZK_RAIN_X);
+    TEQ_I(rain->parent_y, ZK_RAIN_Y);
+    TEQ_I(rain->parent_w, ZK_RAIN_W);
+    TEQ_I(rain->parent_h, ZK_RAIN_H);
+    TCHECK(!overlaps(head, time), "%s headline overlaps time (%d,%d %dx%d) vs (%d,%d %dx%d)", screen, head->x, head->y,
+           head->w, head->h, time->x, time->y, time->w, time->h);
+    TCHECK(!box_hits(head, rain->parent_x, rain->parent_y, rain->parent_w, rain->parent_h),
+           "%s headline overlaps rain", screen);
+    TCHECK(!box_hits(time, rain->parent_x, rain->parent_y, rain->parent_w, rain->parent_h), "%s time overlaps rain",
+           screen);
+}
+
+static void assert_slots_fixed(const zk_ui_label_box_t *b, int n, int nstat)
+{
+    int i;
+    int shown = nstat > 4 ? 6 : 4;
+    if (nstat < shown) {
+        shown = nstat;
+    }
+    for (i = 0; i < shown; i++) {
+        char id[32];
+        zk_rect r;
+        const zk_ui_label_box_t *slot;
+        snprintf(id, sizeof id, "tile_slot%d", i);
+        zk_layout_slot(nstat > 4 ? 6 : 4, i, &r);
+        slot = find_box(b, n, id);
+        TCHECK(slot != NULL, "slot %d", i);
+        if (!slot) {
+            continue;
+        }
+        TEQ_I(slot->parent_x, r.x);
+        /* The slot sits at its spec rect; a name that needs its extra clamp
+         * lines (spec screens) pushes it down, but never out of the tile. */
+        {
+            int six = nstat > 4;
+            int tile_y = r.y - (six ? (ZK_SLOT_Y6 - ZK_GRID_Y) : ZK_SLOT_DY4);
+            int tile_h = six ? 102 : 160;
+            TCHECK(slot->parent_y >= r.y, "%s y %d above spec %d", id, slot->parent_y, r.y);
+            TCHECK(slot->parent_y + ZK_SLOT_H <= tile_y + tile_h - 2, "%s y %d leaves tile", id, slot->parent_y);
+        }
+        TEQ_I(slot->parent_w, ZK_SLOT_W);
+        TEQ_I(slot->parent_h, ZK_SLOT_H);
+        TCHECK(slot->w <= ZK_SLOT_W, "%s label width %d", id, slot->w);
+    }
 }
 
 static void test_running_long(void)
@@ -382,7 +495,9 @@ static void test_running_long(void)
         TEQ_S(label->text, "WATERING NOW " ZK_MID " MORNING CYCLE");
     }
     if (head) {
-        TEQ_S(head->text, cur);
+        char flat[160];
+        strip_breaks(flat, sizeof flat, head->text);
+        TEQ_S(flat, cur);
         TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
     }
     if (time) {
@@ -499,10 +614,15 @@ static void test_sheets_soil_offline(void)
         slot = find_box(b, n, id);
         TCHECK(slot != NULL, "stale slot %d", i);
         if (slot) {
+            int tw;
             TEQ_S(slot->text, "Rate not measured");
             TCHECK(strstr(slot->text, "0%") == NULL, "stale showed a percent");
+            tw = (int)lv_text_get_width(slot->text, (uint32_t)strlen(slot->text), &zk_font_m_18, 0);
+            TCHECK(tw <= ZK_SLOT_W, "rate width %d", tw);
+            TCHECK(tw <= slot->w, "rate clipped %d in box %d", tw, slot->w);
         }
     }
+    assert_slots_fixed(b, n, 4);
     TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load needs-update");
     zk_data_debug_force_needs_update(1);
     zk_ui_debug_set_view(ZK_SCREEN_HOME, 0, -1);
@@ -521,6 +641,273 @@ static void test_sheets_soil_offline(void)
     zk_data_debug_force_needs_update(0);
 }
 
+static void test_hero_longname(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    const zk_ui_label_box_t *head;
+    const zk_ui_label_box_t *time;
+    const char *full = "North Orchard Drip Line East Bed Zone";
+    char flat[160];
+    TCHECK(load_fix("dc-watering-4-longname", ZK_SCREEN_HOME) == 0, "load longname");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    head = find_box(b, n, "hero_headline");
+    time = find_box(b, n, "hero_time");
+    TCHECK(head && time, "longname labels");
+    if (head) {
+        lv_point_t sz;
+        int th;
+        strip_breaks(flat, sizeof flat, head->text);
+        TEQ_S(flat, full);
+        TCHECK(!ends_ellipsis(head->text), "long headline ellipsized: %s", head->text);
+        /* The box must hold every wrapped line. A short box clips "Zone" into the time. */
+        lv_text_get_size(&sz, head->text, &zk_font_lit_48, 0, 0, head->w, LV_TEXT_FLAG_NONE);
+        th = (int)sz.y;
+        TCHECK(th >= 52 * 3, "long headline is %d px, not 3 lines", th);
+        TCHECK(head->h >= th, "headline box %d clips text %d", head->h, th);
+    }
+    if (time) {
+        TCHECK(strstr(time->text, "min left") != NULL, "time %s", time->text);
+    }
+    {
+        const zk_ui_label_box_t *sub = find_box(b, n, "hero_secondary");
+        if (sub) {
+            TCHECK(!sub->visible, "secondary kept under a 3-line headline");
+        }
+    }
+    assert_hero_clear_of_rain(b, n, "longname");
+}
+
+static void test_running_sheet(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int i;
+    const zk_ui_label_box_t *title;
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *body;
+    const zk_ui_label_box_t *cancel;
+    const zk_ui_label_box_t *stop;
+    TCHECK(load_fix("dc-watering-6", ZK_SCREEN_HOME) == 0, "load dc-watering-6");
+    zk_ui_debug_set_view(ZK_SCREEN_SHEET_STOP_STATION, 0, 2);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    title = find_box(b, n, "sheet_title");
+    label = find_box(b, n, "sheet_label");
+    body = find_box(b, n, "sheet_body");
+    stop = find_box(b, n, "stop_word");
+    TCHECK(title && label && body && stop, "running sheet labels");
+    if (title) {
+        TEQ_S(title->text, "Front Yard Drip Emitters is watering");
+        TCHECK(title->visible, "running title hidden");
+    }
+    if (label) {
+        TEQ_S(label->text, "WATERING NOW " ZK_MID " 2 MIN LEFT");
+    }
+    if (body) {
+        TEQ_S(body->text, "The program goes on with the next station, Beds. Use STOP to end everything.");
+    }
+    if (stop) {
+        TEQ_S(stop->text, "STOP");
+        TCHECK(stop->visible, "STOP hidden on the running sheet");
+    }
+    cancel = NULL;
+    for (i = 0; i < n; i++) {
+        if (!b[i].visible) {
+            continue;
+        }
+        TCHECK(strcmp(b[i].text, "Stop station") != 0, "Stop station still drawn");
+        TCHECK(strstr(b[i].text, "Stop ") != b[i].text, "stop-station title still drawn: %s", b[i].text);
+        if (strcmp(b[i].text, "Cancel") == 0) {
+            cancel = &b[i];
+        }
+    }
+    TCHECK(cancel != NULL, "running sheet Cancel");
+    if (cancel) {
+        TCHECK(cancel->visible, "Cancel hidden");
+    }
+}
+
+static void parent_box(const zk_ui_label_box_t *b, int n, const char *id, int *x, int *y, int *w, int *h)
+{
+    const zk_ui_label_box_t *t = find_box(b, n, id);
+    TCHECK(t != NULL, "missing %s", id);
+    if (!t) {
+        *x = *y = *w = *h = -1;
+        return;
+    }
+    *x = t->parent_x;
+    *y = t->parent_y;
+    *w = t->parent_w;
+    *h = t->parent_h;
+}
+
+static void expect_parent(const zk_ui_label_box_t *b, int n, const char *id, int x, int y, int w, int h)
+{
+    int ax, ay, aw, ah;
+    parent_box(b, n, id, &ax, &ay, &aw, &ah);
+    TCHECK(ax == x && ay == y && aw == w && ah == h, "%s parent %d,%d %dx%d want %d,%d %dx%d", id, ax, ay, aw, ah, x,
+           y, w, h);
+}
+
+static void test_schedules_screen(void)
+{
+    zk_ui_label_box_t four[96];
+    zk_ui_label_box_t six[96];
+    zk_ui_label_box_t rain[96];
+    zk_ui_label_box_t dry[96];
+    zk_ui_label_box_t home[96];
+    int n4;
+    int n6;
+    int nr;
+    int nd;
+    int nh;
+    int i;
+    const char *ids[] = {"sched_word", "pause_word", "stop_word", "sched_label", "next_word", NULL};
+    const zk_ui_label_box_t *t;
+    const zk_ui_label_box_t *hero;
+    TCHECK(load_fix("dc-schedules-4", ZK_SCREEN_HOME) == 0, "load schedules home");
+    nh = grab(home, 96);
+    if (nh < 0) {
+        return;
+    }
+    t = find_box(home, nh, "sched_word");
+    TCHECK(t && t->visible, "home Schedules word");
+    if (t) {
+        TEQ_S(t->text, "Schedules");
+    }
+    t = find_box(home, nh, "pause_word");
+    if (t) {
+        TEQ_S(t->text, "Pause for rain");
+    }
+    expect_parent(home, nh, "sched_word", 16, 360, 120, 104);
+    expect_parent(home, nh, "pause_word", 148, 360, 244, 104);
+    expect_parent(home, nh, "stop_word", 404, 360, 380, 104);
+
+    TCHECK(load_fix("dc-schedules-4", ZK_SCREEN_SCHEDULES) == 0, "load schedules 4");
+    n4 = grab(four, 96);
+    if (n4 < 0) {
+        return;
+    }
+    t = find_box(four, n4, "sched_word");
+    if (t) {
+        TEQ_S(t->text, "Home");
+        TCHECK(t->visible, "Home hidden");
+    }
+    t = find_box(four, n4, "sched_label");
+    if (t) {
+        TEQ_S(t->text, "SCHEDULES " ZK_MID " READ ONLY");
+        TCHECK(t->visible, "schedules label hidden");
+    }
+    t = find_box(four, n4, "sched_name0");
+    if (t) {
+        TEQ_S(t->text, "Lawn " ZK_MID " Morning");
+        TCHECK(t->visible, "first program hidden");
+    }
+    t = find_box(four, n4, "sched_meta0");
+    if (t) {
+        TEQ_S(t->text, "Every day " ZK_MID " 6:10" ZK_NBSP "AM " ZK_MID " 3 steps " ZK_MID " 18 min " ZK_MID " Enabled");
+    }
+    t = find_box(four, n4, "sched_name1");
+    if (t) {
+        TEQ_S(t->text, "Beds " ZK_MID " Every 2 days");
+        TCHECK(t->visible, "second program hidden");
+    }
+    t = find_box(four, n4, "sched_meta1");
+    if (t) {
+        TEQ_S(t->text,
+              "Mon Wed Fri " ZK_MID " 7:00" ZK_NBSP "AM " ZK_MID " 2 steps " ZK_MID " 12 min " ZK_MID " Disabled");
+    }
+    t = find_box(four, n4, "sched_note");
+    if (t) {
+        TEQ_S(t->text, ZK_SCHED_NOTE);
+        TCHECK(t->visible, "fix-on-phone note hidden");
+    }
+    t = find_box(four, n4, "next_word");
+    if (t) {
+        TEQ_S(t->text, "Next");
+        TCHECK(t->visible, "Next hidden");
+    }
+    t = find_box(four, n4, "stop_word");
+    if (t) {
+        TEQ_S(t->text, "STOP");
+        TCHECK(t->visible, "STOP hidden on schedules");
+    }
+    hero = find_box(four, n4, "hero_headline");
+    if (hero) {
+        TCHECK(!hero->visible, "hero still showing on schedules");
+    }
+    expect_parent(four, n4, "sched_word", 16, 360, 120, 104);
+    expect_parent(four, n4, "pause_word", 148, 360, 244, 104);
+    expect_parent(four, n4, "stop_word", 404, 360, 380, 104);
+    expect_parent(four, n4, "sched_label", 16, 16, 768, 332);
+    expect_parent(four, n4, "next_word", 400, 232, 364, 96);
+
+    TCHECK(load_fix("dc-schedules-6", ZK_SCREEN_SCHEDULES) == 0, "load schedules 6");
+    n6 = grab(six, 96);
+    if (n6 < 0) {
+        return;
+    }
+    for (i = 0; ids[i]; i++) {
+        int x1, y1, w1, h1, x2, y2, w2, h2;
+        parent_box(four, n4, ids[i], &x1, &y1, &w1, &h1);
+        parent_box(six, n6, ids[i], &x2, &y2, &w2, &h2);
+        TCHECK(x1 == x2 && y1 == y2 && w1 == w2 && h1 == h2, "%s 4-up vs 6-up %d,%d %dx%d vs %d,%d %dx%d", ids[i], x1,
+               y1, w1, h1, x2, y2, w2, h2);
+    }
+
+    TCHECK(load_fix("home-rain", ZK_SCREEN_SCHEDULES) == 0, "load rain schedules");
+    nr = grab(rain, 96);
+    if (nr < 0) {
+        return;
+    }
+    TCHECK(load_fix("home-nosoil", ZK_SCREEN_SCHEDULES) == 0, "load nosoil schedules");
+    nd = grab(dry, 96);
+    if (nd < 0) {
+        return;
+    }
+    for (i = 0; ids[i]; i++) {
+        int x1, y1, w1, h1, x2, y2, w2, h2;
+        parent_box(rain, nr, ids[i], &x1, &y1, &w1, &h1);
+        parent_box(dry, nd, ids[i], &x2, &y2, &w2, &h2);
+        TCHECK(x1 == x2 && y1 == y2 && w1 == w2 && h1 == h2, "%s soil rect %d,%d %dx%d vs %d,%d %dx%d", ids[i], x1, y1,
+               w1, h1, x2, y2, w2, h2);
+    }
+}
+
+/* Regression: names that fit the spec clamp (3 lines for 4 stations, 2 for 6)
+ * must not be ellipsized because the soil slot is below them. */
+static void test_tile_names_fit_clamp(void)
+{
+    static const struct { const char *fix; int nstat; } cases[] = {{"dc-idle-4", 4}, {"dc-soil-4", 4}, {"dc-idle-6", 6}, {"dc-soil-6", 6}};
+    size_t k;
+    for (k = 0; k < sizeof cases / sizeof cases[0]; k++) {
+        zk_ui_label_box_t b[96];
+        int n;
+        int i;
+        TCHECK(load_fix(cases[k].fix, ZK_SCREEN_HOME) == 0, "load %s", cases[k].fix);
+        n = grab(b, 96);
+        for (i = 0; i < cases[k].nstat; i++) {
+            char id[32];
+            const zk_ui_label_box_t *t;
+            snprintf(id, sizeof id, "tile_title%d", i);
+            t = find_box(b, n, id);
+            if (!t || !t->visible) {
+                continue;
+            }
+            TCHECK(!t->clamped, "%s %s clamped: %s", cases[k].fix, id, t->text);
+            TCHECK(strstr(t->text, "\xE2\x80\xA6") == NULL, "%s %s ellipsis: %s", cases[k].fix, id, t->text);
+        }
+        assert_slots_fixed(b, n, cases[k].nstat);
+    }
+}
+
 int main(void)
 {
     zk_platform_opts_t opts;
@@ -537,9 +924,13 @@ int main(void)
     test_paused_long();
     test_home_long();
     test_home_onoff();
+    test_tile_names_fit_clamp();
+    test_hero_longname();
     test_home_title_width();
     test_running_long();
     test_sheets_soil_offline();
+    test_running_sheet();
+    test_schedules_screen();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");

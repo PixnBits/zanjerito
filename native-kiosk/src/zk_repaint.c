@@ -20,7 +20,8 @@ static const char *k_names[] = {
     "soil_rain",
     "manual",
     "retry_tick",
-    "ack"
+    "ack",
+    "schedules"
 };
 
 const char *zk_repaint_name(zk_repaint_event_t ev)
@@ -67,6 +68,16 @@ static zk_rect pause_r(void)
     r.y = ZK_BAR_Y;
     r.w = ZK_PAUSE_W;
     r.h = ZK_PAUSE_H;
+    return r;
+}
+
+static zk_rect sched_r(void)
+{
+    zk_rect r;
+    r.x = ZK_SCHED_X;
+    r.y = ZK_BAR_Y;
+    r.w = ZK_SCHED_W;
+    r.h = ZK_SCHED_H;
     return r;
 }
 
@@ -180,6 +191,7 @@ int zk_repaint_rects(zk_repaint_event_t ev, const zk_repaint_ctx_t *ctx, zk_rect
             n = push(out, n, max, tile_r(ctx->n_stations, i));
         }
         n = push(out, n, max, pause_r());
+        n = push(out, n, max, sched_r());
         return n;
     case ZK_EVT_SOIL_RAIN:
         for (i = 0; i < shown; i++) {
@@ -215,6 +227,16 @@ int zk_repaint_rects(zk_repaint_event_t ev, const zk_repaint_ctx_t *ctx, zk_rect
         n = push(out, n, max, pause_r());
         n = push(out, n, max, stop_r());
         return n;
+    case ZK_EVT_SCHEDULES: {
+        zk_rect s;
+        s.x = ZK_SHEET_X;
+        s.y = ZK_SHEET_Y;
+        s.w = ZK_SHEET_W;
+        s.h = ZK_SHEET_H;
+        n = push(out, n, max, s);
+        n = push(out, n, max, sched_r());
+        return n;
+    }
     default:
         return 0;
     }

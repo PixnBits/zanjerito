@@ -16,10 +16,16 @@
 #define ZK_PAUSE_BODY "{\"until\":\"tomorrow_morning\",\"reason\":\"rain\"}"
 #define ZK_WORD_PAUSE "Pause for rain"
 #define ZK_WORD_RESUME "Resume"
+#define ZK_WORD_SCHEDULES "Schedules"
+#define ZK_WORD_HOME "Home"
+#define ZK_WORD_NEXT "Next"
+#define ZK_SCHED_NOTE "Fix on phone: Zanjerito " ZK_RQ " Schedules."
+#define ZK_SCHED_EMPTY "Nothing scheduled"
+#define ZK_SCHED_EMPTY_BODY "Add a program on your phone"
+#define ZK_SCHED_READ "SCHEDULES " ZK_MID " READ ONLY"
 #define ZK_WORD_STOP "STOP"
 #define ZK_WORD_CANCEL "Cancel"
 #define ZK_WORD_RUN "Run"
-#define ZK_WORD_STOP_STATION "Stop station"
 #define ZK_WORD_STOP_ALL "Stop all"
 #define ZK_WORD_OK "OK"
 
@@ -78,6 +84,24 @@ typedef struct {
 } zk_sheet_copy_t;
 
 typedef struct {
+    char name[ZK_NOTE_MAX];
+    char meta[192];
+    int enabled;
+    int on;
+} zk_sched_row_t;
+
+typedef struct {
+    char label[80];
+    char note[120];
+    char empty_title[48];
+    char empty_body[64];
+    zk_sched_row_t rows[2];
+    int n_rows;
+    int n_total;
+    int next_on;
+} zk_sched_copy_t;
+
+typedef struct {
     zk_hero_copy_t hero;
     zk_tile_copy_t tiles[ZK_MAX_SHOWN];
     int n_tiles;
@@ -90,6 +114,7 @@ typedef struct {
     int overlap;
     char overlap_title[96];
     char overlap_body[480];
+    zk_sched_copy_t sched;
 } zk_view_t;
 
 typedef int (*zk_width_fn)(const char *text, size_t nbytes, void *user);
@@ -119,6 +144,7 @@ typedef struct {
     int tile_px;
     zk_width_fn width_px;
     void *width_user;
+    int sched_index; /* first program shown; the screen shows two from here */
 } zk_view_in_t;
 
 void zk_fmt_time_nbsp(int hh, int mm, char *out, size_t cap);

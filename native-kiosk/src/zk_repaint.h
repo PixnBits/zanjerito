@@ -22,7 +22,8 @@ typedef enum {
     ZK_EVT_SOIL_RAIN,
     ZK_EVT_MANUAL,
     ZK_EVT_RETRY_TICK,
-    ZK_EVT_ACK
+    ZK_EVT_ACK,
+    ZK_EVT_SCHEDULES
 } zk_repaint_event_t;
 
 typedef struct {

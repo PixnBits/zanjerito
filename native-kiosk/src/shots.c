@@ -28,6 +28,8 @@ static const shot_t k_shots[] = {
     {"dc-idle-4", "C-idle-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-idle-6", "C-idle-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-watering-4", "C-watering-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-watering-4-longname", "C-watering-4-longname.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-watering-4", "C-stop-slow-ack.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_QUEUED},
     {"dc-watering-6", "C-watering-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-paused-4", "C-paused-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-paused-6", "C-paused-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
@@ -41,12 +43,14 @@ static const shot_t k_shots[] = {
     {"dc-stopped", "C-offline-stop-3-stopped.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_CONFIRMED},
     {"dc-idle-6", "S1-confirm-run.png", ZK_SCREEN_SHEET_RUN, 0, 2, 0, 0, -1},
     {"dc-paused-6", "S2-confirm-anyway.png", ZK_SCREEN_SHEET_ANYWAY, 0, 0, 0, 0, -1},
-    {"dc-watering-6", "S3-confirm-stop-station.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 2, 0, 0, -1},
+    {"dc-watering-6", "S3-running-tile.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 2, 0, 0, -1},
     {"dc-watering-6", "S4-confirm-stop-all.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 0, 0, -1},
     {"dc-soil-4", "C-soil-mix-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-soil-6", "C-soil-mix-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-soil-watering-6", "C-soil-watering-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
     {"dc-manual-4", "C-manual-run-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-schedules-4", "C-schedules-4.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1},
+    {"dc-schedules-6", "C-schedules-6.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0, -1},
 };
 
 static int join2(char *dst, size_t cap, const char *a, const char *b)

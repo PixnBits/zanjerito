@@ -3,6 +3,7 @@
 #include "zk_copy.h"
 #include "zk_flow.h"
 #include "zk_layout.h"
+#include "zk_logic.h"
 #include "zk_repaint.h"
 #include "zk_soilcfg.h"
 
@@ -185,11 +186,38 @@ static void test_copy_states(void)
     TEQ_S(v.hero.label, "PAUSED FOR RAIN");
     TEQ_S(v.hero.headline, "Until Sat 6:00" ZK_NBSP "AM");
     TEQ_S(v.hero.secondary, "Tap a station to run it anyway");
+    /* Pause until Sat 6:00; the daily 6:10 fire that day is the next run. */
+    TEQ_S(v.hero.time_line, "Sat 6:10" ZK_NBSP "AM");
+    TCHECK(strstr(v.hero.time_line, "Tomorrow") == NULL, "paused next run is not the skipped fire");
     TEQ_S(v.bar_word, "Resume");
     TEQ_I(v.bar_is_resume, 1);
+    /* Clock is Monday. Pause until Wednesday 6:00, so the next 6:10 is Wednesday,
+     * not the skipped Tuesday fire ("Tomorrow"). */
+    wall_at(&k.now, 2026, 10, 19, 18, 0);
+    wall_at(&k.pause.until, 2026, 10, 21, 6, 0);
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.hero.headline, "Until Wed 6:00" ZK_NBSP "AM");
+    TEQ_S(v.hero.time_line, "Wed 6:10" ZK_NBSP "AM");
+    TCHECK(strstr(v.hero.time_line, "Tomorrow") == NULL, "pause until Wed is not tomorrow");
+    TEQ_S(v.hero.secondary, "Tap a station to run it anyway");
+    {
+        zk_wall_t until;
+        zk_wall_t fire;
+        wall_at(&until, 2026, 10, 21, 6, 10);
+        TEQ_I(zk_next_fire_after(&sc, until, &fire), 1);
+        TEQ_I(fire.d, 21);
+        TEQ_I(fire.hh, 6);
+        TEQ_I(fire.mm, 10);
+        wall_at(&until, 2026, 10, 21, 6, 11);
+        TEQ_I(zk_next_fire_after(&sc, until, &fire), 1);
+        TEQ_I(fire.d, 22);
+        TEQ_I(fire.hh, 6);
+        TEQ_I(fire.mm, 10);
+    }
     k.pause.has_until = 0;
     build(&k, &sc, &in, 0, &v);
     TEQ_S(v.hero.headline, "Until you resume");
+    TEQ_S(v.hero.time_line, "");
 
     /* Nothing scheduled. */
     k.pause.paused = 0;
@@ -222,6 +250,7 @@ static void test_copy_states(void)
     TEQ_S(joined, "Stop not sent yet: can't reach controller. Retrying" "\xE2\x80\xA6" "");
     TEQ_S(v.hero.label, "STOP " ZK_MID " LAST UPDATE 6:42" ZK_NBSP "AM");
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "pending is not stopped");
+    TEQ_I(v.stop_filled, 1);
     TEQ_I(zk_stop_shows_stopped(&(zk_stop_flow_t){.phase = ZK_STOP_QUEUED}), 0);
 
     memset(&in, 0, sizeof in);
@@ -288,8 +317,12 @@ static void test_copy_sheets(void)
     in.station_index = 2;
     build(&k, &sc, &in, 0, &v);
     TEQ_S(v.sheet.label, "WATERING NOW " ZK_MID " 2 MIN LEFT");
-    TEQ_S(v.sheet.title, "Stop Front Yard Drip Emitters?");
+    TEQ_S(v.sheet.title, "Front Yard Drip Emitters is watering");
     TEQ_S(v.sheet.body, "The program goes on with the next station, Beds. Use STOP to end everything.");
+    k.run.next_station[0] = 0;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sheet.title, "Front Yard Drip Emitters is watering");
+    TEQ_S(v.sheet.body, "The program goes on with the next station. Use STOP to end everything.");
 
     in.sheet_kind = ZK_SHEET_STOP_ALL;
     build(&k, &sc, &in, 0, &v);
@@ -353,7 +386,6 @@ static void test_copy_sheets(void)
     TEQ_S(ZK_WORD_CANCEL, "Cancel");
     TEQ_S(ZK_WORD_RUN, "Run");
     TEQ_S(ZK_WORD_STOP, "STOP");
-    TEQ_S(ZK_WORD_STOP_STATION, "Stop station");
     TEQ_S(ZK_WORD_STOP_ALL, "Stop all");
     TEQ_S(ZK_WORD_OK, "OK");
     TEQ_S(ZK_WORD_PAUSE, "Pause for rain");
@@ -407,7 +439,8 @@ static void test_tile_tap_never_runs(void)
         tile.paused = 0;
         tile.tile_on = 1;
         zk_flow_tap((enum zk_target_id)id, &tile, &o);
-        TCHECK(o.effect != ZK_TAP_SUBMIT_RUN, "running tile submitted");
+        TCHECK(o.effect != ZK_TAP_SUBMIT_RUN, "running tile submitted a run");
+        TCHECK(o.effect != ZK_TAP_SUBMIT_STOP, "running tile submitted a stop");
         TEQ_I((int)o.effect, (int)ZK_TAP_OPEN_STOP_STATION);
         tile.tile_on = 0;
     }
@@ -417,10 +450,22 @@ static void test_tile_tap_never_runs(void)
     TEQ_I((int)o.effect, (int)ZK_TAP_OPEN_STOP_ALL);
     zk_flow_tap(ZK_TARGET_STOP_ALL, &tile, &o);
     TEQ_I((int)o.effect, (int)ZK_TAP_SUBMIT_STOP);
-    zk_flow_tap(ZK_TARGET_STOP_STATION, &tile, &o);
+    zk_flow_tap(ZK_TARGET_CANCEL, &tile, &o);
+    TCHECK(o.effect != ZK_TAP_SUBMIT_RUN, "cancel submitted a run");
+    TCHECK(o.effect != ZK_TAP_SUBMIT_STOP, "cancel submitted a stop");
     TEQ_I((int)o.effect, (int)ZK_TAP_CLOSE);
     zk_flow_tap(ZK_TARGET_PAUSE, &tile, &o);
     TEQ_I((int)o.effect, (int)ZK_TAP_SUBMIT_PAUSE);
+    zk_flow_tap(ZK_TARGET_SCHEDULES, &tile, &o);
+    TEQ_I((int)o.effect, (int)ZK_TAP_OPEN_SCHEDULES);
+    TCHECK(o.effect != ZK_TAP_SUBMIT_RUN && o.effect != ZK_TAP_SUBMIT_STOP, "schedules posted");
+    TCHECK(o.effect != ZK_TAP_SUBMIT_PAUSE && o.effect != ZK_TAP_SUBMIT_RESUME, "schedules posted a pause");
+    zk_flow_tap(ZK_TARGET_HOME, &tile, &o);
+    TEQ_I((int)o.effect, (int)ZK_TAP_HOME);
+    TCHECK(o.effect != ZK_TAP_SUBMIT_RUN && o.effect != ZK_TAP_SUBMIT_STOP, "home posted");
+    zk_flow_tap(ZK_TARGET_SCHED_NEXT, &tile, &o);
+    TEQ_I((int)o.effect, (int)ZK_TAP_SCHED_NEXT);
+    TCHECK(o.effect != ZK_TAP_SUBMIT_RUN && o.effect != ZK_TAP_SUBMIT_STOP, "next posted");
     TEQ_I(zk_flow_debounce_ok(0, 1000), 1);
     TEQ_I(zk_flow_debounce_ok(1000, 1299), 0);
     TEQ_I(zk_flow_debounce_ok(1000, 1300), 1);
@@ -450,17 +495,41 @@ static void test_offline_stop_ack(void)
     zk_stop_http(&f, 1);
     TEQ_I((int)f.phase, (int)ZK_STOP_WAIT);
     TEQ_I(zk_stop_shows_stopped(&f), 0);
-    zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON);
+    /* The sequence above confirmed while a request was in flight, so again stays
+     * set. A clean ack whose snapshot still shows water returns to idle, and the
+     * next confirm sends. It does not stay stuck in WAIT. */
+    memset(&f, 0, sizeof f);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    zk_stop_http(&f, 1);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
     TEQ_I(zk_stop_shows_stopped(&f), 0);
+    TEQ_I((int)f.phase, (int)ZK_STOP_IDLE);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    TEQ_I((int)f.phase, (int)ZK_STOP_QUEUED);
+    TEQ_I(f.inflight, 1);
+
+    memset(&f, 0, sizeof f);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    TEQ_I(zk_stop_confirm(&f), 0);
+    TEQ_I(f.again, 1);
+    zk_stop_http(&f, 1);
     TEQ_I((int)f.phase, (int)ZK_STOP_WAIT);
-    zk_stop_snapshot(&f, ZK_STOP_SNAP_CLEAR);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 1);
+    TEQ_I((int)f.phase, (int)ZK_STOP_QUEUED);
+    TEQ_I(f.inflight, 1);
+    TEQ_I(zk_stop_shows_stopped(&f), 0);
+
+    memset(&f, 0, sizeof f);
+    zk_stop_confirm(&f);
+    zk_stop_http(&f, 1);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_CLEAR), 0);
     TEQ_I(zk_stop_shows_stopped(&f), 1);
     TEQ_I((int)f.phase, (int)ZK_STOP_CONFIRMED);
 
     memset(&f, 0, sizeof f);
     zk_stop_confirm(&f);
     zk_stop_http(&f, 1);
-    zk_stop_snapshot(&f, ZK_STOP_SNAP_UNAVAILABLE);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_UNAVAILABLE), 0);
     TEQ_I(zk_stop_shows_stopped(&f), 1);
 
     base_yard(&k, 4);
@@ -480,6 +549,17 @@ static void test_offline_stop_ack(void)
     build(&k, NULL, &in, 0, &v);
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "http ok still watering");
     TEQ_I((int)v.hero.style, (int)ZK_HERO_WATERING);
+    TEQ_I(v.stop_filled, 1);
+
+    /* Reachable, but the stop is retrying: same pending copy, STOP stays filled. */
+    in.stop_phase = ZK_STOP_QUEUED;
+    in.offline_pending = 1;
+    build(&k, NULL, &in, 0, &v);
+    TEQ_S(v.hero.headline, "Stop not sent yet:");
+    TEQ_S(v.hero.secondary, "can't reach controller. Retrying" "\xE2\x80\xA6" "");
+    TEQ_I((int)v.hero.style, (int)ZK_HERO_STOP_PENDING);
+    TEQ_I(v.stop_filled, 1);
+    TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "retry is not stopped");
 }
 
 static void test_soil_never_zero_and_layout(void)
@@ -606,6 +686,113 @@ static void expect_line(zk_repaint_event_t ev, const zk_repaint_ctx_t *ctx, cons
     TEQ_S(buf, want);
 }
 
+static void add_step(zk_schedule_t *s, const char *id, int minutes)
+{
+    if (s->n_steps >= ZK_MAX_STEPS) {
+        return;
+    }
+    zk_str_copy(s->steps[s->n_steps].station_id, ZK_ID_MAX, id);
+    s->steps[s->n_steps].minutes = minutes;
+    s->n_steps++;
+}
+
+static void test_schedules_copy(void)
+{
+    zk_kiosk_t k;
+    zk_schedules_t sc;
+    zk_view_in_t in;
+    zk_view_t v;
+    zk_copy_src_t src;
+    zk_schedule_t *a;
+    zk_schedule_t *b;
+    base_yard(&k, 4);
+    memset(&sc, 0, sizeof sc);
+    a = &sc.items[sc.n++];
+    zk_str_copy(a->id, sizeof a->id, "lawn-morning");
+    zk_str_copy(a->name, sizeof a->name, "Lawn " ZK_MID " Morning");
+    a->enabled = 1;
+    a->has_start = 1;
+    a->start_hh = 6;
+    a->start_mm = 10;
+    a->weekdays = ZK_WD_ALL;
+    add_step(a, "lawn-a", 6);
+    add_step(a, "lawn-b", 6);
+    add_step(a, "beds", 6);
+    b = &sc.items[sc.n++];
+    zk_str_copy(b->id, sizeof b->id, "beds-2d");
+    zk_str_copy(b->name, sizeof b->name, "Beds " ZK_MID " Every 2 days");
+    b->enabled = 0;
+    b->has_start = 1;
+    b->start_hh = 7;
+    b->start_mm = 0;
+    b->weekdays = ZK_WD_MON | ZK_WD_WED | ZK_WD_FRI;
+    add_step(b, "beds", 8);
+    add_step(b, "drip", 4);
+    memset(&in, 0, sizeof in);
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sched.label, ZK_SCHED_READ);
+    TEQ_I(v.sched.n_rows, 2);
+    TEQ_I(v.sched.n_total, 2);
+    TEQ_I(v.sched.next_on, 1);
+    TEQ_S(v.sched.rows[0].name, "Lawn " ZK_MID " Morning");
+    TEQ_I(v.sched.rows[0].enabled, 1);
+    TEQ_S(v.sched.rows[0].meta,
+          "Every day " ZK_MID " 6:10" ZK_NBSP "AM " ZK_MID " 3 steps " ZK_MID " 18 min " ZK_MID " Enabled");
+    TEQ_S(v.sched.rows[1].name, "Beds " ZK_MID " Every 2 days");
+    TEQ_I(v.sched.rows[1].enabled, 0);
+    TEQ_S(v.sched.rows[1].meta,
+          "Mon Wed Fri " ZK_MID " 7:00" ZK_NBSP "AM " ZK_MID " 2 steps " ZK_MID " 12 min " ZK_MID " Disabled");
+    TEQ_S(v.sched.note, ZK_SCHED_NOTE);
+    TEQ_S(v.sched.empty_title, ZK_SCHED_EMPTY);
+    TEQ_S(v.sched.empty_body, ZK_SCHED_EMPTY_BODY);
+
+    in.sched_index = 1;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_I(v.sched.n_rows, 1);
+    TEQ_S(v.sched.rows[0].name, "Beds " ZK_MID " Every 2 days");
+    TEQ_I(v.sched.rows[1].on, 0);
+    TEQ_I(v.sched.next_on, 1);
+
+    a->weekdays = ZK_WD_MON | ZK_WD_TUE | ZK_WD_WED | ZK_WD_THU | ZK_WD_FRI;
+    a->n_steps = 1;
+    a->steps[0].minutes = 6;
+    in.sched_index = 0;
+    sc.n = 1;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sched.rows[0].meta, "Weekdays " ZK_MID " 6:10" ZK_NBSP "AM " ZK_MID " 1 step " ZK_MID " 6 min " ZK_MID " Enabled");
+    TEQ_I(v.sched.next_on, 0);
+
+    a->weekdays = ZK_WD_SAT | ZK_WD_SUN;
+    a->has_start = 0;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sched.rows[0].meta, "Weekends " ZK_MID " No start " ZK_MID " 1 step " ZK_MID " 6 min " ZK_MID " Enabled");
+
+    a->name[0] = 0;
+    zk_str_copy(a->note, sizeof a->note, "From note");
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sched.rows[0].name, "From note");
+    a->note[0] = 0;
+    build(&k, &sc, &in, 0, &v);
+    TEQ_S(v.sched.rows[0].name, "lawn-morning");
+
+    memset(&src, 0, sizeof src);
+    memset(&sc, 0, sizeof sc);
+    memset(&in, 0, sizeof in);
+    src.kiosk = &k;
+    src.have_kiosk = 1;
+    src.schedules = &sc;
+    src.have_schedules = 1;
+    src.wall = k.now;
+    zk_view_build(&src, &in, &v);
+    TEQ_I(v.sched.n_rows, 0);
+    TEQ_I(v.sched.next_on, 0);
+    TEQ_S(v.sched.label, ZK_SCHED_READ);
+    TEQ_S(v.sched.empty_title, ZK_SCHED_EMPTY);
+    src.unreachable = 1;
+    zk_view_build(&src, &in, &v);
+    TEQ_S(v.sched.label, "SCHEDULES " ZK_MID " LAST UPDATE 6:00" ZK_NBSP "PM");
+}
+
 static void test_dirty_rects(void)
 {
     zk_repaint_ctx_t ctx;
@@ -625,8 +812,9 @@ static void test_dirty_rects(void)
                 "dirty event=next_station rects=16,16,376x332;404,130,184x102;600,130,184x102\n");
     expect_line(ZK_EVT_IDLE_WATER, &ctx, "dirty event=idle_water rects=16,16,376x332;404,130,184x102;404,360,380x104\n");
     expect_line(ZK_EVT_MANUAL, &ctx, "dirty event=manual rects=16,16,376x332;404,130,184x102;404,360,380x104\n");
-    expect_line(ZK_EVT_PAUSE_RESUME, &ctx, "dirty event=pause_resume rects=16,16,376x332;16,360,376x104\n");
+    expect_line(ZK_EVT_PAUSE_RESUME, &ctx, "dirty event=pause_resume rects=16,16,376x332;148,360,244x104\n");
     expect_line(ZK_EVT_OVERLAP, &ctx, "dirty event=overlap rects=16,16,376x332\n");
+    /* Run, anyway, running tile, and overlap open and close share this rect. */
     expect_line(ZK_EVT_SHEET, &ctx, "dirty event=sheet rects=16,16,768x332\n");
     ctx.stepper_cross = 1;
     expect_line(ZK_EVT_STEPPER, &ctx, "dirty event=stepper rects=144,232,132x96;36,62,728x80;36,232,96x96\n");
@@ -634,14 +822,15 @@ static void test_dirty_rects(void)
     expect_line(ZK_EVT_STEPPER, &ctx, "dirty event=stepper rects=144,232,132x96;36,62,728x80\n");
     expect_line(ZK_EVT_CONTROLLER_LOST, &ctx,
                 "dirty event=controller_lost rects=16,16,376x332;404,16,184x102;600,16,184x102;404,130,184x102;"
-                "600,130,184x102;404,244,184x102;600,244,184x102;16,360,376x104\n");
+                "600,130,184x102;404,244,184x102;600,244,184x102;148,360,244x104;16,360,120x104\n");
     ctx.soil_mask = 1u << 4;
     ctx.rain = 1;
     expect_line(ZK_EVT_SOIL_RAIN, &ctx, "dirty event=soil_rain rects=418,297,156x24;40,264,328x64\n");
     expect_line(ZK_EVT_RETRY_TICK, &ctx, "dirty event=retry_tick rects=38,34,332x44\n");
     expect_line(ZK_EVT_ACK, &ctx,
                 "dirty event=ack rects=16,16,376x332;404,16,184x102;600,16,184x102;404,130,184x102;600,130,184x102;"
-                "404,244,184x102;600,244,184x102;16,360,376x104;404,360,380x104\n");
+                "404,244,184x102;600,244,184x102;148,360,244x104;404,360,380x104\n");
+    expect_line(ZK_EVT_SCHEDULES, &ctx, "dirty event=schedules rects=16,16,768x332;16,360,120x104\n");
 
     /* 4-up running tile is the tall cell. */
     ctx.n_stations = 4;
@@ -657,6 +846,7 @@ int main(void)
     test_copy_sheets();
     test_label_clamp_headline_intact();
     test_tile_tap_never_runs();
+    test_schedules_copy();
     test_offline_stop_ack();
     test_soil_never_zero_and_layout();
     test_dirty_rects();

@@ -610,6 +610,143 @@ static void upper_label(char *dst, size_t cap, const char *prefix, const char *n
     snprintf(dst, cap, "%s%s", prefix, up);
 }
 
+static void sched_days(unsigned m, char *out, size_t cap)
+{
+    static const char *wd[7] = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
+    static const unsigned bit[7] = {ZK_WD_MON, ZK_WD_TUE, ZK_WD_WED, ZK_WD_THU, ZK_WD_FRI, ZK_WD_SAT, ZK_WD_SUN};
+    unsigned known;
+    size_t pos = 0;
+    int i;
+    int n = 0;
+    if (!out || cap == 0) {
+        return;
+    }
+    out[0] = 0;
+    known = m & ZK_WD_ALL;
+    if (m == 0 || known == ZK_WD_ALL) {
+        zk_str_copy(out, cap, "Every day");
+        return;
+    }
+    if (known == (ZK_WD_MON | ZK_WD_TUE | ZK_WD_WED | ZK_WD_THU | ZK_WD_FRI)) {
+        zk_str_copy(out, cap, "Weekdays");
+        return;
+    }
+    if (known == (ZK_WD_SAT | ZK_WD_SUN)) {
+        zk_str_copy(out, cap, "Weekends");
+        return;
+    }
+    for (i = 0; i < 7; i++) {
+        int wr;
+        if ((known & bit[i]) == 0) {
+            continue;
+        }
+        wr = snprintf(out + pos, cap - pos, "%s%s", n ? " " : "", wd[i]);
+        if (wr < 0 || (size_t)wr >= cap - pos) {
+            out[cap - 1] = 0;
+            return;
+        }
+        pos += (size_t)wr;
+        n++;
+    }
+    if (!out[0]) {
+        zk_str_copy(out, cap, "Every day");
+    }
+}
+
+static void sched_disp_name(const zk_schedule_t *sch, char *out, size_t cap)
+{
+    char tmp[ZK_NOTE_MAX];
+    zk_str_trim_copy(tmp, sizeof tmp, sch->name);
+    if (!tmp[0]) {
+        zk_str_trim_copy(tmp, sizeof tmp, sch->note);
+    }
+    if (!tmp[0]) {
+        zk_str_trim_copy(tmp, sizeof tmp, sch->id);
+    }
+    zk_str_copy(out, cap, tmp);
+}
+
+static void fill_sched_row(const zk_schedule_t *sch, zk_sched_row_t *row)
+{
+    char days[64];
+    char clk[24];
+    const char *when;
+    int steps;
+    int mins = 0;
+    int i;
+    sched_disp_name(sch, row->name, sizeof row->name);
+    sched_days(sch->weekdays, days, sizeof days);
+    if (sch->has_start) {
+        zk_fmt_time_nbsp(sch->start_hh, sch->start_mm, clk, sizeof clk);
+        when = clk;
+    } else {
+        when = "No start";
+    }
+    steps = sch->n_steps;
+    if (steps < 0) {
+        steps = 0;
+    }
+    if (steps > ZK_MAX_STEPS) {
+        steps = ZK_MAX_STEPS;
+    }
+    for (i = 0; i < steps; i++) {
+        if (sch->steps[i].minutes > 0) {
+            mins += sch->steps[i].minutes;
+        }
+    }
+    snprintf(row->meta, sizeof row->meta, "%s " ZK_MID " %s " ZK_MID " %d %s " ZK_MID " %d min " ZK_MID " %s", days, when,
+             steps, steps == 1 ? "step" : "steps", mins, sch->enabled ? "Enabled" : "Disabled");
+    row->enabled = sch->enabled ? 1 : 0;
+    row->on = 1;
+}
+
+static void fill_sched(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *out)
+{
+    const zk_schedules_t *sc;
+    zk_wall_t wall;
+    char clk[24];
+    int n;
+    int start;
+    int i;
+    zk_str_copy(out->sched.note, sizeof out->sched.note, ZK_SCHED_NOTE);
+    zk_str_copy(out->sched.empty_title, sizeof out->sched.empty_title, ZK_SCHED_EMPTY);
+    zk_str_copy(out->sched.empty_body, sizeof out->sched.empty_body, ZK_SCHED_EMPTY_BODY);
+    if (src->unreachable) {
+        if (src->have_kiosk && src->kiosk && src->kiosk->has_now) {
+            wall = src->kiosk->now;
+        } else {
+            wall = src->wall;
+        }
+        zk_fmt_time_nbsp(wall.hh, wall.mm, clk, sizeof clk);
+        snprintf(out->sched.label, sizeof out->sched.label, "SCHEDULES " ZK_MID " LAST UPDATE %s", clk);
+    } else {
+        zk_str_copy(out->sched.label, sizeof out->sched.label, ZK_SCHED_READ);
+    }
+    sc = (src->have_schedules && src->schedules) ? src->schedules : NULL;
+    n = sc ? sc->n : 0;
+    if (n < 0) {
+        n = 0;
+    }
+    if (n > ZK_MAX_SCHEDULES) {
+        n = ZK_MAX_SCHEDULES;
+    }
+    start = in->sched_index;
+    if (start < 0 || start >= n) {
+        start = 0;
+    }
+    out->sched.n_total = n;
+    out->sched.next_on = n > 1 ? 1 : 0;
+    out->sched.n_rows = 0;
+    for (i = 0; i < 2; i++) {
+        int idx = start + i;
+        if (!sc || idx >= n) {
+            continue;
+        }
+        fill_sched_row(&sc->items[idx], &out->sched.rows[i]);
+        out->sched.n_rows++;
+    }
+}
+
 void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *out)
 {
     zk_copy_src_t empty_src;
@@ -724,6 +861,12 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
     } else if (paused) {
         zk_str_copy(out->hero.label, sizeof out->hero.label, "PAUSED FOR RAIN");
         until_text(&k->pause, out->hero.headline, sizeof out->hero.headline);
+        if (k->pause.has_until && src->have_schedules && src->schedules) {
+            zk_wall_t fire;
+            if (zk_next_fire_after(src->schedules, k->pause.until, &fire)) {
+                when_nbsp(fire, src->wall, out->hero.time_line, sizeof out->hero.time_line);
+            }
+        }
         zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Tap a station to run it anyway");
         out->hero.style = ZK_HERO_PAUSED;
     } else if (!k || !k->has_next_run) {
@@ -805,7 +948,9 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
     out->bar_disabled = offline ? 1 : 0;
     out->bar_is_resume = paused ? 1 : 0;
     zk_str_copy(out->bar_word, sizeof out->bar_word, paused ? ZK_WORD_RESUME : ZK_WORD_PAUSE);
-    out->stop_filled = (watering || manual) && !confirmed && !pending ? 1 : 0;
+    /* Filled while water is on, and while a stop is still unacknowledged.
+     * Outline only after the controller acks and nothing is on. */
+    out->stop_filled = (pending || ((watering || manual) && !confirmed)) ? 1 : 0;
 
     out->sheet_kind = in->sheet_kind;
     if (in->sheet_kind == ZK_SHEET_RUN || in->sheet_kind == ZK_SHEET_ANYWAY) {
@@ -852,7 +997,7 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
         const char *next = (k && k->has_run) ? station_title_id(k, k->run.next_station) : "";
         int left = (k && k->has_run) ? ceil_min(k->run.step_remaining_sec) : 0;
         snprintf(out->sheet.label, sizeof out->sheet.label, "WATERING NOW " ZK_MID " %d MIN LEFT", left);
-        snprintf(out->sheet.title, sizeof out->sheet.title, "Stop %s?", st ? st->title : "");
+        snprintf(out->sheet.title, sizeof out->sheet.title, "%s is watering", st ? st->title : "");
         if (next[0]) {
             snprintf(out->sheet.body, sizeof out->sheet.body,
                      "The program goes on with the next station, %s. Use STOP to end everything.", next);
@@ -893,4 +1038,5 @@ void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *
                     out->overlap_title[0] ? out->overlap_title : "Two programs overlap");
         zk_str_copy(out->sheet.body, sizeof out->sheet.body, out->overlap_body);
     }
+    fill_sched(src, in, out);
 }
