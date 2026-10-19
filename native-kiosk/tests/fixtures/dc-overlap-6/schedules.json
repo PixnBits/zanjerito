@@ -1,0 +1,34 @@
+{
+ "schedules": [
+  {
+   "enabled": true,
+   "id": "front-summer",
+   "name": "Front Summer",
+   "start": "06:10",
+   "steps": [
+    {
+     "minutes": 30,
+     "station_id": "lawn-a"
+    }
+   ],
+   "weekdays": [
+    "tue"
+   ]
+  },
+  {
+   "enabled": true,
+   "id": "drip-year",
+   "name": "Drip \u00b7 All year",
+   "start": "06:30",
+   "steps": [
+    {
+     "minutes": 20,
+     "station_id": "drip"
+    }
+   ],
+   "weekdays": [
+    "tue"
+   ]
+  }
+ ]
+}

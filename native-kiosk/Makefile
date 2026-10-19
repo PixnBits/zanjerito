@@ -1,5 +1,5 @@
 # Core sources (reused by later UI / cross-compile targets).
-SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c src/zk_console.c src/zk_power.c src/zk_boot.c
+SRC_CORE = src/zk_model.c src/zk_logic.c src/zk_layout.c src/zk_http.c src/zk_actions.c src/zk_text.c src/zk_console.c src/zk_power.c src/zk_boot.c src/zk_flow.c src/zk_repaint.c src/zk_soilcfg.c src/zk_extra.c src/zk_copy.c
 SRC_DATA = src/data.c
 CJSON = third_party/cJSON/cJSON.c
 
@@ -10,7 +10,7 @@ BUILD = build
 
 SANITIZE := $(shell printf 'int main(void){return 0;}\n' | $(CC) -fsanitize=address,undefined -x c -o /dev/null - >/dev/null 2>&1 && echo -fsanitize=address,undefined)
 
-TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text $(BUILD)/test_power $(BUILD)/test_boot $(BUILD)/test_fb
+TEST_BINS = $(BUILD)/test_json $(BUILD)/test_logic $(BUILD)/test_layout $(BUILD)/test_flow $(BUILD)/test_http $(BUILD)/test_data $(BUILD)/test_stop_latency $(BUILD)/test_text $(BUILD)/test_ui_text $(BUILD)/test_power $(BUILD)/test_boot $(BUILD)/test_fb
 
 HOST_CC := gcc
 ARM_CC ?= arm-linux-gnueabihf-gcc
@@ -57,6 +57,7 @@ test: $(TEST_BINS)
 	$(BUILD)/test_json
 	$(BUILD)/test_logic
 	$(BUILD)/test_layout
+	$(BUILD)/test_flow
 	$(BUILD)/test_http
 	$(BUILD)/test_data
 	$(BUILD)/test_stop_latency
@@ -77,6 +78,9 @@ $(BUILD)/test_logic: tests/test_logic.c $(SRC_CORE) $(CJSON) | $(BUILD)
 
 $(BUILD)/test_layout: tests/test_layout.c $(SRC_CORE) $(CJSON) | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_layout.c $(SRC_CORE) $(CJSON)
+
+$(BUILD)/test_flow: tests/test_flow.c $(SRC_CORE) $(CJSON) | $(BUILD)
+	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -o $@ tests/test_flow.c $(SRC_CORE) $(CJSON)
 
 $(BUILD)/test_http: tests/test_http.c $(SRC_CORE) $(CJSON) | $(BUILD)
 	$(CC) $(CFLAGS) $(SANITIZE) $(INCLUDES) -g -pthread -o $@ tests/test_http.c $(SRC_CORE) $(CJSON)

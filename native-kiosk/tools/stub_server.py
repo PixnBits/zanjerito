@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 GET_MAP = {
     "/api/kiosk": "kiosk.json",
     "/api/schedules": "schedules.json",
+    "/api/soil": "soil.json",
+    "/api/history": "history.json",
 }
 
 
@@ -64,7 +66,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
             return
-        name = GET_MAP.get(self.path)
+        name = GET_MAP.get(self.path.split("?", 1)[0])
         if not name:
             self.send_error(404)
             return

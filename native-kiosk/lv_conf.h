@@ -141,7 +141,8 @@
 #define LV_USE_FONT_PLACEHOLDER 1
 
 #define LV_TXT_ENC LV_TXT_ENC_UTF8
-#define LV_TXT_BREAK_CHARS " ,.;:-_)]}"
+/* Colon is not a break. Clock times ("6:10 AM") stay one token; NBSP holds AM/PM. */
+#define LV_TXT_BREAK_CHARS " ,.;-_)]}"
 #define LV_TXT_LINE_BREAK_LONG_LEN 0
 #define LV_TXT_LINE_BREAK_LONG_PRE_MIN_LEN 3
 #define LV_TXT_LINE_BREAK_LONG_POST_MIN_LEN 3

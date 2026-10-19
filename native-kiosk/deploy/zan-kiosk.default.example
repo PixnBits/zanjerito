@@ -43,3 +43,14 @@ ZAN_OFF_AFTER_SEC=600
 
 # Extra client arguments, split on spaces. No embedded spaces.
 # ZAN_EXTRA_ARGS=
+
+# Soil words on a station tile. Display only. They do not change watering.
+# Dry when the percent is below ZAN_SOIL_DRY_LT, Wet when it is above
+# ZAN_SOIL_WET_GT, otherwise OK. Defaults are 30 and 80.
+# These two variables override the global cuts only.
+# ZAN_SOIL_DRY_LT=30
+# ZAN_SOIL_WET_GT=80
+# Optional JSON file for per-station cuts. If unset, the client reads
+# /etc/zan-kiosk-soil.json when that file exists.
+# {"dry_lt":30,"wet_gt":80,"stations":{"lawn-a":{"dry_lt":25,"wet_gt":75}}}
+# ZAN_SOIL_THRESHOLDS=/etc/zan-kiosk-soil.json

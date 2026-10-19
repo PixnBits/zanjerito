@@ -3,6 +3,7 @@
 #include "data.h"
 #include "platform.h"
 #include "ui.h"
+#include "zk_flow.h"
 #include "zk_layout.h"
 
 #include <errno.h>
@@ -19,34 +20,33 @@ typedef struct {
     int chip;
     int stale;
     int needs_update;
+    int stop_phase; /* -1 clears the hold */
 } shot_t;
 
+/* Direction C names from the handoff. Example fixtures only. */
 static const shot_t k_shots[] = {
-    {"home-rain", "01-home-idle-rain.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-norain", "01b-home-idle-no-rain.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-nosoil", "01c-home-no-soil.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-stale", "01d-home-soil-stale.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"home-fault", "01e-home-fault.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"running", "02-running.png", ZK_SCREEN_RUNNING, 0, -1, 0, 0},
-    {"paused-rain", "03-paused-rain.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
-    {"paused-manual", "03b-paused-manual.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
-    {"home-rain", "04-pause-picker.png", ZK_SCREEN_PICKER, 0, -1, 0, 0},
-    {"home-rain", "05-schedules.png", ZK_SCREEN_SCHEDULES, 0, -1, 0, 0},
-    {"home-rain", "06-confirm-stop.png", ZK_SCREEN_CONFIRM_STOP, 0, -1, 0, 0},
-    {"home-rain", "07-confirm-pause.png", ZK_SCREEN_CONFIRM_PAUSE, 0, 0, 0, 0},
-    {"home-rain", "08-home-stop-pressed.png", ZK_SCREEN_HOME, ZK_TARGET_STOP, -1, 0, 0},
-    {"home-rain", "09-offline.png", ZK_SCREEN_HOME, 0, -1, 1, 0},
-    {"paused-long", "03c-paused-long-reason.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0},
-    {"home-longnames", "01f-home-long-names.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"running-long", "02b-running-long.png", ZK_SCREEN_RUNNING, 0, -1, 0, 0},
-    {"home-rain", "10-station-sheet-soil.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
-    {"home-stale", "10b-station-sheet-soil-stale.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
-    {"home-nosoil", "10c-station-sheet-nosoil.png", ZK_SCREEN_STATION, 0, 0, 0, 0},
-    {"running", "10d-station-sheet-running.png", ZK_SCREEN_STATION, 0, 1, 0, 0},
-    {"home-rain", "10e-station-sheet-exempt.png", ZK_SCREEN_STATION, 0, 1, 0, 0},
-    {"home-rain", "11-controller-needs-update.png", ZK_SCREEN_NEEDS_UPDATE, 0, -1, 0, 1},
-    {"home-rain", "12-home-schedules-button.png", ZK_SCREEN_HOME, 0, -1, 0, 0},
-    {"paused-rain", "13-paused-schedules-button.png", ZK_SCREEN_PAUSED, 0, -1, 0, 0}
+    {"dc-idle-4", "C-idle-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-idle-6", "C-idle-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-watering-4", "C-watering-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-watering-6", "C-watering-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-paused-4", "C-paused-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-paused-6", "C-paused-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-nothing-4", "C-nothing-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-nothing-6", "C-nothing-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-overlap-6", "C-overlap-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-overlap-6", "S5-overlap-detail.png", ZK_SCREEN_SHEET_OVERLAP, 0, -1, 0, 0, -1},
+    {"dc-offline-6", "C-offline-6.png", ZK_SCREEN_HOME, 0, -1, 1, 0, -1},
+    {"dc-offline-6", "C-offline-stop-1-confirm.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 1, 0, -1},
+    {"dc-offline-6", "C-offline-stop-2-pending.png", ZK_SCREEN_HOME, 0, -1, 1, 0, ZK_STOP_QUEUED},
+    {"dc-stopped", "C-offline-stop-3-stopped.png", ZK_SCREEN_HOME, 0, -1, 0, 0, ZK_STOP_CONFIRMED},
+    {"dc-idle-6", "S1-confirm-run.png", ZK_SCREEN_SHEET_RUN, 0, 2, 0, 0, -1},
+    {"dc-paused-6", "S2-confirm-anyway.png", ZK_SCREEN_SHEET_ANYWAY, 0, 0, 0, 0, -1},
+    {"dc-watering-6", "S3-confirm-stop-station.png", ZK_SCREEN_SHEET_STOP_STATION, 0, 2, 0, 0, -1},
+    {"dc-watering-6", "S4-confirm-stop-all.png", ZK_SCREEN_SHEET_STOP_ALL, 0, -1, 0, 0, -1},
+    {"dc-soil-4", "C-soil-mix-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-soil-6", "C-soil-mix-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-soil-watering-6", "C-soil-watering-6.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
+    {"dc-manual-4", "C-manual-run-4.png", ZK_SCREEN_HOME, 0, -1, 0, 0, -1},
 };
 
 static int join2(char *dst, size_t cap, const char *a, const char *b)
@@ -89,11 +89,13 @@ static int one_shot(const char *root, const char *outdir, const shot_t *sc)
     zk_data_debug_force_stale(sc->stale);
     zk_data_debug_force_needs_update(sc->needs_update);
     zk_ui_debug_set_view(sc->screen, sc->pressed, sc->chip);
+    zk_ui_debug_set_stop(sc->stop_phase);
     zk_ui_refresh();
     if (zk_snapshot_png(out) != 0) {
         fprintf(stderr, "shots: write failed %s\n", out);
         return -1;
     }
+    zk_ui_debug_set_stop(-1);
     zk_data_debug_force_stale(0);
     zk_data_debug_force_needs_update(0);
     return 0;

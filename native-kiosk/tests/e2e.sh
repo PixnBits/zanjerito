@@ -3,18 +3,18 @@
 # Cases:
 #   a  read-only STOP+OK sends nothing
 #   b  STOP+OK posts cancel; a later Cancel does not
-#   c  pause for days, and pause until tomorrow morning
+#   c  one tap on Pause for rain posts tomorrow-morning pause
 #   d  resume posts only with --allow-writes
-#   e  confirm-STOP ignores a tap on the rail
-#   f  unreachable API shows the stale pill and exits 0
+#   e  Stop all sheet ignores a tap that is not Cancel or Stop all
+#   f  unreachable API shows the offline hero and exits 0
 #   g  no API exits 2
-#   h  one pause POST; stray taps after OK do not add another
+#   h  a second Pause inside 300 ms does not add a POST
 #   i  a second STOP while the first POST is held does not double-post
 #   j  cancel POST is not stuck behind a slow GET
-#   k  tile tap opens the station sheet and does not POST
-#   l  Schedules button, then Close
-#   m  STOP from the station sheet posts one cancel
-#   n  needs-update card; STOP still posts
+#   k  tile tap opens the run sheet and does not POST
+#   l  a hero tap on idle does nothing
+#   m  STOP from the run sheet posts one cancel
+#   n  unreachable kiosk shows the offline hero; STOP still posts
 #   o  idle dim, then off; a tile tap while off wakes and does not open the sheet
 #   p  a dimmed tile tap is swallowed; dimmed STOP opens confirm on that first tap
 #   q  a running fixture never dims or blanks
@@ -37,35 +37,22 @@ BIN=$ROOT/build/zan-kiosk-host
 STUB=$ROOT/tools/stub_server.py
 FIX=$ROOT/tests/fixtures
 
-# Centers from zk_layout.c (integer division). test_layout checks STOP height
-# 264 (304 while running), chip size 255x188, and each target's center.
-# HOME STOP (550,12 236x264) -> (668,144)
-# HOME slot y=292 h=168 -> (668,376)  Pause, and Resume on the paused screen
-# Confirm OK (120,240 270x130) -> (255,305); Cancel (410,240) -> (545,305)
-# Picker chips at (14,72), 255x188, gap 12:
-#   chip 0 tomorrow morning (141,166); chip 1 "2 days" (408,166)
-STOP_X=668
-STOP_Y=144
-SLOT_X=668
-SLOT_Y=376
-# Home tile 0 with rain: (14,198 256x126) -> (142,261)
-TILE0_X=142
-TILE0_Y=261
-# Schedules button (416,12 120x108) -> (476,66)
-SCHED_X=476
-SCHED_Y=66
-OK_X=255
-OK_Y=305
-CANCEL_X=545
-CANCEL_Y=305
-CHIP_TOMORROW_X=141
-CHIP_TOMORROW_Y=166
-CHIP_DAYS2_X=408
-CHIP_DAYS2_Y=166
-# Chip 2 "1 week": (14, 272) 255x188 -> center (141, 366).
-# (255, 305) is inside that chip while the picker is still up.
-CHIP_WEEK_X=141
-CHIP_WEEK_Y=366
+# Direction C centers. STOP (404,360 380x104), Pause (16,360 376x104).
+# Tile 0 on the 4-up grid is (404,16 184x160).
+# Stop all sheet: Cancel (40,328 352x112), Stop all (408,328 352x112).
+# Idle hero is not a target. Its center must not open a sheet.
+STOP_X=594
+STOP_Y=412
+SLOT_X=204
+SLOT_Y=412
+TILE0_X=496
+TILE0_Y=96
+HERO_X=204
+HERO_Y=182
+OK_X=584
+OK_Y=384
+CANCEL_X=216
+CANCEL_Y=384
 
 FAILS=0
 STUB_PID=
@@ -204,37 +191,26 @@ def main():
         import hashlib
         print(hashlib.sha256(open(path, "rb").read()).hexdigest())
         return
-    # Stale pill fill is #F6D5CC. Count matches in the lower band.
+    # Offline hero border is #A8432A. Idle home has none of that red.
     if cmd == "stale":
         n = 0
-        y1 = min(h, 470)
-        x1 = min(w, 520)
-        for y in range(400, y1):
-            for x in range(20, x1):
-                if near(pix(rows, x, y), (0xF6, 0xD5, 0xCC), 8):
+        for y in range(16, 348):
+            for x in range(16, 392):
+                if near(pix(rows, x, y), (0xA8, 0x43, 0x2A), 8):
                     n += 1
         print(n)
         return
-    # Confirm-STOP OK button is #B5361A, above the label.
+    # Stop all button fill is #B5361A. Sample left of the label inside (408,328 352x112).
     if cmd == "stopok":
-        rgb = pix(rows, 200, 260)
+        rgb = pix(rows, 424, 384)  # Stop all fill, left of the label
         print("%d %d %d" % rgb)
         return
-    # Needs-update card is cream #FCF5E6 in the main column.
+    # Offline hero border #A8432A. The idle hero does not use this color.
     if cmd == "needsupdate":
         n = 0
-        for y in range(40, 200):
-            for x in range(30, 500):
-                if near(pix(rows, x, y), (0xFC, 0xF5, 0xE6), 8):
-                    n += 1
-        print(n)
-        return
-    # Hold-to-edit on Schedules is dusk plum #4E3F63.
-    if cmd == "schedules":
-        n = 0
-        for y in range(340, 450):
-            for x in range(40, 520):
-                if near(pix(rows, x, y), (0x4E, 0x3F, 0x63), 12):
+        for y in range(16, 348):
+            for x in range(16, 392):
+                if near(pix(rows, x, y), (0xA8, 0x43, 0x2A), 8):
                     n += 1
         print(n)
         return
@@ -425,15 +401,9 @@ case_b() {
 case_c() {
     start_stub "$FIX/home-rain" || return 1
     kiosk 4 \
-        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_DAYS2_X},${CHIP_DAYS2_Y};wait:400;tap:${OK_X},${OK_Y};wait:700" \
+        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:700" \
         12 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts 'POST /api/pause {"days":2,"reason":"kiosk"}' || return 1
-
-    start_stub "$FIX/home-rain" || return 1
-    kiosk 4 \
-        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_TOMORROW_X},${CHIP_TOMORROW_Y};wait:400;tap:${OK_X},${OK_Y};wait:700" \
-        12 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts 'POST /api/pause {"until":"tomorrow_morning","reason":"kiosk"}' || return 1
+    assert_posts 'POST /api/pause {"until":"tomorrow_morning","reason":"rain"}' || return 1
 }
 
 case_d() {
@@ -450,15 +420,15 @@ case_e() {
     local a=$TMP/e1.png b=$TMP/e2.png
     local c1 c2
     start_stub "$FIX/home-rain" || return 1
-    # Second shot is after a tap on the rail Pause point while confirm-STOP is up.
+    # Second shot is after a tap on a tile point. The full sheet covers it.
     kiosk 5 \
-        "wait:900;tap:${STOP_X},${STOP_Y};wait:500;shot:${a};tap:${SLOT_X},${SLOT_Y};wait:500;shot:${b}" \
+        "wait:900;tap:${STOP_X},${STOP_Y};wait:500;shot:${a};tap:${TILE0_X},${TILE0_Y};wait:500;shot:${b}" \
         12 --allow-writes || { show_kiosk_err; return 1; }
     assert_posts "" || return 1
     [[ -f "$a" && -f "$b" ]] || { echo "missing modal shots" >&2; return 1; }
     c1=$(python3 "$TMP/png.py" stopok "$a")
     c2=$(python3 "$TMP/png.py" stopok "$b")
-    # OK button fill, above the STOP label. Home at this point is not this color.
+    # Stop all button fill (left of its label). Home at this point is not this color.
     if [[ "$c1" != "181 54 26" || "$c2" != "181 54 26" ]]; then
         echo "confirm STOP not held open (pixels $c1 / $c2)" >&2
         return 1
@@ -523,13 +493,13 @@ case_g() {
     fi
 }
 
-# Pause OK, then stray taps at OK and on the 1-week chip: still one pause POST.
+# One Pause, then a second Pause inside the 300 ms debounce: still one POST.
 case_h() {
     start_stub "$FIX/home-rain" || return 1
-    kiosk 6 \
-        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:400;tap:${CHIP_DAYS2_X},${CHIP_DAYS2_Y};wait:400;tap:${OK_X},${OK_Y};wait:100;tap:${OK_X},${OK_Y};wait:150;tap:${CHIP_WEEK_X},${CHIP_WEEK_Y};wait:50;tap:${OK_X},${OK_Y};wait:900" \
+    kiosk 4 \
+        "wait:700;tap:${SLOT_X},${SLOT_Y};wait:100;tap:${SLOT_X},${SLOT_Y};wait:900" \
         12 --allow-writes || { show_kiosk_err; return 1; }
-    assert_posts 'POST /api/pause {"days":2,"reason":"kiosk"}' || return 1
+    assert_posts 'POST /api/pause {"until":"tomorrow_morning","reason":"rain"}' || return 1
 }
 
 # Two STOP+OK sequences while the first POST is still held by the stub.
@@ -612,22 +582,16 @@ case_k() {
     [[ "$(png_size "$png")" == "800x480" ]] || return 1
 }
 
-# Schedules button opens Schedules; Close (slot) returns.
+# Idle hero is not a target. A tap there leaves the screen unchanged.
 case_l() {
-    local a=$TMP/l-sched.png b=$TMP/l-home.png
-    local n
+    local a=$TMP/l-before.png b=$TMP/l-after.png
     start_stub "$FIX/home-rain" || return 1
-    kiosk 5 "wait:800;tap:${SCHED_X},${SCHED_Y};wait:400;shot:${a};tap:${SLOT_X},${SLOT_Y};wait:400;shot:${b}" 12 || {
+    kiosk 5 "wait:800;shot:${a};tap:${HERO_X},${HERO_Y};wait:400;shot:${b}" 12 || {
         show_kiosk_err
         return 1
     }
-    n=$(python3 "$TMP/png.py" schedules "$a")
-    if [[ "$n" -lt 80 ]]; then
-        echo "schedules screen plum pixels $n" >&2
-        return 1
-    fi
-    if cmp -s "$a" "$b"; then
-        echo "Close did not leave Schedules" >&2
+    if ! cmp -s "$a" "$b"; then
+        echo "hero tap changed the idle screen" >&2
         return 1
     fi
 }
@@ -727,14 +691,12 @@ nearcount() {
     python3 "$TMP/png.py" nearcount "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
 }
 
-# Home with the rain strip is #CFE6E1. The gap between tile rows is #EFDDBE.
-# The station sheet paints that gap cream, so a swallowed tile tap stays beige.
+# The 12 px gap between the 4-up tile rows is page sand. A sheet covers it.
 home_rain_ok() {
-    local png=$1 rain gap
-    rain=$(nearcount "$png" 300 520 140 180 207 230 225 12)
-    gap=$(nearcount "$png" 30 200 325 334 239 221 190 12)
-    if [[ "$rain" -lt 400 || "$gap" -lt 400 ]]; then
-        echo "home layout not held (rain=$rain gap=$gap) $png" >&2
+    local png=$1 gap
+    gap=$(nearcount "$png" 420 760 178 186 251 236 214 12)
+    if [[ "$gap" -lt 1500 ]]; then
+        echo "home layout not held (gap=$gap) $png" >&2
         return 1
     fi
 }
@@ -890,7 +852,7 @@ PY
         trace_fail
         return 1
     fi
-    n=$(nearcount "$png" 300 520 200 320 15 94 92 16)
+    n=$(nearcount "$png" 610 770 30 150 15 110 108 16)
     if [[ "$n" -lt 200 ]]; then
         echo "running screen teal pixels $n" >&2
         return 1
@@ -933,9 +895,9 @@ PY
         trace_fail
         return 1
     fi
-    n=$(nearcount "$fault" 20 500 135 180 181 54 26 16)
+    n=$(nearcount "$fault" 40 300 40 140 255 250 238 12)
     if [[ "$n" -lt 400 ]]; then
-        echo "fault banner red pixels $n" >&2
+        echo "fault screen hero cream pixels $n" >&2
         return 1
     fi
 
@@ -1052,7 +1014,7 @@ run_isolated() {
         "$@"
 }
 
-# home-norain: background (2,2), STOP face (580,40), soil fill on tile 0 (34,248).
+# home-norain: page sand (2,2), STOP border (594,361), hero cream (40,40).
 panel_case() {
     local bpp=$1
     local fmt=$2
@@ -1135,11 +1097,11 @@ PY
     fi
     [[ -f "$mem" && -f "$shot" ]] || { echo "missing png" >&2; return 1; }
     python3 "$TMP/png.py" close "$mem" "$shot" 2 2 "$tol" || return 1
-    python3 "$TMP/png.py" close "$mem" "$shot" 580 40 "$tol" || return 1
-    python3 "$TMP/png.py" close "$mem" "$shot" 34 248 "$tol" || return 1
+    python3 "$TMP/png.py" close "$mem" "$shot" 594 361 "$tol" || return 1
+    python3 "$TMP/png.py" close "$mem" "$shot" 40 40 "$tol" || return 1
     p1=$(python3 "$TMP/png.py" pix "$mem" 2 2)
-    p2=$(python3 "$TMP/png.py" pix "$mem" 580 40)
-    p3=$(python3 "$TMP/png.py" pix "$mem" 34 248)
+    p2=$(python3 "$TMP/png.py" pix "$mem" 594 361)
+    p3=$(python3 "$TMP/png.py" pix "$mem" 40 40)
     python3 -c 'import sys
 ps = [tuple(int(x) for x in s.split()) for s in sys.argv[1:]]
 if len(set(ps)) != 3:
@@ -1367,8 +1329,7 @@ case_z() {
     stride_case 16 RGB565 2 1664 || return 1
 }
 
-# Rows 474..479 used to be a COL_STOP (#B5361A) bar and dashes. They are
-# screen background now (COL_BG #EFDDBE). Row 470 is the same band.
+# Rows 474..479 sit below the bottom bar (it ends at y=464) and stay page sand.
 case_aa() {
     local fix png fb rc red bg
     for fix in home-norain running; do
@@ -1414,7 +1375,7 @@ case_aa() {
             echo "aa $fix COL_STOP pixels in rows 474..479: $red" >&2
             return 1
         fi
-        bg=$(nearcount "$png" 0 800 470 471 239 221 190 8)
+        bg=$(nearcount "$png" 0 800 470 471 251 236 214 8)
         if [[ "$bg" -ne 800 ]]; then
             echo "aa $fix row 470 is not COL_BG: $bg/800" >&2
             return 1

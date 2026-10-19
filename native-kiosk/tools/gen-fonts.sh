@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Generate LVGL v9 C fonts from fonts/*.ttf into generated/.
 # Uses lv_font_conv 1.5.3 (npx). Output is deterministic for a given tool version.
+# Literata sources are static SemiBold instances (see fonts/README.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FONTS="$ROOT/fonts"
 GEN="$ROOT/generated"
 CONV_PKG="lv_font_conv@1.5.3"
 
@@ -16,17 +16,19 @@ fi
 mkdir -p "$GEN"
 cd "$ROOT"
 
+# Drop previous subsets so unused faces (Alfa, ExtraBold) cannot linger.
+rm -f "$GEN"/zk_font_*.c
+
 CONV=(npx --yes "$CONV_PKG")
 CONV_VER="$("${CONV[@]}" -v 2>/dev/null | tail -n 1)"
 CONV_VER="${CONV_VER:-1.5.3}"
 
-ASCII_RANGE="0x20-0x7E,0xB7,0x2013,0x2026"
-# space, hyphen-minus, digits 0-9, colon
-TIMER_RANGE="0x20,0x2D,0x30-0x3A"
+# Printable ASCII, NBSP, middot, en dash, curly apostrophe, ellipsis, single right angle quote.
+# U+26A0 is not in these fonts; the kiosk draws the warning triangle.
+GLYPHS="0x20-0x7E,0xA0,0xB7,0x2013,0x2019,0x2026,0x203A"
 
 gen_one() {
   local ttf="$1" name="$2" size="$3"
-  shift 3
   local rel="generated/${name}.c"
   echo "font ${name} size=${size}"
   "${CONV[@]}" \
@@ -38,7 +40,7 @@ gen_one() {
     --lv-font-name "$name" \
     --font "$ttf" \
     --size "$size" \
-    "$@" \
+    --range "$GLYPHS" \
     -o "$rel"
   local tmp
   tmp="$(mktemp)"
@@ -50,31 +52,33 @@ gen_one() {
   mv "$tmp" "$rel"
 }
 
-# sb: Barlow Semi Condensed SemiBold
-for s in 26 28; do
-  gen_one "fonts/BarlowSemiCondensed-SemiBold.ttf" "zk_font_sb_${s}" "$s" --range "$ASCII_RANGE"
+# r: Barlow Semi Condensed Regular (400)
+for s in 20 22 24 26; do
+  gen_one "fonts/BarlowSemiCondensed-Regular.ttf" "zk_font_r_${s}" "$s"
 done
 
-# b: Bold
-for s in 26 28 34; do
-  gen_one "fonts/BarlowSemiCondensed-Bold.ttf" "zk_font_b_${s}" "$s" --range "$ASCII_RANGE"
+# m: Medium (500)
+for s in 18 20 26 28; do
+  gen_one "fonts/BarlowSemiCondensed-Medium.ttf" "zk_font_m_${s}" "$s"
 done
 
-# xb: ExtraBold (full ASCII + extras)
-for s in 28 32 36 40 42 44 48 50 58; do
-  gen_one "fonts/BarlowSemiCondensed-ExtraBold.ttf" "zk_font_xb_${s}" "$s" --range "$ASCII_RANGE"
+# sb: SemiBold (600)
+for s in 18 24 26 36; do
+  gen_one "fonts/BarlowSemiCondensed-SemiBold.ttf" "zk_font_sb_${s}" "$s"
 done
 
-# xb 96 / 104: STOP word on the rail button
-for s in 96 104; do
-  gen_one "fonts/BarlowSemiCondensed-ExtraBold.ttf" "zk_font_xb_${s}" "$s" --symbols STOP
+# b: Bold (700)
+for s in 30 36; do
+  gen_one "fonts/BarlowSemiCondensed-Bold.ttf" "zk_font_b_${s}" "$s"
 done
 
-# xb 172: running-screen countdown (digits, colon, space, hyphen)
-gen_one "fonts/BarlowSemiCondensed-ExtraBold.ttf" "zk_font_xb_172" 172 --range "$TIMER_RANGE"
-
-# alfa: brand wordmark
-gen_one "fonts/AlfaSlabOne-Regular.ttf" "zk_font_alfa_26" 26 --range "$ASCII_RANGE"
+# lit: Literata SemiBold. Text optical size for small sizes, Display for large.
+for s in 20 26 32; do
+  gen_one "fonts/Literata-SemiBold-Text.ttf" "zk_font_lit_${s}" "$s"
+done
+for s in 40 48; do
+  gen_one "fonts/Literata-SemiBold.ttf" "zk_font_lit_${s}" "$s"
+done
 
 HEADER="$GEN/zk_fonts.h"
 {
@@ -93,12 +97,11 @@ HEADER="$GEN/zk_fonts.h"
   echo "#endif"
   echo
   for name in \
-    zk_font_sb_26 zk_font_sb_28 \
-    zk_font_b_26 zk_font_b_28 zk_font_b_34 \
-    zk_font_xb_28 zk_font_xb_32 zk_font_xb_36 zk_font_xb_40 \
-    zk_font_xb_42 zk_font_xb_44 zk_font_xb_48 zk_font_xb_50 \
-    zk_font_xb_58 zk_font_xb_96 zk_font_xb_104 zk_font_xb_172 \
-    zk_font_alfa_26
+    zk_font_r_20 zk_font_r_22 zk_font_r_24 zk_font_r_26 \
+    zk_font_m_18 zk_font_m_20 zk_font_m_26 zk_font_m_28 \
+    zk_font_sb_18 zk_font_sb_24 zk_font_sb_26 zk_font_sb_36 \
+    zk_font_b_30 zk_font_b_36 \
+    zk_font_lit_20 zk_font_lit_26 zk_font_lit_32 zk_font_lit_40 zk_font_lit_48
   do
     echo "LV_FONT_DECLARE(${name});"
   done

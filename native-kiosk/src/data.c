@@ -38,6 +38,10 @@ typedef struct {
     zk_schedules_t schedules;
     int have_schedules;
     zk_api_state_t api_state;
+    zk_soil_doc_t soil_doc;
+    int have_soil_doc;
+    zk_last_run_t lasts[ZK_MAX_STATIONS];
+    int n_lasts;
 } store_t;
 
 static pthread_once_t g_once = PTHREAD_ONCE_INIT;
@@ -227,6 +231,36 @@ static void remember_schedules(const zk_schedules_t *v)
     }
 }
 
+static void remember_soil_locked(const zk_soil_doc_t *doc)
+{
+    int changed = !g_snap.have_soil_doc || memcmp(&g_snap.soil_doc, doc, sizeof *doc) != 0;
+    g_snap.soil_doc = *doc;
+    g_snap.have_soil_doc = 1;
+    if (changed) {
+        g_version++;
+    }
+}
+
+static void remember_lasts_locked(const zk_last_run_t *lasts, int n)
+{
+    int changed;
+    if (n < 0) {
+        n = 0;
+    }
+    if (n > ZK_MAX_STATIONS) {
+        n = ZK_MAX_STATIONS;
+    }
+    changed = g_snap.n_lasts != n || (n > 0 && memcmp(g_snap.lasts, lasts, sizeof(*lasts) * (size_t)n) != 0);
+    memset(g_snap.lasts, 0, sizeof g_snap.lasts);
+    if (n > 0 && lasts) {
+        memcpy(g_snap.lasts, lasts, sizeof(*lasts) * (size_t)n);
+    }
+    g_snap.n_lasts = n;
+    if (changed) {
+        g_version++;
+    }
+}
+
 static void set_api_state_locked(zk_api_state_t st, int touch_mono)
 {
     if (g_snap.api_state != st) {
@@ -303,6 +337,37 @@ static void poll_kiosk(char *buf)
     call_platform_wake();
 }
 
+static void poll_soil(char *buf)
+{
+    zk_soil_doc_t doc;
+    if (fetch(buf, "/api/soil", NULL) != ZK_OK) {
+        return;
+    }
+    if (zk_parse_soil_doc(buf, &doc) != ZK_OK) {
+        return;
+    }
+    pthread_mutex_lock(&g_mu);
+    remember_soil_locked(&doc);
+    arm_wake_locked();
+    pthread_mutex_unlock(&g_mu);
+    call_platform_wake();
+}
+
+static void poll_history(char *buf)
+{
+    zk_last_run_t lasts[ZK_MAX_STATIONS];
+    int n;
+    if (fetch(buf, "/api/history?limit=50", NULL) != ZK_OK) {
+        return;
+    }
+    n = zk_parse_history_lasts(buf, lasts, ZK_MAX_STATIONS);
+    pthread_mutex_lock(&g_mu);
+    remember_lasts_locked(lasts, n);
+    arm_wake_locked();
+    pthread_mutex_unlock(&g_mu);
+    call_platform_wake();
+}
+
 static void poll_schedules(char *buf)
 {
     zk_schedules_t v;
@@ -336,6 +401,8 @@ static int dispatch_action(int allow, const char *base, zk_act_kind_t kind, cons
         return zk_action_pause(&a, body, http_status);
     case ZK_ACT_RESUME:
         return zk_action_resume(&a, http_status);
+    case ZK_ACT_RUN:
+        return zk_action_run(&a, body, http_status);
     default:
         return ZK_ERR_ARG;
     }
@@ -375,7 +442,7 @@ static int act_same(zk_act_kind_t ak, const char *abody, zk_act_kind_t bk, const
     if (ak != bk) {
         return 0;
     }
-    if (ak == ZK_ACT_PAUSE) {
+    if (ak == ZK_ACT_PAUSE || ak == ZK_ACT_RUN) {
         if (!abody) {
             abody = "";
         }
@@ -511,6 +578,8 @@ static void *worker_main(void *arg)
             continue;
         }
         if (do_slow) {
+            poll_soil(buf);
+            poll_history(buf);
             poll_schedules(buf);
             next_slow = mono_ms() + SLOW_POLL_MS;
         }
@@ -584,13 +653,35 @@ static void load_fixture(const char *dir)
     if (load_named(dir, "schedules.json", &sched_b) == ZK_OK && zk_parse_schedules(sched_b, &schedules) == ZK_OK) {
         ok_sch = 1;
     }
-    mono = mono_ms();
-    pthread_mutex_lock(&g_mu);
-    if (ok_k) {
-        remember_kiosk(&kiosk, mono);
-    }
-    if (ok_sch) {
-        remember_schedules(&schedules);
+    {
+        char *soil_b = NULL;
+        char *hist_b = NULL;
+        zk_soil_doc_t soil;
+        zk_last_run_t lasts[ZK_MAX_STATIONS];
+        int n_lasts = 0;
+        int ok_soil = 0;
+        if (load_named(dir, "soil.json", &soil_b) == ZK_OK && zk_parse_soil_doc(soil_b, &soil) == ZK_OK) {
+            ok_soil = 1;
+        }
+        if (load_named(dir, "history.json", &hist_b) == ZK_OK) {
+            n_lasts = zk_parse_history_lasts(hist_b, lasts, ZK_MAX_STATIONS);
+        }
+        mono = mono_ms();
+        pthread_mutex_lock(&g_mu);
+        if (ok_k) {
+            remember_kiosk(&kiosk, mono);
+        }
+        if (ok_sch) {
+            remember_schedules(&schedules);
+        }
+        if (ok_soil) {
+            remember_soil_locked(&soil);
+        }
+        if (hist_b) {
+            remember_lasts_locked(lasts, n_lasts);
+        }
+        free(soil_b);
+        free(hist_b);
     }
     if (ok_k || ok_sch) {
         arm_wake_locked();
@@ -734,6 +825,10 @@ void zk_data_get(zk_snapshot_t *out)
     out->schedules = g_snap.schedules;
     out->have_schedules = g_snap.have_schedules;
     out->api_state = g_snap.api_state;
+    out->soil_doc = g_snap.soil_doc;
+    out->have_soil_doc = g_snap.have_soil_doc;
+    memcpy(out->lasts, g_snap.lasts, sizeof out->lasts);
+    out->n_lasts = g_snap.n_lasts;
     if (!g_snap.have_mono) {
         out->status_age_s = 1.0e9;
     } else {
@@ -790,7 +885,7 @@ void zk_data_submit_action(zk_act_kind_t kind, const char *json_body)
     int running;
 
     ensure_init();
-    if (kind != ZK_ACT_STOP && kind != ZK_ACT_PAUSE && kind != ZK_ACT_RESUME) {
+    if (kind != ZK_ACT_STOP && kind != ZK_ACT_PAUSE && kind != ZK_ACT_RESUME && kind != ZK_ACT_RUN) {
         fail_submit(kind, ZK_ERR_ARG);
         return;
     }

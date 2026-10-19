@@ -509,7 +509,7 @@ static void test_initial_and_repoll(void)
     TEQ_I(c.n_status, 0);
     TEQ_I(c.n_stations, 0);
     TEQ_I(c.n_sched, 1);
-    TEQ_I(c.n_soil, 0);
+    TEQ_I(c.n_soil, 1);
     TEQ_I(c.n_post, 0);
     TEQ_I(snap.have_kiosk, 1);
     TEQ_S(snap.kiosk.phase, "Idle");
@@ -538,7 +538,7 @@ static void test_initial_and_repoll(void)
     stub_counts(&s, &c);
     TEQ_I(c.n_stations, 0);
     TEQ_I(c.n_sched, 1);
-    TEQ_I(c.n_soil, 0);
+    TEQ_I(c.n_soil, 1);
     TEQ_I(c.n_status, 0);
     TCHECK(c.n_kiosk >= 2, "kiosk polls %d", c.n_kiosk);
     TCHECK(snap.version > v0, "version %u -> %u", v0, snap.version);

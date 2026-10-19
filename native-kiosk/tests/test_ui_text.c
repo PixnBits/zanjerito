@@ -1,9 +1,9 @@
 #include "zk_test.h"
 
 #include "data.h"
-#include "generated/zk_fonts.h"
 #include "platform.h"
 #include "ui.h"
+#include "zk_copy.h"
 #include "zk_layout.h"
 
 #include <sys/stat.h>
@@ -96,6 +96,9 @@ static int load_fix(const char *name, int screen)
     if (zk_data_start(&app) != 0) {
         return -1;
     }
+    zk_data_debug_force_stale(0);
+    zk_data_debug_force_needs_update(0);
+    zk_ui_debug_set_stop(-1);
     zk_ui_debug_set_view(screen, 0, -1);
     zk_ui_refresh();
     return 0;
@@ -108,7 +111,9 @@ static int grab(zk_ui_label_box_t *b, int cap)
     return n;
 }
 
-static void check_geometry(const zk_ui_label_box_t *b, int n, const char *screen)
+/* Clamped labels stay inside their parent and clear of every other visible label.
+ * require_clamped is 1 only when this screen is expected to ellipsize something. */
+static void check_geometry(const zk_ui_label_box_t *b, int n, const char *screen, int require_clamped)
 {
     int i, j;
     int clamped = 0;
@@ -127,178 +132,28 @@ static void check_geometry(const zk_ui_label_box_t *b, int n, const char *screen
                    b[j].id, b[i].x, b[i].y, b[i].w, b[i].h, b[j].x, b[j].y, b[j].w, b[j].h);
         }
     }
-    TCHECK(clamped > 0, "%s has no clamped labels", screen);
-}
-
-static int dark_px(const uint8_t *p)
-{
-    int b = p[0];
-    int g = p[1];
-    int r = p[2];
-    return (0xFC - r) > 40 && (0xF5 - g) > 40 && (0xE6 - b) > 30;
-}
-
-static void check_pause_gap(const zk_ui_label_box_t *name, const zk_ui_label_box_t *sub)
-{
-    const uint8_t *frame;
-    int fw, fh, stride;
-    int y0, y1, x0, x1, y, x;
-    int dark = 0;
-    int ink = 0;
-    TCHECK(name && sub, "pause labels");
-    if (!name || !sub) {
-        return;
-    }
-    TCHECK(name->y_rel == 54, "info_name y_rel %d", name->y_rel);
-    TCHECK(sub->y_rel == 112, "info_sub0 y_rel %d", sub->y_rel);
-    TCHECK(name->h > 0 && name->y_rel + name->h <= 112, "info_name bottom %d", name->y_rel + name->h);
-    TCHECK(name->y + name->h <= sub->y, "info_name abs bottom %d sub %d", name->y + name->h, sub->y);
-    TCHECK(sub->y - (name->y + name->h) >= 8, "gap %d", sub->y - (name->y + name->h));
-    frame = zk_platform_frame(&fw, &fh, &stride);
-    TCHECK(frame != NULL, "frame");
-    if (!frame) {
-        return;
-    }
-    y0 = name->y + name->h;
-    y1 = sub->y;
-    x0 = name->x;
-    x1 = name->x + name->w;
-    TCHECK(y0 >= 0 && y1 <= fh && x0 >= 0 && x1 <= fw, "gap outside frame");
-    for (y = name->y; y < name->y + name->h && y < fh; y++) {
-        for (x = x0; x < x1 && x < fw; x++) {
-            if (y >= 0 && x >= 0 && dark_px(frame + (size_t)y * (size_t)stride + (size_t)x * 4u)) {
-                ink++;
-            }
-        }
-    }
-    TCHECK(ink > 0, "info_name drew no ink");
-    for (y = y0; y < y1; y++) {
-        for (x = x0; x < x1; x++) {
-            if (dark_px(frame + (size_t)y * (size_t)stride + (size_t)x * 4u)) {
-                if (dark < 3) {
-                    fprintf(stderr, "dark gap pixel %d,%d\n", x, y);
-                }
-                dark++;
-            }
-        }
-    }
-    TCHECK(dark == 0, "pause gap has %d dark pixels", dark);
-}
-
-static void test_paused_short(void)
-{
-    zk_ui_label_box_t b[96];
-    int n;
-    const zk_ui_label_box_t *name;
-    const zk_ui_label_box_t *sub;
-    TCHECK(load_fix("paused-manual", ZK_SCREEN_PAUSED) == 0, "load paused-manual");
-    n = grab(b, 96);
-    if (n < 0) {
-        return;
-    }
-    check_geometry(b, n, "paused-manual");
-    name = find_box(b, n, "info_name");
-    sub = find_box(b, n, "info_sub0");
-    TCHECK(name != NULL, "short info_name");
-    if (name) {
-        TEQ_S(name->text, "Runs again when you resume");
-        TCHECK(!ends_ellipsis(name->text), "short name ellipsized: %s", name->text);
-    }
-    check_pause_gap(name, sub);
-}
-
-static void test_paused_long(void)
-{
-    zk_ui_label_box_t b[96];
-    int n;
-    const zk_ui_label_box_t *name;
-    const zk_ui_label_box_t *sub;
-    const char *full =
-        "live parity: alpha 2, beta 3, gamma 3 (bash cron 08:23) \xC2\xB7 Daily 8:23 AM \xC2\xB7 Tomorrow 8:23 AM";
-    TCHECK(load_fix("paused-long", ZK_SCREEN_PAUSED) == 0, "load paused-long");
-    n = grab(b, 96);
-    if (n < 0) {
-        return;
-    }
-    check_geometry(b, n, "paused-long");
-    name = find_box(b, n, "info_name");
-    sub = find_box(b, n, "info_sub0");
-    TCHECK(name != NULL, "long info_name");
-    if (name) {
-        TCHECK(strncmp(name->text, "live parity:", 12) == 0, "long name %s", name->text);
-        TCHECK(prefix_ellipsis(name->text, full), "long name not an ellipsized prefix: %s", name->text);
-        TCHECK(strlen(name->text) < strlen(full), "long name not shorter");
-    }
-    check_pause_gap(name, sub);
-}
-
-static void test_home_long(void)
-{
-    zk_ui_label_box_t b[96];
-    int n;
-    int i;
-    const zk_ui_label_box_t *kicker;
-    const zk_ui_label_box_t *big;
-    TCHECK(load_fix("home-longnames", ZK_SCREEN_HOME) == 0, "load home-longnames");
-    n = grab(b, 96);
-    if (n < 0) {
-        return;
-    }
-    check_geometry(b, n, "home-longnames");
-    kicker = find_box(b, n, "hdr_kicker");
-    big = find_box(b, n, "hdr_big");
-    TCHECK(kicker && big, "header labels");
-    if (kicker) {
-        TEQ_S(kicker->text, "NEXT RUN \xC2\xB7 MORNING CYCLE");
-    }
-    if (big) {
-        TEQ_S(big->text, "Today 8:23 AM");
-    }
-    for (i = 0; i < 4; i++) {
-        char id[32];
-        char full[128];
-        const zk_ui_label_box_t *t;
-        const zk_ui_label_box_t *st;
-        snprintf(id, sizeof id, "tile_title%d", i);
-        make_title(full, i + 1);
-        t = find_box(b, n, id);
-        TCHECK(t != NULL, "missing %s", id);
-        if (t) {
-            TCHECK(prefix_ellipsis(t->text, full), "%s text %s", id, t->text);
-        }
-        {
-            zk_ui_tile_dbg_t tile;
-            TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
-            TEQ_I(tile.on, 0);
-            TEQ_I(tile.bg, 0xFCF5E6);
-            TEQ_I(tile.border_w, 3);
-            TEQ_I(tile.border, 0xD2B78A);
-            TEQ_I(tile.drop_visible, 0);
-            TEQ_I(tile.title_w, tile.tile_w - 28);
-        }
-        snprintf(id, sizeof id, "tile_state%d", i);
-        st = find_box(b, n, id);
-        TCHECK(st == NULL, "pill %s still present", id);
+    if (require_clamped) {
+        TCHECK(clamped > 0, "%s has no clamped labels", screen);
     }
 }
 
+/* White ink gap between the STOP octagon and the word, along the word's mid line. */
 static int white_px(const uint8_t *p)
 {
-    int b = p[0];
-    int g = p[1];
-    int r = p[2];
-    return r > 220 && g > 220 && b > 220;
+    return p[2] > 220 && p[1] > 220 && p[0] > 220;
 }
 
-/* Visual gap between the STOP octagon and the word, in the center of the button. */
 static void check_stop_gap(const zk_ui_label_box_t *b, int n)
 {
     const zk_ui_label_box_t *word = find_box(b, n, "stop_word");
     const uint8_t *frame;
     int fw, fh, stride;
-    int x0, x1, x;
-    int best = 1000;
-    int seen = 0;
+    int y;
+    int x;
+    int x0;
+    int x1;
+    int icon = -1;
+    int text = -1;
     TCHECK(word != NULL, "stop word");
     if (!word) {
         return;
@@ -308,8 +163,13 @@ static void check_stop_gap(const zk_ui_label_box_t *b, int n)
     if (!frame) {
         return;
     }
-    x0 = word->x + word->w / 2 - 20;
-    x1 = word->x + word->w / 2 + 20;
+    y = word->y + word->h / 2;
+    if (y < 0 || y >= fh) {
+        TCHECK(0, "stop word y %d", y);
+        return;
+    }
+    x0 = word->parent_x;
+    x1 = word->x + word->w;
     if (x0 < 0) {
         x0 = 0;
     }
@@ -317,43 +177,124 @@ static void check_stop_gap(const zk_ui_label_box_t *b, int n)
         x1 = fw;
     }
     for (x = x0; x < x1; x++) {
-        int y;
-        int text_top = -1;
-        int icon_bot = -1;
-        int y_hi = word->y + word->h;
-        if (y_hi > fh) {
-            y_hi = fh;
-        }
-        for (y = word->y; y < y_hi; y++) {
-            const uint8_t *p = frame + (size_t)y * (size_t)stride + (size_t)x * 4u;
-            if (white_px(p)) {
-                text_top = y;
-                break;
-            }
-        }
-        if (text_top < 0) {
+        const uint8_t *p = frame + (size_t)y * (size_t)stride + (size_t)x * 4u;
+        if (!white_px(p)) {
             continue;
         }
-        for (y = text_top - 1; y >= 0 && y >= text_top - 80; y--) {
-            const uint8_t *p = frame + (size_t)y * (size_t)stride + (size_t)x * 4u;
-            if (white_px(p)) {
-                icon_bot = y;
-                break;
-            }
-        }
-        if (icon_bot < 0) {
-            continue;
-        }
-        {
-            int gap = text_top - icon_bot - 1;
-            if (gap < best) {
-                best = gap;
-            }
-            seen++;
+        if (x < word->x) {
+            icon = x;
+        } else if (text < 0) {
+            text = x;
         }
     }
-    TCHECK(seen > 0, "stop icon and word ink");
-    TCHECK(best >= 8, "stop gap %d px", best);
+    TCHECK(icon >= 0 && text >= 0, "stop icon and word ink");
+    if (icon >= 0 && text >= 0) {
+        TCHECK(text - icon - 1 >= 8, "stop gap %d px", text - icon - 1);
+    }
+}
+
+static void test_paused_short(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *head;
+    const zk_ui_label_box_t *sub;
+    const zk_ui_label_box_t *bar;
+    TCHECK(load_fix("paused-manual", ZK_SCREEN_HOME) == 0, "load paused-manual");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    label = find_box(b, n, "hero_label");
+    head = find_box(b, n, "hero_headline");
+    sub = find_box(b, n, "hero_secondary");
+    bar = find_box(b, n, "pause_word");
+    TCHECK(label && head && sub && bar, "paused labels");
+    if (label) {
+        TEQ_S(label->text, "PAUSED FOR RAIN");
+    }
+    if (head) {
+        TEQ_S(head->text, "Until you resume");
+        TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+    }
+    if (sub) {
+        TEQ_S(sub->text, "Tap a station to run it anyway");
+    }
+    if (bar) {
+        TEQ_S(bar->text, "Resume");
+    }
+}
+
+static void test_paused_long(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *head;
+    TCHECK(load_fix("paused-long", ZK_SCREEN_HOME) == 0, "load paused-long");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    label = find_box(b, n, "hero_label");
+    head = find_box(b, n, "hero_headline");
+    TCHECK(label && head, "paused-long labels");
+    if (label) {
+        TEQ_S(label->text, "PAUSED FOR RAIN");
+    }
+    if (head) {
+        TCHECK(strncmp(head->text, "Until ", 6) == 0, "headline %s", head->text);
+        TCHECK(strstr(head->text, ZK_NBSP "AM") != NULL, "headline time %s", head->text);
+        TCHECK(!ends_ellipsis(head->text), "headline ellipsized: %s", head->text);
+    }
+}
+
+static void test_home_long(void)
+{
+    zk_ui_label_box_t b[96];
+    int n;
+    int i;
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *head;
+    char today[64];
+    TCHECK(load_fix("home-longnames", ZK_SCREEN_HOME) == 0, "load home-longnames");
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    check_geometry(b, n, "home-longnames", 1);
+    label = find_box(b, n, "hero_label");
+    head = find_box(b, n, "hero_headline");
+    TCHECK(label && head, "header labels");
+    if (label) {
+        TEQ_S(label->text, "NEXT RUN " ZK_MID " MORNING CYCLE");
+    }
+    snprintf(today, sizeof today, "Today 8:23" ZK_NBSP "AM");
+    if (head) {
+        TEQ_S(head->text, today);
+        TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+    }
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        char full[128];
+        const zk_ui_label_box_t *t;
+        zk_ui_tile_dbg_t tile;
+        snprintf(id, sizeof id, "tile_title%d", i);
+        make_title(full, i + 1);
+        t = find_box(b, n, id);
+        TCHECK(t != NULL, "missing %s", id);
+        if (t) {
+            TCHECK(prefix_ellipsis(t->text, full), "%s text %s", id, t->text);
+        }
+        TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
+        TEQ_I(tile.on, 0);
+        TEQ_I(tile.bg, 0xFCF5E6);
+        TEQ_I(tile.border_w, 2);
+        TEQ_I(tile.border, 0xD9C3A0);
+        TEQ_I(tile.drop_visible, 0);
+        TEQ_I(tile.title_w, tile.tile_w - 28);
+    }
 }
 
 static void test_home_onoff(void)
@@ -361,54 +302,55 @@ static void test_home_onoff(void)
     zk_ui_label_box_t b[96];
     int n;
     int i;
-    const zk_ui_label_box_t *kicker;
-    const zk_ui_label_box_t *big;
-    const char *full = "NEXT RUN \xC2\xB7 MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *head;
+    const zk_ui_label_box_t *time;
+    char ms[41];
+    char full[96];
+    memset(ms, 'M', 40);
+    ms[40] = 0;
+    snprintf(full, sizeof full, "WATERING NOW " ZK_MID " %s", ms);
     TCHECK(load_fix("home-onoff", ZK_SCREEN_HOME) == 0, "load home-onoff");
     n = grab(b, 96);
     if (n < 0) {
         return;
     }
-    check_geometry(b, n, "home-onoff");
-    kicker = find_box(b, n, "hdr_kicker");
-    big = find_box(b, n, "hdr_big");
-    TCHECK(kicker && big, "onoff header");
-    if (kicker) {
-        TCHECK(strncmp(kicker->text, "NEXT RUN \xC2\xB7 ", 12) == 0, "prefix %s", kicker->text);
-        TCHECK(prefix_ellipsis(kicker->text, full), "name not end-cut: %s", kicker->text);
+    check_geometry(b, n, "home-onoff", 0);
+    label = find_box(b, n, "hero_label");
+    head = find_box(b, n, "hero_headline");
+    time = find_box(b, n, "hero_time");
+    TCHECK(label && head && time, "onoff header");
+    if (label) {
+        TCHECK(strncmp(label->text, "WATERING NOW " ZK_MID " ", 16) == 0, "prefix %s", label->text);
+        TCHECK(strcmp(label->text, full) == 0 || prefix_ellipsis(label->text, full), "label %s", label->text);
     }
-    if (big) {
-        TEQ_S(big->text, "Today 6:10 AM");
-        TCHECK(!ends_ellipsis(big->text), "time ellipsized");
+    if (head) {
+        TEQ_S(head->text, ms);
+        TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
+    }
+    if (time) {
+        TCHECK(strstr(time->text, "min left") != NULL, "time %s", time->text);
     }
     for (i = 0; i < 4; i++) {
-        char id[32];
         zk_ui_tile_dbg_t tile;
-        snprintf(id, sizeof id, "tile_state%d", i);
-        TCHECK(find_box(b, n, id) == NULL, "pill %s still present", id);
         TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
         if (i == 0) {
             TEQ_I(tile.on, 1);
             TEQ_I(tile.bg, 0x0F6E6C);
-            TEQ_I(tile.border_w, 4);
+            TEQ_I(tile.border_w, 2);
             TEQ_I(tile.border, 0x0F6E6C);
             TEQ_I(tile.drop_visible, 1);
         } else {
             TEQ_I(tile.on, 0);
             TEQ_I(tile.bg, 0xFCF5E6);
-            TEQ_I(tile.border_w, 3);
+            TEQ_I(tile.border_w, 2);
+            TEQ_I(tile.border, 0xD9C3A0);
             TEQ_I(tile.drop_visible, 0);
         }
         TEQ_I(tile.title_w, tile.tile_w - 28);
     }
     for (i = 0; i < n; i++) {
         TCHECK(strcmp(b[i].text, "On") != 0 && strcmp(b[i].text, "Off") != 0, "pill text %s", b[i].text);
-    }
-    {
-        int32_t timew = lv_text_get_width("Tomorrow 6:10 AM", (uint32_t)strlen("Tomorrow 6:10 AM"), &zk_font_xb_50, 0);
-        if (big) {
-            TCHECK(big->w >= timew, "time slot %d holds %d", big->w, (int)timew);
-        }
     }
     check_stop_gap(b, n);
 }
@@ -417,139 +359,164 @@ static void test_running_long(void)
 {
     zk_ui_label_box_t b[96];
     int n;
+    int i;
     char cur[128];
-    char next_full[160];
-    const zk_ui_label_box_t *title;
-    const zk_ui_label_box_t *next;
-    const zk_ui_label_box_t *step;
-    TCHECK(load_fix("running-long", ZK_SCREEN_RUNNING) == 0, "load running-long");
+    const zk_ui_label_box_t *label;
+    const zk_ui_label_box_t *head;
+    const zk_ui_label_box_t *time;
+    const zk_ui_label_box_t *sub;
+    int saw = 0;
+    TCHECK(load_fix("running-long", ZK_SCREEN_HOME) == 0, "load running-long");
     n = grab(b, 96);
     if (n < 0) {
         return;
     }
-    check_geometry(b, n, "running-long");
+    check_geometry(b, n, "running-long", 1);
     make_title(cur, 2);
-    make_title(next_full, 4);
-    memmove(next_full + 6, next_full, strlen(next_full) + 1);
-    memcpy(next_full, "Next: ", 6);
-    title = find_box(b, n, "run_title");
-    next = find_box(b, n, "run_next");
-    step = find_box(b, n, "run_step");
-    TCHECK(title && next && step, "running labels");
-    if (title) {
-        TCHECK(prefix_ellipsis(title->text, cur), "run_title %s", title->text);
+    label = find_box(b, n, "hero_label");
+    head = find_box(b, n, "hero_headline");
+    time = find_box(b, n, "hero_time");
+    sub = find_box(b, n, "hero_secondary");
+    TCHECK(label && head && time && sub, "running labels");
+    if (label) {
+        TEQ_S(label->text, "WATERING NOW " ZK_MID " MORNING CYCLE");
     }
-    if (next) {
-        TCHECK(prefix_ellipsis(next->text, next_full), "run_next %s", next->text);
-        TCHECK(strncmp(next->text, "Next:", 5) == 0, "run_next start %s", next->text);
+    if (head) {
+        TEQ_S(head->text, cur);
+        TCHECK(!ends_ellipsis(head->text), "headline ellipsized");
     }
-    if (step) {
-        TEQ_S(step->text, "Step 2 of 3");
+    if (time) {
+        TEQ_S(time->text, "3 min left");
     }
+    if (sub) {
+        TCHECK(strstr(sub->text, "next") != NULL, "secondary %s", sub->text);
+    }
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        const zk_ui_label_box_t *t;
+        snprintf(id, sizeof id, "tile_title%d", i);
+        t = find_box(b, n, id);
+        if (t && prefix_ellipsis(t->text, cur)) {
+            saw = 1;
+        }
+    }
+    TCHECK(saw, "running tile name not ellipsized");
     check_stop_gap(b, n);
 }
 
-/* Main's station title slot is tile width minus 14 px insets (parent_w - 28).
- * Soil and no-soil must both keep that width. "Test Station N" fit on main. */
-static void test_home_title_width(const char *fix)
+static void snapshot_geom(const zk_ui_label_box_t *b, int n, const char *id, int *x, int *y, int *w, int *h)
 {
-    zk_ui_label_box_t b[96];
-    int n;
-    int i;
-    TCHECK(load_fix(fix, ZK_SCREEN_HOME) == 0, "load %s", fix);
-    n = grab(b, 96);
-    if (n < 0) {
+    const zk_ui_label_box_t *t = find_box(b, n, id);
+    TCHECK(t != NULL, "missing %s", id);
+    if (!t) {
+        *x = *y = *w = *h = -1;
         return;
     }
-    check_geometry(b, n, fix);
+    *x = t->x;
+    *y = t->y;
+    *w = t->w;
+    *h = t->h;
+}
+
+/* Soil on and soil off keep the same title and slot boxes. */
+static void test_home_title_width(void)
+{
+    zk_ui_label_box_t rain[96];
+    zk_ui_label_box_t dry[96];
+    int nr;
+    int nd;
+    int i;
+    /* The slot row stays 24 px. A soil bar only insets the words inside that row. */
+    const char *ids[] = {"tile_title0", "tile_title1", "tile_title2", "tile_title3", "hero_label",
+                         "hero_headline", "pause_word", "stop_word", "rain_text", NULL};
+    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load home-rain");
+    nr = grab(rain, 96);
+    if (nr < 0) {
+        return;
+    }
+    TCHECK(load_fix("home-nosoil", ZK_SCREEN_HOME) == 0, "load home-nosoil");
+    nd = grab(dry, 96);
+    if (nd < 0) {
+        return;
+    }
     for (i = 0; i < 4; i++) {
         char id[32];
         char want[32];
         const zk_ui_label_box_t *t;
-        const zk_ui_label_box_t *st;
+        zk_ui_tile_dbg_t tile;
         snprintf(id, sizeof id, "tile_title%d", i);
-        t = find_box(b, n, id);
-        TCHECK(t != NULL, "%s missing %s", fix, id);
+        t = find_box(dry, nd, id);
+        TCHECK(t != NULL, "nosoil missing %s", id);
         if (t) {
             TEQ_I(t->w, t->parent_w - 28);
             snprintf(want, sizeof want, "Test Station %d", i + 1);
             TEQ_S(t->text, want);
         }
-        snprintf(id, sizeof id, "tile_state%d", i);
-        st = find_box(b, n, id);
-        TCHECK(st == NULL, "%s pill %s still present", fix, id);
-        {
-            zk_ui_tile_dbg_t tile;
-            TCHECK(zk_ui_debug_tile(i, &tile) == 1, "%s tile %d", fix, i);
-            TEQ_I(tile.drop_visible, 0);
-            TEQ_I(tile.bg, 0xFCF5E6);
-            TEQ_I(tile.title_w, tile.tile_w - 28);
+        t = find_box(rain, nr, id);
+        if (t) {
+            snprintf(want, sizeof want, "Test Station %d", i + 1);
+            TEQ_S(t->text, want);
         }
+        TCHECK(zk_ui_debug_tile(i, &tile) == 1, "tile %d", i);
+        TEQ_I(tile.drop_visible, 0);
+        TEQ_I(tile.bg, 0xFCF5E6);
+        TEQ_I(tile.title_w, tile.tile_w - 28);
+        TEQ_I(tile.border_w, 2);
+    }
+    for (i = 0; ids[i]; i++) {
+        int x1, y1, w1, h1, x2, y2, w2, h2;
+        snapshot_geom(rain, nr, ids[i], &x1, &y1, &w1, &h1);
+        snapshot_geom(dry, nd, ids[i], &x2, &y2, &w2, &h2);
+        TCHECK(x1 == x2 && y1 == y2 && w1 == w2 && h1 == h2, "%s soil rect %d,%d %dx%d vs %d,%d %dx%d", ids[i], x1,
+               y1, w1, h1, x2, y2, w2, h2);
     }
 }
 
-static void test_station_sheet_and_needs_update(void)
+static void test_sheets_soil_offline(void)
 {
     zk_ui_label_box_t b[96];
     int n;
+    int i;
     const zk_ui_label_box_t *title;
-    const zk_ui_label_box_t *state;
-    const zk_ui_label_box_t *exempt;
-    const zk_ui_label_box_t *msg;
-    const zk_ui_label_box_t *nu;
-    const zk_ui_label_box_t *sched;
-    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load home for schedules");
-    n = grab(b, 96);
-    sched = find_box(b, n, "sched_btn");
-    TCHECK(sched != NULL, "schedules label");
-    if (sched) {
-        int32_t tw = lv_text_get_width("Schedules", (uint32_t)strlen("Schedules"), &zk_font_b_26, 0);
-        TEQ_S(sched->text, "Schedules");
-        TCHECK(inside_parent(sched), "schedules box");
-        TCHECK(sched->parent_w >= tw + 24, "schedules pad parent %d text %d", sched->parent_w, (int)tw);
-        TCHECK(sched->x >= sched->parent_x + 12, "schedules left inset %d", sched->x - sched->parent_x);
-        TCHECK(sched->x + sched->w <= sched->parent_x + sched->parent_w - 12, "schedules right inset");
-    }
-    zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 0);
+    const zk_ui_label_box_t *slot;
+    const zk_ui_label_box_t *head;
+    const zk_ui_label_box_t *stop;
+    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load home for run sheet");
+    zk_ui_debug_set_view(ZK_SCREEN_SHEET_RUN, 0, 0);
     zk_ui_refresh();
     n = grab(b, 96);
-    check_geometry(b, n, "station-sheet");
-    title = find_box(b, n, "st_title");
-    state = find_box(b, n, "st_state");
-    TCHECK(title && state, "sheet labels");
+    title = find_box(b, n, "sheet_title");
+    TCHECK(title != NULL, "run sheet title");
     if (title) {
-        TEQ_S(title->text, "Test Station 1");
+        TCHECK(strstr(title->text, "Run ") != NULL, "run title %s", title->text);
+        TCHECK(strstr(title->text, "min?") != NULL, "run title minutes %s", title->text);
     }
-    if (state) {
-        TEQ_S(state->text, "Idle");
-    }
-    zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 1);
-    zk_ui_refresh();
+    TCHECK(load_fix("home-stale", ZK_SCREEN_HOME) == 0, "load home-stale");
     n = grab(b, 96);
-    exempt = find_box(b, n, "st_exempt");
-    TCHECK(exempt != NULL, "exempt");
-    if (exempt) {
-        TCHECK(strstr(exempt->text, "Skips rain") != NULL, "exempt %s", exempt->text);
+    for (i = 0; i < 4; i++) {
+        char id[32];
+        snprintf(id, sizeof id, "tile_slot%d", i);
+        slot = find_box(b, n, id);
+        TCHECK(slot != NULL, "stale slot %d", i);
+        if (slot) {
+            TEQ_S(slot->text, "Rate not measured");
+            TCHECK(strstr(slot->text, "0%") == NULL, "stale showed a percent");
+        }
     }
-    TCHECK(load_fix("home-stale", ZK_SCREEN_STATION) == 0, "stale sheet");
-    zk_ui_debug_set_view(ZK_SCREEN_STATION, 0, 0);
-    zk_ui_refresh();
-    n = grab(b, 96);
-    msg = find_box(b, n, "st_soil_msg");
-    TCHECK(msg != NULL, "stale soil msg");
-    if (msg) {
-        TCHECK(strstr(msg->text, "ET data old") != NULL, "stale msg %s", msg->text);
-    }
-    TCHECK(load_fix("home-rain", ZK_SCREEN_NEEDS_UPDATE) == 0, "needs-update");
+    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load needs-update");
     zk_data_debug_force_needs_update(1);
-    zk_ui_debug_set_view(ZK_SCREEN_NEEDS_UPDATE, 0, -1);
+    zk_ui_debug_set_view(ZK_SCREEN_HOME, 0, -1);
     zk_ui_refresh();
     n = grab(b, 96);
-    check_geometry(b, n, "needs-update");
-    nu = find_box(b, n, "nu_title");
-    TCHECK(nu != NULL, "nu title");
-    if (nu) {
-        TEQ_S(nu->text, "Controller needs an update");
+    head = find_box(b, n, "hero_headline");
+    stop = find_box(b, n, "stop_word");
+    TCHECK(head && stop, "offline labels");
+    if (head) {
+        TEQ_S(head->text, "Can't reach controller");
+    }
+    if (stop) {
+        TEQ_S(stop->text, "STOP");
+        TCHECK(stop->visible, "STOP hidden while offline");
     }
     zk_data_debug_force_needs_update(0);
 }
@@ -570,10 +537,9 @@ int main(void)
     test_paused_long();
     test_home_long();
     test_home_onoff();
-    test_home_title_width("home-rain");
-    test_home_title_width("home-nosoil");
+    test_home_title_width();
     test_running_long();
-    test_station_sheet_and_needs_update();
+    test_sheets_soil_offline();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");

@@ -1,0 +1,28 @@
+{
+ "enabled": true,
+ "et_stale": false,
+ "et_known": true,
+ "updated_at": "2026-10-19T12:00:00-06:00",
+ "zones": [
+  {
+   "station_id": "lawn-a",
+   "percent": 52,
+   "rate_measured": true
+  },
+  {
+   "station_id": "lawn-b",
+   "percent": 22,
+   "rate_measured": true
+  },
+  {
+   "station_id": "drip",
+   "percent": null,
+   "rate_measured": false
+  },
+  {
+   "station_id": "beds",
+   "percent": 88,
+   "rate_measured": true
+  }
+ ]
+}

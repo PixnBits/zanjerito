@@ -1,0 +1,896 @@
+#include "zk_copy.h"
+
+#include "zk_logic.h"
+#include "zk_text.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static const char *k_wd[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+void zk_fmt_time_nbsp(int hh, int mm, char *out, size_t cap)
+{
+    const char *ampm;
+    int h12;
+    if (!out || cap == 0) {
+        return;
+    }
+    if (hh < 0) {
+        hh = 0;
+    }
+    if (hh > 23) {
+        hh = 23;
+    }
+    if (mm < 0) {
+        mm = 0;
+    }
+    if (mm > 59) {
+        mm = 59;
+    }
+    ampm = (hh < 12) ? "AM" : "PM";
+    h12 = hh % 12;
+    if (h12 == 0) {
+        h12 = 12;
+    }
+    snprintf(out, cap, "%d:%02d" ZK_NBSP "%s", h12, mm, ampm);
+}
+
+void zk_fmt_inches_trim(double v, char *out, size_t cap)
+{
+    int h;
+    if (!out || cap == 0) {
+        return;
+    }
+    if (!(v == v) || v < 0) {
+        v = 0;
+    }
+    if (v > 999.99) {
+        v = 999.99;
+    }
+    h = (int)(v * 100.0 + 0.5);
+    if (h < 0) {
+        h = 0;
+    }
+    if (h > 99999) {
+        h = 99999;
+    }
+    if (h % 100 == 0) {
+        snprintf(out, cap, "%d", h / 100);
+    } else if (h % 10 == 0) {
+        snprintf(out, cap, "%d.%d", h / 100, (h / 10) % 10);
+    } else {
+        snprintf(out, cap, "%d.%02d", h / 100, h % 100);
+    }
+}
+
+static void clamp_to(char *dst, size_t cap, const char *src, int px, int lines, zk_width_fn fn, void *user)
+{
+    if (!dst || cap == 0) {
+        return;
+    }
+    if (!src) {
+        src = "";
+    }
+    if (!fn || px < 1 || lines < 1) {
+        zk_str_copy(dst, cap, src);
+        return;
+    }
+    if (zk_text_fit(dst, cap, src, px * lines, fn, user) != 0) {
+        zk_str_copy(dst, cap, src);
+    }
+}
+
+static int is_manual(const zk_kiosk_t *k)
+{
+    if (!k || !k->has_run) {
+        return 0;
+    }
+    return strcmp(k->run.kind, "manual") == 0 || strcmp(k->run.program, "manual") == 0;
+}
+
+static int is_watering(const zk_kiosk_t *k)
+{
+    if (!k) {
+        return 0;
+    }
+    return k->watering || k->has_run || k->n_on > 0 || k->current_station[0] ? 1 : 0;
+}
+
+static const zk_kiosk_station_t *station_at(const zk_kiosk_t *k, int index)
+{
+    if (!k || index < 0 || index >= k->n_stations) {
+        return NULL;
+    }
+    return &k->stations[index];
+}
+
+static const zk_schedule_t *sched_by_id(const zk_schedules_t *sc, const char *id)
+{
+    int i;
+    if (!sc || !id || !id[0]) {
+        return NULL;
+    }
+    for (i = 0; i < sc->n; i++) {
+        if (strcmp(sc->items[i].id, id) == 0) {
+            return &sc->items[i];
+        }
+    }
+    return NULL;
+}
+
+static int step_minutes_for(const zk_schedule_t *sch, const char *station_id)
+{
+    int i;
+    if (!sch || !station_id) {
+        return 0;
+    }
+    for (i = 0; i < sch->n_steps; i++) {
+        if (strcmp(sch->steps[i].station_id, station_id) == 0 && sch->steps[i].minutes > 0) {
+            return sch->steps[i].minutes;
+        }
+    }
+    return 0;
+}
+
+int zk_usual_minutes(const zk_copy_src_t *src, int station_index)
+{
+    const zk_kiosk_station_t *st;
+    const zk_schedule_t *sch;
+    int i;
+    int m = 0;
+    if (!src || !src->kiosk) {
+        return 10;
+    }
+    st = station_at(src->kiosk, station_index);
+    if (!st) {
+        return 10;
+    }
+    if (src->have_schedules && src->schedules && src->kiosk->has_next_run) {
+        sch = sched_by_id(src->schedules, src->kiosk->next_run.schedule_id);
+        m = step_minutes_for(sch, st->id);
+    }
+    if (m <= 0 && src->have_schedules && src->schedules) {
+        for (i = 0; i < src->schedules->n; i++) {
+            sch = &src->schedules->items[i];
+            if (!sch->enabled) {
+                continue;
+            }
+            m = step_minutes_for(sch, st->id);
+            if (m > 0) {
+                break;
+            }
+        }
+    }
+    if (m <= 0) {
+        m = 10;
+    }
+    if (m > 60) {
+        m = 60;
+    }
+    if (m < 1) {
+        m = 1;
+    }
+    return m;
+}
+
+static void when_nbsp(zk_wall_t at, zk_wall_t now, char *out, size_t cap)
+{
+    char day[32];
+    char t[24];
+    zk_fmt_relative_day(at, now, day, sizeof day);
+    zk_fmt_time_nbsp(at.hh, at.mm, t, sizeof t);
+    snprintf(out, cap, "%s %s", day, t);
+}
+
+static void until_text(const zk_pause_t *p, char *out, size_t cap)
+{
+    char t[24];
+    int w;
+    if (!p || !p->has_until) {
+        zk_str_copy(out, cap, "Until you resume");
+        return;
+    }
+    w = p->until.wday;
+    if (w < 0 || w > 6) {
+        zk_wall_t tmp = p->until;
+        zk_wall_set_wday(&tmp);
+        w = tmp.wday;
+    }
+    if (w < 0 || w > 6) {
+        w = 0;
+    }
+    zk_fmt_time_nbsp(p->until.hh, p->until.mm, t, sizeof t);
+    snprintf(out, cap, "Until %s %s", k_wd[w], t);
+}
+
+static int weekday_bit(const zk_schedule_t *s)
+{
+    if (!s || s->weekdays == 0) {
+        return 0x7F;
+    }
+    return (int)(s->weekdays & 0x7F);
+}
+
+static int range_overlap(const zk_schedule_t *a, const zk_schedule_t *b)
+{
+    int a0y = a->has_starts_on ? a->starts_y : 1;
+    int a0m = a->has_starts_on ? a->starts_m : 1;
+    int a0d = a->has_starts_on ? a->starts_d : 1;
+    int a1y = a->has_ends_on ? a->ends_y : 9999;
+    int a1m = a->has_ends_on ? a->ends_m : 12;
+    int a1d = a->has_ends_on ? a->ends_d : 31;
+    int b0y = b->has_starts_on ? b->starts_y : 1;
+    int b0m = b->has_starts_on ? b->starts_m : 1;
+    int b0d = b->has_starts_on ? b->starts_d : 1;
+    int b1y = b->has_ends_on ? b->ends_y : 9999;
+    int b1m = b->has_ends_on ? b->ends_m : 12;
+    int b1d = b->has_ends_on ? b->ends_d : 31;
+    if (!a->has_starts_on && !a->has_ends_on) {
+        return 1;
+    }
+    if (!b->has_starts_on && !b->has_ends_on) {
+        return 1;
+    }
+    if (zk_date_cmp(a0y, a0m, a0d, b1y, b1m, b1d) > 0) {
+        return 0;
+    }
+    if (zk_date_cmp(b0y, b0m, b0d, a1y, a1m, a1d) > 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static int window_min(const zk_schedule_t *s, int *start, int *end)
+{
+    int i;
+    int total = 0;
+    if (!s || !s->enabled || !s->has_start || s->n_steps <= 0) {
+        return 0;
+    }
+    for (i = 0; i < s->n_steps; i++) {
+        if (s->steps[i].minutes > 0) {
+            total += s->steps[i].minutes;
+        }
+    }
+    if (total <= 0) {
+        return 0;
+    }
+    *start = s->start_hh * 60 + s->start_mm;
+    *end = *start + total;
+    return 1;
+}
+
+static void sched_name(const zk_schedule_t *s, char *out, size_t cap)
+{
+    if (s->name[0]) {
+        zk_str_copy(out, cap, s->name);
+    } else {
+        zk_str_copy(out, cap, s->id);
+    }
+}
+
+typedef struct {
+    int on;
+    int wday;
+    char earlier[ZK_NOTE_MAX];
+    char later[ZK_NOTE_MAX];
+    int start;
+    int end;
+    int later_start;
+} overlap_t;
+
+static int first_bit(int mask)
+{
+    int i;
+    for (i = 0; i < 7; i++) {
+        if (mask & (1 << i)) {
+            return i;
+        }
+    }
+    return 2;
+}
+
+static void find_overlap(const zk_copy_src_t *src, overlap_t *o)
+{
+    int i, j;
+    int prefer = -1;
+    memset(o, 0, sizeof *o);
+    if (!src || !src->have_schedules || !src->schedules) {
+        return;
+    }
+    if (src->kiosk && src->kiosk->has_next_run && src->kiosk->next_run.has_at) {
+        prefer = src->kiosk->next_run.at.wday;
+        if (prefer < 0 || prefer > 6) {
+            zk_wall_t tmp = src->kiosk->next_run.at;
+            zk_wall_set_wday(&tmp);
+            prefer = tmp.wday;
+        }
+    }
+    for (i = 0; i < src->schedules->n; i++) {
+        int as, ae, amask;
+        if (!window_min(&src->schedules->items[i], &as, &ae)) {
+            continue;
+        }
+        amask = weekday_bit(&src->schedules->items[i]);
+        for (j = i + 1; j < src->schedules->n; j++) {
+            int bs, be, both, shared;
+            if (!window_min(&src->schedules->items[j], &bs, &be)) {
+                continue;
+            }
+            if (!range_overlap(&src->schedules->items[i], &src->schedules->items[j])) {
+                continue;
+            }
+            both = amask & weekday_bit(&src->schedules->items[j]);
+            if (!both) {
+                continue;
+            }
+            if (!(as < be && bs < ae)) {
+                continue;
+            }
+            shared = (prefer >= 0 && (both & (1 << prefer)) != 0) ? prefer : first_bit(both);
+            o->on = 1;
+            o->wday = shared;
+            if (as <= bs) {
+                sched_name(&src->schedules->items[i], o->earlier, sizeof o->earlier);
+                sched_name(&src->schedules->items[j], o->later, sizeof o->later);
+                o->start = as;
+                o->end = ae;
+                o->later_start = bs;
+            } else {
+                sched_name(&src->schedules->items[j], o->earlier, sizeof o->earlier);
+                sched_name(&src->schedules->items[i], o->later, sizeof o->later);
+                o->start = bs;
+                o->end = be;
+                o->later_start = as;
+            }
+            return;
+        }
+    }
+}
+
+static void min_to_nbsp(int minutes, char *out, size_t cap)
+{
+    int hh;
+    int mm;
+    if (minutes < 0) {
+        minutes = 0;
+    }
+    hh = (minutes / 60) % 24;
+    mm = minutes % 60;
+    zk_fmt_time_nbsp(hh, mm, out, cap);
+}
+
+static int ceil_min(int sec)
+{
+    if (sec <= 0) {
+        return 0;
+    }
+    return (sec + 59) / 60;
+}
+
+static const char *station_title_id(const zk_kiosk_t *k, const char *id)
+{
+    const zk_kiosk_station_t *st;
+    if (!k || !id || !id[0]) {
+        return "";
+    }
+    st = zk_kiosk_station(k, id);
+    if (!st) {
+        return "";
+    }
+    return st->title;
+}
+
+static int station_running(const zk_kiosk_t *k, const zk_kiosk_station_t *st)
+{
+    int i;
+    if (!k || !st) {
+        return 0;
+    }
+    if (st->on) {
+        return 1;
+    }
+    if (k->current_station[0] && strcmp(k->current_station, st->id) == 0) {
+        return 1;
+    }
+    if (k->has_run && strcmp(k->run.current_station, st->id) == 0) {
+        return 1;
+    }
+    for (i = 0; i < k->n_on; i++) {
+        if (strcmp(k->stations_on[i], st->id) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int last_wday(const zk_copy_src_t *src, const char *id)
+{
+    int i;
+    if (!src || !src->lasts || !id) {
+        return -1;
+    }
+    for (i = 0; i < src->n_lasts; i++) {
+        if (strcmp(src->lasts[i].id, id) == 0) {
+            return src->lasts[i].wday;
+        }
+    }
+    return -1;
+}
+
+static int soil_feature(const zk_copy_src_t *src)
+{
+    if (src->soil_doc) {
+        return src->soil_doc->configured ? 1 : 0;
+    }
+    return src->kiosk && src->kiosk->soil.enabled ? 1 : 0;
+}
+
+static int age_days(const zk_copy_src_t *src, int *stale)
+{
+    const zk_wall_t *upd = NULL;
+    int has = 0;
+    int64_t a, b;
+    int days;
+    *stale = 0;
+    if (src->soil_doc) {
+        *stale = src->soil_doc->et_stale ? 1 : 0;
+        if (src->soil_doc->has_updated) {
+            upd = &src->soil_doc->updated_at;
+            has = 1;
+        }
+    } else if (src->kiosk) {
+        *stale = src->kiosk->soil.et_stale ? 1 : 0;
+        if (src->kiosk->soil.has_updated_at) {
+            upd = &src->kiosk->soil.updated_at;
+            has = 1;
+        }
+    }
+    if (!has || !upd) {
+        return *stale ? 2 : 0;
+    }
+    a = zk_wall_epoch_sec(*upd);
+    b = zk_wall_epoch_sec(src->wall);
+    if (b < a) {
+        days = 0;
+    } else {
+        days = (int)((b - a) / 86400);
+    }
+    if (days > 2) {
+        *stale = 1;
+    }
+    if (*stale && days < 2) {
+        days = 2;
+    }
+    return days;
+}
+
+static const zk_soil_zone_t *zone_for(const zk_soil_doc_t *doc, const char *id)
+{
+    int i;
+    if (!doc || !id) {
+        return NULL;
+    }
+    for (i = 0; i < doc->n_zones; i++) {
+        if (strcmp(doc->zones[i].id, id) == 0) {
+            return &doc->zones[i];
+        }
+    }
+    return NULL;
+}
+
+static void fill_soil_text(zk_tile_copy_t *tile, const zk_copy_src_t *src, const zk_view_in_t *in,
+                           const zk_kiosk_station_t *st, int feature)
+{
+    int stale = 0;
+    int days = 0;
+    int has = 0;
+    int pct = 0;
+    int rate = 0;
+    const zk_soil_zone_t *z;
+    tile->soil = ZK_SOIL_HIDDEN;
+    tile->percent = -1;
+    tile->muted_slot = 0;
+    if (!feature) {
+        return;
+    }
+    days = age_days(src, &stale);
+    z = src->soil_doc ? zone_for(src->soil_doc, st->id) : NULL;
+    if (z) {
+        has = z->has_percent;
+        pct = z->percent;
+        rate = z->rate_measured;
+    } else if (!src->soil_doc && st->soil_percent >= 0 && src->kiosk->soil.show_bars) {
+        has = 1;
+        pct = st->soil_percent;
+        rate = 1;
+    }
+    if (!has || !rate) {
+        tile->soil = ZK_SOIL_NONE;
+        tile->muted_slot = 1;
+        zk_str_copy(tile->slot, sizeof tile->slot, "Rate not measured");
+        return;
+    }
+    if (pct < 0) {
+        pct = 0;
+    }
+    if (pct > 100) {
+        pct = 100;
+    }
+    tile->percent = pct;
+    if (z && z->has_age && z->age_days >= 2) {
+        stale = 1;
+        days = z->age_days;
+    }
+    if (stale) {
+        tile->soil = ZK_SOIL_STALE;
+        tile->muted_slot = 1;
+        snprintf(tile->slot, sizeof tile->slot, "%d%% " ZK_MID " %dd old", pct, days);
+        return;
+    }
+    tile->soil = ZK_SOIL_VALUE;
+    snprintf(tile->slot, sizeof tile->slot, "%d%% " ZK_MID " %s", pct,
+             zk_soil_word(in ? in->soil_cfg : NULL, st->id, pct));
+}
+
+static void fill_rain(zk_hero_copy_t *h, const zk_kiosk_t *k)
+{
+    int hundredths;
+    char num[24];
+    double v;
+    h->rain = 0;
+    h->rain_text[0] = 0;
+    h->rain_fill_px = 0;
+    if (!k || !k->rain.have_totals) {
+        return;
+    }
+    v = k->rain.total_72h;
+    if (!(v == v) || v <= 0.05) {
+        return;
+    }
+    hundredths = (int)(v * 100.0 + 0.5);
+    if (hundredths <= 5) {
+        return;
+    }
+    zk_fmt_inches_trim(v, num, sizeof num);
+    snprintf(h->rain_text, sizeof h->rain_text, "Rain %s in " ZK_MID " last 72 h", num);
+    h->rain = 1;
+    if (v >= 1.0) {
+        h->rain_fill_px = ZK_RAIN_TRACK;
+    } else {
+        h->rain_fill_px = (int)(v * (double)ZK_RAIN_TRACK + 0.5);
+    }
+}
+
+static void count_line(const zk_copy_src_t *src, char *out, size_t cap)
+{
+    const zk_schedule_t *sch;
+    int n = 0;
+    int total = 0;
+    int i;
+    out[0] = 0;
+    if (!src->kiosk || !src->kiosk->has_next_run) {
+        return;
+    }
+    total = src->kiosk->next_run.total_min;
+    sch = NULL;
+    if (src->have_schedules && src->schedules) {
+        sch = sched_by_id(src->schedules, src->kiosk->next_run.schedule_id);
+    }
+    if (sch) {
+        n = sch->n_steps;
+        if (total <= 0) {
+            for (i = 0; i < sch->n_steps; i++) {
+                total += sch->steps[i].minutes;
+            }
+        }
+    }
+    if (n <= 0 || total <= 0) {
+        return;
+    }
+    snprintf(out, cap, "%d station%s " ZK_MID " about %d min", n, n == 1 ? "" : "s", total);
+}
+
+static const char *program_name(const zk_kiosk_t *k)
+{
+    if (k->has_run && k->run.program[0]) {
+        return k->run.program;
+    }
+    if (k->has_next_run && k->next_run.name[0]) {
+        return k->next_run.name;
+    }
+    return "";
+}
+
+static void upper_label(char *dst, size_t cap, const char *prefix, const char *name)
+{
+    char up[ZK_TITLE_MAX];
+    zk_str_copy(up, sizeof up, name ? name : "");
+    zk_str_upper(up);
+    snprintf(dst, cap, "%s%s", prefix, up);
+}
+
+void zk_view_build(const zk_copy_src_t *src, const zk_view_in_t *in, zk_view_t *out)
+{
+    zk_copy_src_t empty_src;
+    zk_view_in_t empty_in;
+    const zk_kiosk_t *k;
+    overlap_t ov;
+    int offline;
+    int manual;
+    int watering;
+    int paused;
+    int confirmed;
+    int pending;
+    int i;
+    int n;
+    int feature;
+    char tbuf[32];
+    char when[64];
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof *out);
+    if (!src) {
+        memset(&empty_src, 0, sizeof empty_src);
+        src = &empty_src;
+    }
+    if (!in) {
+        memset(&empty_in, 0, sizeof empty_in);
+        in = &empty_in;
+    }
+    k = src->have_kiosk ? src->kiosk : NULL;
+    offline = src->unreachable || !k;
+    manual = k && is_manual(k);
+    watering = k && is_watering(k);
+    paused = k && k->pause.paused;
+    confirmed = in->stop_phase == ZK_STOP_CONFIRMED && !manual && !watering;
+    pending = !confirmed && in->offline_pending &&
+              (in->stop_phase == ZK_STOP_QUEUED || in->stop_phase == ZK_STOP_WAIT);
+    find_overlap(src, &ov);
+    out->overlap = (!offline && !manual && !watering && !paused && k && k->has_next_run && ov.on) ? 1 : 0;
+    if (ov.on && ov.wday >= 0 && ov.wday <= 6) {
+        char a[24], b[24], c[24];
+        min_to_nbsp(ov.start, a, sizeof a);
+        min_to_nbsp(ov.end, b, sizeof b);
+        min_to_nbsp(ov.later_start, c, sizeof c);
+        snprintf(out->overlap_title, sizeof out->overlap_title, "Two programs overlap on %s", k_wd[ov.wday]);
+        snprintf(out->overlap_body, sizeof out->overlap_body,
+                 "%s (%s " ZK_EN " %s) overlaps %s (%s). Stations would wait their turn. "
+                 "Fix on phone: Zanjerito " ZK_RQ " Schedules.",
+                 ov.earlier, a, b, ov.later, c);
+    }
+    fill_rain(&out->hero, k);
+    if (confirmed) {
+        zk_wall_t at = in->has_confirmed_at ? in->confirmed_at : src->wall;
+        zk_fmt_time_nbsp(at.hh, at.mm, tbuf, sizeof tbuf);
+        snprintf(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " CONFIRMED %s", tbuf);
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Watering stopped");
+        if (k && k->has_next_run && k->next_run.has_at) {
+            when_nbsp(k->next_run.at, src->wall, when, sizeof when);
+            snprintf(out->hero.secondary, sizeof out->hero.secondary, "Next run %s", when);
+        }
+        out->hero.style = ZK_HERO_STOP_CONFIRMED;
+    } else if (pending) {
+        zk_fmt_time_nbsp(k ? k->now.hh : src->wall.hh, k ? k->now.mm : src->wall.mm, tbuf, sizeof tbuf);
+        snprintf(out->hero.label, sizeof out->hero.label, "STOP " ZK_MID " LAST UPDATE %s", tbuf);
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Stop not sent yet:");
+        zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "can't reach controller. Retrying\xE2\x80\xA6");
+        out->hero.style = ZK_HERO_STOP_PENDING;
+    } else if (offline) {
+        if (k && k->has_now) {
+            zk_fmt_time_nbsp(k->now.hh, k->now.mm, tbuf, sizeof tbuf);
+        } else {
+            zk_fmt_time_nbsp(src->wall.hh, src->wall.mm, tbuf, sizeof tbuf);
+        }
+        snprintf(out->hero.label, sizeof out->hero.label, "LAST UPDATE %s " ZK_MID " RETRYING", tbuf);
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Can't reach controller");
+        zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Check the controller power and Wi-Fi");
+        out->hero.style = ZK_HERO_OFFLINE;
+    } else if (manual) {
+        const char *title = station_title_id(k, k->run.current_station);
+        int left = ceil_min(k->run.step_remaining_sec);
+        zk_wall_t end = src->wall;
+        if (!title[0]) {
+            title = station_title_id(k, k->current_station);
+        }
+        upper_label(out->hero.label, sizeof out->hero.label, "MANUAL RUN " ZK_MID " ", title);
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, title);
+        snprintf(out->hero.time_line, sizeof out->hero.time_line, "%d min left", left);
+        zk_wall_add_seconds(&end, k->run.step_remaining_sec > 0 ? k->run.step_remaining_sec : 0);
+        zk_fmt_time_nbsp(end.hh, end.mm, tbuf, sizeof tbuf);
+        snprintf(out->hero.secondary, sizeof out->hero.secondary, "ends %s", tbuf);
+        out->hero.style = ZK_HERO_MANUAL;
+    } else if (watering) {
+        const char *title = station_title_id(k, k->has_run ? k->run.current_station : k->current_station);
+        const char *next = k->has_run ? station_title_id(k, k->run.next_station) : "";
+        int left = k->has_run ? ceil_min(k->run.step_remaining_sec) : 0;
+        zk_wall_t end = src->wall;
+        char prog[ZK_NOTE_MAX];
+        zk_str_copy(prog, sizeof prog, program_name(k));
+        upper_label(out->hero.label, sizeof out->hero.label, "WATERING NOW " ZK_MID " ", prog);
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, title[0] ? title : prog);
+        snprintf(out->hero.time_line, sizeof out->hero.time_line, "%d min left", left);
+        if (k->has_run) {
+            zk_wall_add_seconds(&end, k->run.step_remaining_sec > 0 ? k->run.step_remaining_sec : 0);
+        }
+        zk_fmt_time_nbsp(end.hh, end.mm, tbuf, sizeof tbuf);
+        if (next[0]) {
+            snprintf(out->hero.secondary, sizeof out->hero.secondary, "ends %s " ZK_MID " next %s", tbuf, next);
+        } else {
+            snprintf(out->hero.secondary, sizeof out->hero.secondary, "ends %s", tbuf);
+        }
+        out->hero.style = ZK_HERO_WATERING;
+    } else if (paused) {
+        zk_str_copy(out->hero.label, sizeof out->hero.label, "PAUSED FOR RAIN");
+        until_text(&k->pause, out->hero.headline, sizeof out->hero.headline);
+        zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Tap a station to run it anyway");
+        out->hero.style = ZK_HERO_PAUSED;
+    } else if (!k || !k->has_next_run) {
+        zk_str_copy(out->hero.label, sizeof out->hero.label, "SCHEDULE");
+        zk_str_copy(out->hero.headline, sizeof out->hero.headline, "Nothing scheduled");
+        zk_str_copy(out->hero.secondary, sizeof out->hero.secondary, "Add a program on your phone");
+        out->hero.style = ZK_HERO_NOTHING;
+    } else if (out->overlap) {
+        char prog[ZK_NOTE_MAX];
+        zk_str_copy(prog, sizeof prog, k->next_run.name);
+        upper_label(out->hero.label, sizeof out->hero.label, "NEXT RUN " ZK_MID " ", prog);
+        if (k->next_run.has_at) {
+            when_nbsp(k->next_run.at, src->wall, out->hero.headline, sizeof out->hero.headline);
+        }
+        snprintf(out->hero.secondary, sizeof out->hero.secondary, "Overlap on %s " ZK_MID " Fix on phone",
+                 k_wd[ov.wday >= 0 && ov.wday <= 6 ? ov.wday : 0]);
+        out->hero.style = ZK_HERO_OVERLAP;
+    } else {
+        char prog[ZK_NOTE_MAX];
+        zk_str_copy(prog, sizeof prog, k->next_run.name);
+        upper_label(out->hero.label, sizeof out->hero.label, "NEXT RUN " ZK_MID " ", prog);
+        if (k->next_run.has_at) {
+            when_nbsp(k->next_run.at, src->wall, out->hero.headline, sizeof out->hero.headline);
+        }
+        count_line(src, out->hero.secondary, sizeof out->hero.secondary);
+        out->hero.style = ZK_HERO_IDLE;
+    }
+    {
+        char tmp[160];
+        zk_str_copy(tmp, sizeof tmp, out->hero.label);
+        clamp_to(out->hero.label, sizeof out->hero.label, tmp, in->label_px, 2, in->width_px, in->width_user);
+    }
+
+    n = k ? zk_layout_shown(k->n_stations) : 0;
+    out->n_tiles = n;
+    feature = k ? soil_feature(src) : 0;
+    for (i = 0; i < n; i++) {
+        const zk_kiosk_station_t *st = &k->stations[i];
+        int lines = n > 4 ? 2 : 3;
+        int remain = -1;
+        {
+            char tmp[ZK_TITLE_MAX];
+            zk_str_copy(tmp, sizeof tmp, st->title);
+            clamp_to(out->tiles[i].name, sizeof out->tiles[i].name, tmp, in->tile_px, lines, in->width_px,
+                     in->width_user);
+        }
+        if (offline || pending) {
+            out->tiles[i].vis = ZK_TILE_UNAVAILABLE;
+            zk_str_copy(out->tiles[i].slot, sizeof out->tiles[i].slot, "unavailable");
+            out->tiles[i].muted_slot = 1;
+            out->tiles[i].soil = ZK_SOIL_HIDDEN;
+            out->tiles[i].percent = -1;
+            continue;
+        }
+        if (station_running(k, st)) {
+            out->tiles[i].vis = ZK_TILE_ON;
+        } else {
+            out->tiles[i].vis = ZK_TILE_OFF;
+        }
+        if (k->has_run && strcmp(k->run.current_station, st->id) == 0) {
+            remain = ceil_min(k->run.step_remaining_sec);
+        }
+        if (out->tiles[i].vis == ZK_TILE_ON && remain >= 0) {
+            snprintf(out->tiles[i].slot, sizeof out->tiles[i].slot, "%d min left", remain);
+            out->tiles[i].soil = ZK_SOIL_HIDDEN;
+            out->tiles[i].percent = -1;
+        } else if (feature) {
+            fill_soil_text(&out->tiles[i], src, in, st, 1);
+        } else {
+            int wd = last_wday(src, st->id);
+            out->tiles[i].soil = ZK_SOIL_HIDDEN;
+            out->tiles[i].percent = -1;
+            if (wd >= 0 && wd <= 6) {
+                snprintf(out->tiles[i].slot, sizeof out->tiles[i].slot, "last %s", k_wd[wd]);
+            }
+            out->tiles[i].muted_slot = 1;
+        }
+    }
+    out->bar_disabled = offline ? 1 : 0;
+    out->bar_is_resume = paused ? 1 : 0;
+    zk_str_copy(out->bar_word, sizeof out->bar_word, paused ? ZK_WORD_RESUME : ZK_WORD_PAUSE);
+    out->stop_filled = (watering || manual) && !confirmed && !pending ? 1 : 0;
+
+    out->sheet_kind = in->sheet_kind;
+    if (in->sheet_kind == ZK_SHEET_RUN || in->sheet_kind == ZK_SHEET_ANYWAY) {
+        const zk_kiosk_station_t *st = k ? station_at(k, in->station_index) : NULL;
+        int minutes = in->minutes;
+        if (minutes < 1) {
+            minutes = 1;
+        }
+        if (minutes > 60) {
+            minutes = 60;
+        }
+        out->sheet.minutes = minutes;
+        out->sheet.show_stepper = 1;
+        out->sheet.minus_enabled = minutes > 1;
+        if (in->sheet_kind == ZK_SHEET_ANYWAY) {
+            char until[80];
+            zk_str_copy(out->sheet.label, sizeof out->sheet.label, "PAUSED FOR RAIN");
+            snprintf(out->sheet.title, sizeof out->sheet.title, "Run %s anyway?", st ? st->title : "");
+            if (k && k->pause.has_until) {
+                char clk[24];
+                int w = k->pause.until.wday;
+                if (w < 0 || w > 6) {
+                    zk_wall_t tmp = k->pause.until;
+                    zk_wall_set_wday(&tmp);
+                    w = tmp.wday;
+                }
+                if (w < 0 || w > 6) {
+                    w = 0;
+                }
+                zk_fmt_time_nbsp(k->pause.until.hh, k->pause.until.mm, clk, sizeof clk);
+                snprintf(until, sizeof until, "%s %s", k_wd[w], clk);
+            } else {
+                zk_str_copy(until, sizeof until, "you resume");
+            }
+            snprintf(out->sheet.body, sizeof out->sheet.body,
+                     "Paused until %s. Runs once; the pause stays on.", until);
+        } else {
+            zk_str_copy(out->sheet.label, sizeof out->sheet.label, "RUN A STATION");
+            snprintf(out->sheet.title, sizeof out->sheet.title, "Run %s for %d min?", st ? st->title : "", minutes);
+            zk_str_copy(out->sheet.body, sizeof out->sheet.body, "Runs once now. Schedules don't change.");
+        }
+    } else if (in->sheet_kind == ZK_SHEET_STOP_STATION) {
+        const zk_kiosk_station_t *st = k ? station_at(k, in->station_index) : NULL;
+        const char *next = (k && k->has_run) ? station_title_id(k, k->run.next_station) : "";
+        int left = (k && k->has_run) ? ceil_min(k->run.step_remaining_sec) : 0;
+        snprintf(out->sheet.label, sizeof out->sheet.label, "WATERING NOW " ZK_MID " %d MIN LEFT", left);
+        snprintf(out->sheet.title, sizeof out->sheet.title, "Stop %s?", st ? st->title : "");
+        if (next[0]) {
+            snprintf(out->sheet.body, sizeof out->sheet.body,
+                     "The program goes on with the next station, %s. Use STOP to end everything.", next);
+        } else {
+            zk_str_copy(out->sheet.body, sizeof out->sheet.body,
+                        "The program goes on with the next station. Use STOP to end everything.");
+        }
+    } else if (in->sheet_kind == ZK_SHEET_STOP_ALL) {
+        if (offline || pending || in->offline_pending) {
+            zk_str_copy(out->sheet.label, sizeof out->sheet.label, "STOP " ZK_MID " CAN'T REACH CONTROLLER");
+            zk_str_copy(out->sheet.body, sizeof out->sheet.body,
+                        "The controller can't be reached right now. The kiosk keeps trying to send the stop "
+                        "and shows 'Watering stopped' only when the controller confirms it.");
+        } else {
+            const char *title = "";
+            const char *prog = "";
+            zk_str_copy(out->sheet.label, sizeof out->sheet.label, "STOP");
+            if (k && k->has_run) {
+                title = station_title_id(k, k->run.current_station);
+                prog = k->run.program;
+            } else if (k && k->current_station[0]) {
+                title = station_title_id(k, k->current_station);
+            }
+            if (title[0] && prog[0]) {
+                snprintf(out->sheet.body, sizeof out->sheet.body,
+                         "%s closes now and the rest of %s is skipped. Schedules stay on.", title, prog);
+            } else if (title[0]) {
+                snprintf(out->sheet.body, sizeof out->sheet.body,
+                         "%s closes now and the rest of the program is skipped. Schedules stay on.", title);
+            } else {
+                zk_str_copy(out->sheet.body, sizeof out->sheet.body, "Schedules stay on.");
+            }
+        }
+        zk_str_copy(out->sheet.title, sizeof out->sheet.title, "Stop all watering?");
+    } else if (in->sheet_kind == ZK_SHEET_OVERLAP) {
+        zk_str_copy(out->sheet.label, sizeof out->sheet.label, "OVERLAP " ZK_MID " READ ONLY");
+        zk_str_copy(out->sheet.title, sizeof out->sheet.title,
+                    out->overlap_title[0] ? out->overlap_title : "Two programs overlap");
+        zk_str_copy(out->sheet.body, sizeof out->sheet.body, out->overlap_body);
+    }
+}

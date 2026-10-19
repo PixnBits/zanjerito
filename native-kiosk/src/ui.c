@@ -2,141 +2,128 @@
 
 #include "data.h"
 #include "platform.h"
+#include "zk_actions.h"
+#include "zk_copy.h"
+#include "zk_flow.h"
 #include "zk_layout.h"
-#include "zk_logic.h"
+#include "zk_model.h"
+#include "zk_repaint.h"
+#include "zk_soilcfg.h"
 #include "zk_text.h"
 
 #include "generated/zk_fonts.h"
 #include "generated/zk_icons.h"
 
+#include "src/core/lv_refr_private.h"
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+/* Direction C. Flat fills, 2 px borders, no shadow. Label backgrounds stay
+ * transparent so the card shows through; that is glyph coverage, not a scrim. */
+
 enum {
-    COL_BG = 0xEFDDBE,
-    COL_CARD = 0xFCF5E6,
-    COL_INK = 0x33200F,
-    COL_MUT = 0x66492F,
-    COL_LINE = 0xD2B78A,
-    COL_TRACK = 0xEBDCC0,
+    COL_SAND = 0xFBECD6,
+    COL_CREAM = 0xFFFAEE,
+    COL_EDGE = 0xEEDDC3,
+    COL_TILE = 0xFCF5E6,
+    COL_LINE = 0xD9C3A0,
+    COL_DIM = 0xF3E1C4,
+    COL_INK = 0x4A2F12,
+    COL_TEXT = 0x3A2A1F,
+    COL_MUTED = 0x6E5A45,
+    COL_LABEL = 0x7A5A3A,
+    COL_TERRA = 0xD26A43,
+    COL_TERRA_INK = 0xB04F2C,
+    COL_ERR = 0xA8432A,
     COL_TEAL = 0x0F6E6C,
-    COL_FILL = 0x2A908B,
-    COL_LOW = 0xCD6A32,
-    COL_LOWTX = 0xA93C14,
+    COL_TEAL_INK = 0x1F6A64,
+    COL_PLUM = 0x4E3F63,
+    COL_PLUM_INK = 0xF3EEF8,
+    COL_PLUM_MUT = 0xD9CFE6,
     COL_STOP = 0xB5361A,
-    COL_STOPSH = 0x7C2411,
-    COL_PAUSE = 0x4E3F63,
-    COL_BACK = 0xDCC59B,
-    COL_RAINBG = 0xCFE6E1,
-    COL_RAINFG = 0x0B4A48,
-    COL_RUNBG = 0x0F5E5C,
-    COL_RUNLBL = 0xBFEDE6,
-    COL_RUNFILL = 0xF2C777,
+    COL_BAND = 0x7C2411,
     COL_WHITE = 0xFFFFFF,
-    COL_STALE_BG = 0xF6D5CC,
-    COL_DIM = 0x33200F
+    COL_TRACK = 0xE3D0B3,
+    COL_STALE = 0xBFAE97,
+    COL_ON_TRACK = 0x3F8B89,
+    COL_ON_FILL = 0xBFEDE6
 };
 
-#define MIDDOT "\xC2\xB7"
-#define ELLIPSIS ZK_TEXT_ELLIPSIS
-
-enum { HIT_N = 32, ACT_SCHED_BODY = 1000 };
+enum { HIT_N = ZK_TARGET_OK + 1, TG_MAX = 24 };
 
 typedef struct {
-    int content;
-    int modal;
-    int rain;
-    int fault;
-    int n_st;
-    int soil_mask;
-    int steps;
-    int sched_i;
-    int station_i;
-    int have;
-} view_key;
-
-typedef struct {
+    lv_obj_t *hero;
+    lv_obj_t *h_label;
+    lv_obj_t *h_head;
+    lv_obj_t *h_time;
+    lv_obj_t *h_sub;
+    lv_obj_t *warn;
+    lv_obj_t *rain;
+    lv_obj_t *rain_tx;
+    lv_obj_t *rain_meter;
+    lv_obj_t *rain_fill;
+    lv_obj_t *rain_0;
+    lv_obj_t *rain_1;
+    lv_obj_t *tile[ZK_MAX_SHOWN];
+    lv_obj_t *title[ZK_MAX_SHOWN];
+    lv_obj_t *title_ln[ZK_MAX_SHOWN];
+    lv_obj_t *title_rest[ZK_MAX_SHOWN];
+    lv_obj_t *drop[ZK_MAX_SHOWN];
+    lv_obj_t *slot[ZK_MAX_SHOWN];
+    lv_obj_t *bar[ZK_MAX_SHOWN];
+    lv_obj_t *fill[ZK_MAX_SHOWN];
+    lv_obj_t *slot_tx[ZK_MAX_SHOWN];
+    lv_obj_t *pause;
+    lv_obj_t *pause_ic;
+    lv_obj_t *pause_tx;
+    lv_obj_t *stop;
+    lv_obj_t *stop_ic;
+    lv_obj_t *stop_tx;
+    lv_obj_t *sheet;
+    lv_obj_t *s_label;
+    lv_obj_t *s_title;
+    lv_obj_t *s_body;
+    lv_obj_t *minus;
+    lv_obj_t *minus_tx;
+    lv_obj_t *plus;
+    lv_obj_t *plus_tx;
+    lv_obj_t *value_box;
+    lv_obj_t *value;
+    lv_obj_t *cancel;
+    lv_obj_t *cancel_tx;
+    lv_obj_t *run;
+    lv_obj_t *run_ic;
+    lv_obj_t *run_tx;
+    lv_obj_t *stop_st;
+    lv_obj_t *stop_st_ic;
+    lv_obj_t *stop_st_tx;
+    lv_obj_t *stop_all;
+    lv_obj_t *stop_all_ic;
+    lv_obj_t *stop_all_tx;
+    lv_obj_t *ok;
+    lv_obj_t *ok_tx;
     lv_obj_t *hit[HIT_N];
-    lv_obj_t *shadow;
-    lv_obj_t *hdr_kicker;
-    lv_obj_t *hdr_big;
-    lv_obj_t *rain_bold;
-    lv_obj_t *rain_rest;
-    lv_obj_t *fault_lbl;
-    lv_obj_t *tile_obj[8];
-    lv_obj_t *tile_title[8];
-    lv_obj_t *tile_pct[8];
-    lv_obj_t *tile_fill[8];
-    lv_obj_t *tile_drop[8];
-    lv_obj_t *tile_bar[8];
-    int tile_bar_w[8];
     int n_tiles;
-    lv_obj_t *run_title;
-    lv_obj_t *run_count;
-    lv_obj_t *run_fill;
-    lv_obj_t *run_step;
-    lv_obj_t *run_next;
-    int run_bar_w;
-    lv_obj_t *ban_title;
-    lv_obj_t *ban_until;
-    lv_obj_t *info_name;
-    lv_obj_t *info_sub0;
-    lv_obj_t *info_sub1;
-    lv_obj_t *chip_t[4];
-    lv_obj_t *chip_s[4];
-    lv_obj_t *sched_count;
-    lv_obj_t *sched_name;
-    lv_obj_t *sched_sum;
-    lv_obj_t *sched_ends1;
-    lv_obj_t *sched_ends2;
-    lv_obj_t *row_name[5];
-    lv_obj_t *row_min[5];
-    lv_obj_t *row_unit[5];
-    lv_obj_t *hold_face;
-    int n_rows;
-    lv_obj_t *m_title;
-    lv_obj_t *m_body;
-    lv_obj_t *m_sub;
-    lv_obj_t *stale;
-    lv_obj_t *toast;
-    lv_obj_t *toast_lbl;
-    lv_obj_t *st_title;
-    lv_obj_t *st_dot;
-    lv_obj_t *st_state;
-    lv_obj_t *st_exempt;
-    lv_obj_t *st_soil_pct;
-    lv_obj_t *st_soil_fill;
-    lv_obj_t *st_soil_msg;
-    int st_bar_w;
-    lv_obj_t *nu_title;
-    lv_obj_t *nu_body;
 } widgets_t;
 
-static zk_app_t g_app;
-static char g_fix[512];
-static lv_display_t *g_disp;
-static widgets_t g_w;
-static view_key g_key;
-static int g_have_key;
-static zk_layout_in g_lin;
-static int g_lin_ready;
-static int g_hit_content;
-static int g_hit_modal;
-static int g_dirty;
-static int g_override = -1;
-static int g_nav = -1;
-static int g_modal;
-static int g_pressed;
-static int g_pick_chip = -1;
-static int g_sched_i;
-static int g_station_i;
-static char g_station_id[ZK_ID_MAX];
-static uint32_t g_ver;
-static uint32_t g_seen_seq;
-static int g_seen_ok;
-static char g_toast_text[96];
-static double g_toast_until;
-static double g_quiet_until; /* ignore chip and modal taps until this mono time */
+typedef struct {
+    int valid;
+    int screen;
+    int unreach;
+    int phase;
+    int paused;
+    int style;
+    int overlap;
+    int run_tile;
+    int minutes;
+    int rain_on;
+    char rain_text[72];
+    char slots[ZK_MAX_SHOWN][96];
+    char time_line[96];
+    int n_stations;
+} frame_t;
 
 enum { LAB_TRACK_MAX = 96, LAB_ID_STORE = 32 };
 
@@ -146,12 +133,92 @@ typedef struct {
     int clamped;
 } lab_slot_t;
 
+static widgets_t g_w;
 static lab_slot_t g_labs[LAB_TRACK_MAX];
 static int g_nlabs;
 static int g_lab_overflow;
 static const char *g_mark_id;
 static int g_mark_clamped;
 static char g_idbuf[LAB_ID_STORE];
+
+static zk_app_t g_app;
+static char g_fix[512];
+static lv_display_t *g_disp;
+static int g_built;
+static int g_ready;
+static int g_override = -1;
+static int g_pressed;
+static enum zk_screen g_screen;
+static int g_station;
+static int g_minutes = 10;
+static int g_min_key = -999;
+static int g_paused;
+static zk_snapshot_t g_snap;
+static zk_view_t g_view;
+static zk_layout_in g_lin;
+static zk_target g_tg[TG_MAX];
+static int g_ntg;
+static zk_stop_flow_t g_stop;
+static int g_stop_hold = -1;
+static int g_last_retry_set;
+static int64_t g_last_retry;
+static int64_t g_last_tap;
+static uint32_t g_seen_seq;
+static int g_seen_ok;
+static uint32_t g_ack_version;
+static int g_confirmed_reachable;
+static int g_have_prev_flags;
+static int g_prev_paused;
+static int g_prev_unreach;
+static zk_wall_t g_confirmed_at;
+static int g_has_confirmed_at;
+static int g_retry_pulse;
+static frame_t g_prev;
+static zk_soil_cfg_t g_soil;
+
+static uint8_t g_oct44[44 * 44];
+static uint8_t g_oct40[40 * 40];
+static uint8_t g_oct30[30 * 30];
+static uint8_t g_play30[30 * 30];
+static uint8_t g_play28[28 * 28];
+static uint8_t g_drop22[22 * 22];
+static uint8_t g_warn22[22 * 22];
+static lv_image_dsc_t g_oct44_dsc;
+static lv_image_dsc_t g_oct40_dsc;
+static lv_image_dsc_t g_oct30_dsc;
+static lv_image_dsc_t g_play30_dsc;
+static lv_image_dsc_t g_play28_dsc;
+static lv_image_dsc_t g_drop22_dsc;
+static lv_image_dsc_t g_warn_dsc;
+
+static lv_color_t hex(uint32_t c)
+{
+    return lv_color_hex(c);
+}
+
+static uint32_t darker(uint32_t c)
+{
+    int r = (int)((c >> 16) & 255u) * 3 / 4;
+    int g = (int)((c >> 8) & 255u) * 3 / 4;
+    int b = (int)(c & 255u) * 3 / 4;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+}
+
+static void copy_cap(char *dst, size_t cap, const char *src)
+{
+    size_t i = 0;
+    if (!dst || cap == 0) {
+        return;
+    }
+    if (!src) {
+        src = "";
+    }
+    while (src[i] && i + 1 < cap) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
 
 static void tracks_reset(void)
 {
@@ -173,22 +240,6 @@ static void mark_lab_n(const char *prefix, int n, int clamped)
     mark_lab(g_idbuf, clamped);
 }
 
-static void copy_cap(char *dst, size_t cap, const char *src)
-{
-    size_t i = 0;
-    if (!dst || cap == 0) {
-        return;
-    }
-    if (!src) {
-        src = "";
-    }
-    while (src[i] && i + 1 < cap) {
-        dst[i] = src[i];
-        i++;
-    }
-    dst[i] = 0;
-}
-
 static void remember(lv_obj_t *lb)
 {
     lab_slot_t *s;
@@ -198,31 +249,21 @@ static void remember(lv_obj_t *lb)
         g_mark_clamped = 0;
         return;
     }
-    s = &g_labs[g_nlabs];
+    s = &g_labs[g_nlabs++];
     if (g_mark_id) {
         copy_cap(s->id, sizeof s->id, g_mark_id);
     } else {
-        snprintf(s->id, sizeof s->id, "l%d", g_nlabs);
+        snprintf(s->id, sizeof s->id, "l%d", g_nlabs - 1);
     }
     s->obj = lb;
     s->clamped = g_mark_clamped;
-    g_nlabs++;
     g_mark_id = NULL;
     g_mark_clamped = 0;
 }
 
-static lv_color_t hex(uint32_t c)
+static void set_tracked(lv_obj_t *lb, const char *text, int clamped)
 {
-    return lv_color_hex(c);
-}
-
-static void plain(lv_obj_t *o)
-{
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-}
-
-static void set_lab(lv_obj_t *lb, const char *text)
-{
+    int i;
     const char *cur;
     if (!lb) {
         return;
@@ -231,440 +272,626 @@ static void set_lab(lv_obj_t *lb, const char *text)
         text = "";
     }
     cur = lv_label_get_text(lb);
-    if (cur && strcmp(cur, text) == 0) {
-        return;
+    if (!cur || strcmp(cur, text) != 0) {
+        lv_label_set_text(lb, text);
     }
-    lv_label_set_text(lb, text);
+    for (i = 0; i < g_nlabs; i++) {
+        if (g_labs[i].obj == lb) {
+            g_labs[i].clamped = clamped;
+            return;
+        }
+    }
 }
 
-typedef struct {
-    const lv_font_t *font;
-    int32_t letter_space;
-} fit_ctx_t;
-
-static int fit_width_cb(const char *text, size_t nbytes, void *user)
+static void show(lv_obj_t *o, int on)
 {
-    fit_ctx_t *u = user;
-    if (!text || !u || !u->font) {
-        return 0;
-    }
-    if (nbytes > 0x7fffffffu) {
-        nbytes = 0x7fffffffu;
-    }
-    return (int)lv_text_get_width(text, (uint32_t)nbytes, u->font, u->letter_space);
-}
-
-/* One line, clipped to max_px, with U+2026 when the source does not fit.
- * Does not change the label's width: right-aligned slots stay put. */
-static void set_lab_fit_px(lv_obj_t *lb, const char *text, int max_px)
-{
-    char buf[512];
-    fit_ctx_t u;
-    const lv_font_t *font;
-    int32_t h;
-    if (!lb) {
+    if (!o) {
         return;
     }
-    font = lv_obj_get_style_text_font(lb, LV_PART_MAIN);
-    u.font = font;
-    u.letter_space = lv_obj_get_style_text_letter_space(lb, LV_PART_MAIN);
-    if (max_px < 1 || !font || zk_text_fit(buf, sizeof buf, text, max_px, fit_width_cb, &u) != 0) {
-        set_lab(lb, text);
+    if (on) {
+        lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
     } else {
-        set_lab(lb, buf);
-    }
-    lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
-    if (font) {
-        h = lv_font_get_line_height(font);
-        if (h > 0) {
-            lv_obj_set_height(lb, h);
-        }
+        lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
-static int slot_px(lv_obj_t *lb)
+static void clickable(lv_obj_t *o, int on)
 {
-    int w;
-    if (!lb) {
-        return 0;
-    }
-    w = (int)lv_obj_get_style_width(lb, LV_PART_MAIN);
-    if (w <= 0 || w > 4000) {
-        lv_obj_update_layout(lb);
-        w = (int)lv_obj_get_width(lb);
-    }
-    if (w <= 0 || w > 4000) {
-        return 0;
-    }
-    return w;
-}
-
-static void set_lab_fit(lv_obj_t *lb, const char *text)
-{
-    int w = slot_px(lb);
-    if (w <= 0) {
-        set_lab(lb, text);
-        if (lb) {
-            lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
-        }
+    if (!o) {
         return;
     }
-    set_lab_fit_px(lb, text, w);
+    if (on) {
+        lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    } else {
+        lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    }
 }
 
-/* Header kicker: "NEXT RUN · " stays whole. Only the name is end-cut. */
-static void set_next_kicker(const char *name)
+static void flat(lv_obj_t *o)
 {
-    char buf[ZK_NOTE_MAX + 32];
-    fit_ctx_t u;
-    const lv_font_t *font;
-    int max_px;
-    if (!g_w.hdr_kicker) {
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_set_style_shadow_width(o, 0, 0);
+    lv_obj_set_style_shadow_width(o, 0, LV_STATE_PRESSED);
+    lv_obj_set_style_outline_width(o, 0, 0);
+    lv_obj_set_style_outline_width(o, 0, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+}
+
+static void paint_box(lv_obj_t *o, uint32_t bg, uint32_t border, int width, int radius, lv_border_side_t side)
+{
+    if (!o) {
         return;
     }
-    font = lv_obj_get_style_text_font(g_w.hdr_kicker, LV_PART_MAIN);
-    u.font = font;
-    u.letter_space = lv_obj_get_style_text_letter_space(g_w.hdr_kicker, LV_PART_MAIN);
-    max_px = slot_px(g_w.hdr_kicker);
-    zk_fmt_next_run_kicker(name, buf, sizeof buf, max_px, (font && max_px > 0) ? fit_width_cb : NULL, &u);
-    set_lab(g_w.hdr_kicker, buf);
-    lv_label_set_long_mode(g_w.hdr_kicker, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_bg_color(o, hex(bg), 0);
+    lv_obj_set_style_bg_color(o, hex(bg), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_border_side(o, side, 0);
+    lv_obj_set_style_border_side(o, side, LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(o, width, 0);
+    lv_obj_set_style_border_width(o, width, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(o, hex(border), 0);
+    lv_obj_set_style_border_color(o, hex(darker(border)), LV_STATE_PRESSED);
+    lv_obj_set_style_border_opa(o, width > 0 ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
-/* Time line is stored whole. A narrow slot may clip pixels; it must not ellipsize. */
-static void set_time_line(lv_obj_t *lb, const char *text)
+static void place(lv_obj_t *o, int x, int y, int w, int h)
 {
-    set_lab(lb, text);
-    if (lb) {
-        lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
+    if (!o) {
+        return;
     }
-}
-
-static lv_obj_t *box_at(lv_obj_t *parent, int x, int y, int w, int h, uint32_t bg, int radius)
-{
-    lv_obj_t *o = lv_obj_create(parent);
     lv_obj_set_pos(o, x, y);
     lv_obj_set_size(o, w, h);
-    lv_obj_set_style_radius(o, radius, 0);
-    lv_obj_set_style_bg_color(o, hex(bg), 0);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(o, 0, 0);
-    lv_obj_set_style_pad_all(o, 0, 0);
-    plain(o);
+}
+
+static lv_obj_t *make_box(lv_obj_t *parent)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    flat(o);
     return o;
 }
 
-static lv_obj_t *box_rect(lv_obj_t *parent, zk_rect r, uint32_t bg, int radius)
-{
-    return box_at(parent, r.x, r.y, r.w, r.h, bg, radius);
-}
-
-static void border_on(lv_obj_t *o, int width)
-{
-    lv_obj_set_style_border_width(o, width, 0);
-    lv_obj_set_style_border_color(o, hex(COL_LINE), 0);
-    lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
-}
-
-static void press_style(lv_obj_t *o, uint32_t bg)
-{
-    lv_obj_set_style_bg_color(o, lv_color_darken(hex(bg), LV_OPA_30), LV_STATE_PRESSED);
-    lv_obj_set_style_translate_y(o, 4, LV_STATE_PRESSED);
-}
-
-static void on_evt(lv_event_t *e);
-
-static lv_obj_t *target(lv_obj_t *parent, zk_rect r, int id, uint32_t bg, int radius, int border)
-{
-    lv_obj_t *o = box_rect(parent, r, bg, radius);
-    void *ud = (void *)(intptr_t)id;
-    if (border) {
-        border_on(o, 3);
-    }
-    press_style(o, bg);
-    lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(o, on_evt, LV_EVENT_CLICKED, ud);
-    lv_obj_add_event_cb(o, on_evt, LV_EVENT_PRESSED, ud);
-    lv_obj_add_event_cb(o, on_evt, LV_EVENT_RELEASED, ud);
-    lv_obj_add_event_cb(o, on_evt, LV_EVENT_PRESS_LOST, ud);
-    if (id > 0 && id < HIT_N) {
-        g_w.hit[id] = o;
-    }
-    return o;
-}
-
-static lv_obj_t *icon_at(lv_obj_t *parent, const void *src, uint32_t color, int x, int y)
-{
-    lv_obj_t *im = lv_image_create(parent);
-    lv_image_set_src(im, src);
-    lv_obj_set_pos(im, x, y);
-    lv_obj_set_style_image_recolor(im, hex(color), 0);
-    lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
-    plain(im);
-    return im;
-}
-
-static lv_obj_t *lab(lv_obj_t *parent, const char *text, const lv_font_t *font, uint32_t color, int x, int y)
+static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *lb = lv_label_create(parent);
-    lv_label_set_text(lb, text ? text : "");
+    lv_obj_set_style_bg_opa(lb, LV_OPA_TRANSP, 0);
     lv_obj_set_style_text_font(lb, font, 0);
     lv_obj_set_style_text_color(lb, hex(color), 0);
-    lv_obj_set_pos(lb, x, y);
-    lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
-    plain(lb);
+    lv_obj_set_style_text_opa(lb, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_line_space(lb, 0, 0);
+    lv_label_set_long_mode(lb, LV_LABEL_LONG_WRAP);
+    lv_obj_remove_flag(lb, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     remember(lb);
     return lb;
 }
 
-static void lab_width(lv_obj_t *lb, int w, lv_text_align_t align)
+/* Visual-only label. Not tracked, so tests keep reading the logical title. */
+static lv_obj_t *make_quiet_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
-    lv_obj_set_width(lb, w);
-    lv_obj_set_style_text_align(lb, align, 0);
+    lv_obj_t *lb = lv_label_create(parent);
+    lv_obj_set_style_bg_opa(lb, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_font(lb, font, 0);
+    lv_obj_set_style_text_color(lb, hex(color), 0);
+    lv_obj_set_style_text_opa(lb, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_line_space(lb, 0, 0);
+    lv_label_set_long_mode(lb, LV_LABEL_LONG_CLIP);
+    lv_obj_remove_flag(lb, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    return lb;
 }
 
-static int fault_on(const zk_snapshot_t *s)
+static void recolor(lv_obj_t *im, uint32_t color)
 {
+    if (!im) {
+        return;
+    }
+    lv_obj_set_style_image_recolor(im, hex(color), 0);
+    lv_obj_set_style_image_recolor_opa(im, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(im, LV_OPA_TRANSP, 0);
+}
+
+static void blit_a8(const lv_image_dsc_t *src, int dw, int dh, uint8_t *dst, lv_image_dsc_t *out)
+{
+    int sw;
+    int sh;
+    int y;
+    int x;
+    memset(out, 0, sizeof *out);
+    if (!src || !src->data || dw < 1 || dh < 1) {
+        return;
+    }
+    sw = (int)src->header.w;
+    sh = (int)src->header.h;
+    if (sw < 1 || sh < 1) {
+        return;
+    }
+    for (y = 0; y < dh; y++) {
+        int sy = y * sh / dh;
+        const uint8_t *row = src->data + (size_t)sy * (size_t)src->header.stride;
+        for (x = 0; x < dw; x++) {
+            dst[(size_t)y * (size_t)dw + (size_t)x] = row[x * sw / dw];
+        }
+    }
+    out->header.magic = LV_IMAGE_HEADER_MAGIC;
+    out->header.cf = LV_COLOR_FORMAT_A8;
+    out->header.w = (uint16_t)dw;
+    out->header.h = (uint16_t)dh;
+    out->header.stride = (uint16_t)dw;
+    out->data_size = (uint32_t)(dw * dh);
+    out->data = dst;
+}
+
+/* Spec overlap mark: 22 px outline triangle + bang (viewBox 24, stroke 2). */
+static const uint8_t k_warn22[22 * 22] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x19, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x0b, 0xdf, 0xe2, 0x0b, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x82, 0xff, 0xff, 0x82, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x1c, 0xf6, 0xf7, 0xf7, 0xf6, 0x1c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xa5, 0xff,
+    0x81, 0x83, 0xff, 0xa4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0xfe, 0xe3, 0x09, 0x0a,
+    0xe4, 0xfe, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0xc8, 0xff, 0x5b, 0x00, 0x00, 0x5d, 0xff,
+    0xc4, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x5a, 0xff, 0xc7, 0x01, 0xa3, 0xa1, 0x01, 0xc9, 0xff, 0x59,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09,
+    0xe2, 0xfe, 0x36, 0x02, 0xff, 0xff, 0x02, 0x37, 0xfe, 0xe1, 0x08, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7c, 0xff, 0xa2,
+    0x00, 0x03, 0xff, 0xff, 0x02, 0x00, 0xa4, 0xff, 0x7b, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1a, 0xf5, 0xf5, 0x1b, 0x00, 0x03,
+    0xff, 0xff, 0x02, 0x00, 0x1c, 0xf6, 0xf5, 0x19, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xa0, 0xff, 0x7c, 0x00, 0x00, 0x03, 0xff, 0xff,
+    0x02, 0x00, 0x00, 0x7e, 0xff, 0x9e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x33, 0xfe, 0xe1, 0x09, 0x00, 0x00, 0x02, 0xfe, 0xfd, 0x02, 0x00,
+    0x00, 0x09, 0xe3, 0xfd, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc1,
+    0xff, 0x58, 0x00, 0x00, 0x00, 0x00, 0x84, 0x83, 0x00, 0x00, 0x00, 0x00,
+    0x59, 0xff, 0xc1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x55, 0xff, 0xc4, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xa3, 0xa1, 0x00, 0x00, 0x00, 0x00, 0x01, 0xc4,
+    0xff, 0x52, 0x00, 0x00, 0x00, 0x06, 0xdf, 0xfe, 0x33, 0x00, 0x00, 0x00,
+    0x00, 0x01, 0xf1, 0xf0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x36, 0xfe, 0xde,
+    0x06, 0x00, 0x00, 0x78, 0xff, 0xb5, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+    0x51, 0x51, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0xb7, 0xff, 0x76, 0x00,
+    0x05, 0xf1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf1, 0x05, 0x05, 0x9e,
+    0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0,
+    0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0, 0x87, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00
+};
+
+static void build_warn(void)
+{
+    memcpy(g_warn22, k_warn22, sizeof g_warn22);
+    memset(&g_warn_dsc, 0, sizeof g_warn_dsc);
+    g_warn_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    g_warn_dsc.header.cf = LV_COLOR_FORMAT_A8;
+    g_warn_dsc.header.w = 22;
+    g_warn_dsc.header.h = 22;
+    g_warn_dsc.header.stride = 22;
+    g_warn_dsc.data_size = 22 * 22;
+    g_warn_dsc.data = g_warn22;
+}
+
+static lv_obj_t *make_icon(lv_obj_t *parent, const void *src)
+{
+    lv_obj_t *im = lv_image_create(parent);
+    lv_image_set_src(im, src);
+    recolor(im, COL_INK);
+    lv_obj_remove_flag(im, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    return im;
+}
+
+static void on_click(lv_event_t *e);
+
+static void listen(lv_obj_t *o)
+{
+    lv_obj_add_event_cb(o, on_click, LV_EVENT_CLICKED, NULL);
+}
+
+typedef struct {
+    const lv_font_t *font;
+    int32_t ls;
+} fit_u_t;
+
+static int fit_width(const char *text, size_t nbytes, void *user)
+{
+    fit_u_t *u = user;
+    if (!text || !u || !u->font) {
+        return 0;
+    }
+    return (int)lv_text_get_width(text, (uint32_t)nbytes, u->font, u->ls);
+}
+
+/* 1 when the stored string was end-cut. Headline and sheet titles skip this. */
+static int fit_text(char *dst, size_t cap, const char *src, const lv_font_t *font, int ls, int width, int lines)
+{
+    fit_u_t u;
+    if (!dst || cap == 0) {
+        return 0;
+    }
+    dst[0] = 0;
+    if (!src) {
+        src = "";
+    }
+    if (!font || width < 1 || lines < 1) {
+        zk_str_copy(dst, cap, src);
+        return 0;
+    }
+    u.font = font;
+    u.ls = ls;
+    if (zk_text_fit(dst, cap, src, width * lines, fit_width, &u) != 0) {
+        zk_str_copy(dst, cap, src);
+        return 0;
+    }
+    return strstr(dst, ZK_TEXT_ELLIPSIS) != NULL;
+}
+
+static void text_color(lv_obj_t *lb, uint32_t color)
+{
+    if (lb) {
+        lv_obj_set_style_text_color(lb, hex(color), 0);
+    }
+}
+
+static void use_font(lv_obj_t *lb, const lv_font_t *font, int ls)
+{
+    if (!lb) {
+        return;
+    }
+    lv_obj_set_style_text_font(lb, font, 0);
+    lv_obj_set_style_text_letter_space(lb, ls, 0);
+}
+
+static int text_width(lv_obj_t *lb)
+{
+    const char *t;
+    const lv_font_t *f;
+    int32_t ls;
+    if (!lb) {
+        return 0;
+    }
+    t = lv_label_get_text(lb);
+    f = lv_obj_get_style_text_font(lb, LV_PART_MAIN);
+    ls = lv_obj_get_style_text_letter_space(lb, LV_PART_MAIN);
+    if (!t || !f) {
+        return 0;
+    }
+    return (int)lv_text_get_width(t, (uint32_t)strlen(t), f, ls);
+}
+
+static uint32_t utf8_next(const char *s, uint32_t i)
+{
+    unsigned char c;
+    if (!s || !s[i]) {
+        return i;
+    }
+    c = (unsigned char)s[i];
+    if (c < 0x80) {
+        return i + 1;
+    }
+    if ((c & 0xE0) == 0xC0 && s[i + 1]) {
+        return i + 2;
+    }
+    if ((c & 0xF0) == 0xE0 && s[i + 1] && s[i + 2]) {
+        return i + 3;
+    }
+    if ((c & 0xF8) == 0xF0 && s[i + 1] && s[i + 2] && s[i + 3]) {
+        return i + 4;
+    }
+    return i + 1;
+}
+
+/* Bytes of the next line that fit in max_w, breaking on spaces.
+ * 0 when the first word is wider than the line. */
+static uint32_t wrap_line(const char *s, const lv_font_t *font, int max_w)
+{
+    uint32_t i = 0;
+    uint32_t last_space = 0;
+    int have_space = 0;
+    if (!s || !s[0] || !font || max_w < 1) {
+        return 0;
+    }
+    while (s[i]) {
+        uint32_t n = utf8_next(s, i);
+        int w;
+        if (n == i) {
+            break;
+        }
+        w = (int)lv_text_get_width(s, n, font, 0);
+        if (w > max_w) {
+            if (have_space) {
+                return last_space;
+            }
+            return 0;
+        }
+        if (s[n - 1] == ' ') {
+            last_space = n;
+            have_space = 1;
+        }
+        i = n;
+    }
+    return i;
+}
+
+typedef struct {
+    int nlines;
+    uint32_t line1;
+    int overflow;
+} wrap_info_t;
+
+/* Hanging indent: line 1 uses first_w, later lines use rest_w. */
+static wrap_info_t measure_wrap(const char *s, const lv_font_t *font, int first_w, int rest_w, int max_lines)
+{
+    wrap_info_t info;
+    const char *p;
+    int line = 0;
+    memset(&info, 0, sizeof info);
+    if (!s || !s[0] || max_lines < 1) {
+        return info;
+    }
+    p = s;
+    while (*p && line < max_lines) {
+        uint32_t adv;
+        int w = line == 0 ? first_w : rest_w;
+        while (*p == ' ') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        adv = wrap_line(p, font, w);
+        if (adv == 0) {
+            info.overflow = 1;
+            return info;
+        }
+        if (line == 0) {
+            info.line1 = (uint32_t)(p - s) + adv;
+        }
+        p += adv;
+        line++;
+    }
+    while (*p == ' ') {
+        p++;
+    }
+    info.nlines = line > 0 ? line : 1;
+    if (*p) {
+        info.overflow = 1;
+    }
+    return info;
+}
+
+static void copy_span(char *dst, size_t cap, const char *s, uint32_t n)
+{
+    if (!dst || cap == 0) {
+        return;
+    }
+    if (!s) {
+        dst[0] = 0;
+        return;
+    }
+    while (n > 0 && s[n - 1] == ' ') {
+        n--;
+    }
+    if (n >= cap) {
+        n = (uint32_t)cap - 1;
+    }
+    memcpy(dst, s, n);
+    dst[n] = 0;
+}
+
+/* Remainder after line 1, with our breaks so LVGL does not reflow it. */
+static void rest_with_breaks(char *dst, size_t cap, const char *s, const lv_font_t *font, int rest_w, int max_lines)
+{
+    const char *p;
+    size_t used = 0;
+    int line = 0;
+    if (!dst || cap == 0) {
+        return;
+    }
+    dst[0] = 0;
+    if (!s || !font || max_lines < 1) {
+        return;
+    }
+    p = s;
+    while (*p == ' ') {
+        p++;
+    }
+    while (*p && line < max_lines && used + 1 < cap) {
+        uint32_t adv = wrap_line(p, font, rest_w);
+        uint32_t n;
+        if (adv == 0) {
+            break;
+        }
+        n = adv;
+        while (n > 0 && p[n - 1] == ' ') {
+            n--;
+        }
+        if (used && used + 1 < cap) {
+            dst[used++] = '\n';
+        }
+        if (n >= cap - used) {
+            n = (uint32_t)(cap - used - 1);
+        }
+        memcpy(dst + used, p, n);
+        used += n;
+        dst[used] = 0;
+        p += adv;
+        while (*p == ' ') {
+            p++;
+        }
+        line++;
+    }
+}
+
+static void center_pair(lv_obj_t *btn, lv_obj_t *icon, int iw, int ih, lv_obj_t *word, int gap)
+{
+    int bw;
+    int bh;
+    int tw;
+    int th;
+    int total;
+    int x;
+    int y;
+    int wy;
+    if (!btn || !word) {
+        return;
+    }
+    /* place() writes the style size. Coords stay stale until a layout pass,
+     * and a previous sheet (352 px Cancel) would center into the wrong box. */
+    lv_obj_update_layout(btn);
+    bw = (int)lv_obj_get_width(btn);
+    bh = (int)lv_obj_get_height(btn);
+    tw = text_width(word);
+    th = (int)lv_font_get_line_height(lv_obj_get_style_text_font(word, LV_PART_MAIN));
+    if (tw < 1) {
+        tw = 1;
+    }
+    if (th < 1) {
+        th = 1;
+    }
+    lv_label_set_long_mode(word, LV_LABEL_LONG_CLIP);
+    lv_obj_set_size(word, tw, th);
+    wy = (bh - th) / 2;
+    if (wy < 0) {
+        wy = 0;
+    }
+    if (icon && iw > 0) {
+        total = iw + gap + tw;
+        x = (bw - total) / 2;
+        if (x < 4) {
+            x = 4;
+        }
+        y = (bh - ih) / 2;
+        if (y < 0) {
+            y = 0;
+        }
+        lv_obj_set_pos(icon, x, y);
+        lv_obj_set_pos(word, x + iw + gap, wy);
+        show(icon, 1);
+    } else {
+        x = (bw - tw) / 2;
+        if (x < 0) {
+            x = 0;
+        }
+        lv_obj_set_pos(word, x, wy);
+        if (icon) {
+            show(icon, 0);
+        }
+    }
+}
+
+static int listed(enum zk_target_id id)
+{
+    int i;
+    for (i = 0; i < g_ntg; i++) {
+        if (g_tg[i].id == id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static enum zk_target_id wid_of(const lv_obj_t *o)
+{
+    int i;
+    if (!o) {
+        return ZK_TARGET_NONE;
+    }
+    if (o == g_w.hero) {
+        return ZK_TARGET_HERO;
+    }
+    if (o == g_w.pause) {
+        return g_paused ? ZK_TARGET_RESUME : ZK_TARGET_PAUSE;
+    }
+    if (o == g_w.stop) {
+        return ZK_TARGET_STOP;
+    }
+    if (o == g_w.minus) {
+        return ZK_TARGET_MINUS;
+    }
+    if (o == g_w.plus) {
+        return ZK_TARGET_PLUS;
+    }
+    if (o == g_w.cancel) {
+        return ZK_TARGET_CANCEL;
+    }
+    if (o == g_w.run) {
+        return ZK_TARGET_RUN;
+    }
+    if (o == g_w.stop_st) {
+        return ZK_TARGET_STOP_STATION;
+    }
+    if (o == g_w.stop_all) {
+        return ZK_TARGET_STOP_ALL;
+    }
+    if (o == g_w.ok) {
+        return ZK_TARGET_OK;
+    }
+    for (i = 0; i < ZK_MAX_SHOWN; i++) {
+        if (o == g_w.tile[i]) {
+            return (enum zk_target_id)(ZK_TARGET_TILE0 + i);
+        }
+    }
+    return ZK_TARGET_NONE;
+}
+
+static int sheet_kind_of(enum zk_screen screen)
+{
+    switch (screen) {
+    case ZK_SCREEN_SHEET_RUN:
+        return ZK_SHEET_RUN;
+    case ZK_SCREEN_SHEET_ANYWAY:
+        return ZK_SHEET_ANYWAY;
+    case ZK_SCREEN_SHEET_STOP_STATION:
+        return ZK_SHEET_STOP_STATION;
+    case ZK_SCREEN_SHEET_STOP_ALL:
+        return ZK_SHEET_STOP_ALL;
+    case ZK_SCREEN_SHEET_OVERLAP:
+        return ZK_SHEET_OVERLAP;
+    default:
+        return ZK_SHEET_NONE;
+    }
+}
+
+static int unreachable_of(const zk_snapshot_t *s)
+{
+    return !s->have_kiosk || s->api_state != ZK_API_OK || s->stale;
+}
+
+static int watering_of(const zk_snapshot_t *s)
+{
+    const zk_kiosk_t *k;
     if (!s->have_kiosk) {
         return 0;
     }
-    if (s->kiosk.fault || s->kiosk.lockout) {
+    k = &s->kiosk;
+    return (k->watering || k->has_run || k->n_on > 0 || k->current_station[0]) ? 1 : 0;
+}
+
+static int manual_of(const zk_snapshot_t *s)
+{
+    if (!s->have_kiosk || !s->kiosk.has_run) {
+        return 0;
+    }
+    if (strcmp(s->kiosk.run.kind, "manual") == 0) {
         return 1;
     }
-    return s->kiosk.last_error[0] ? 1 : 0;
+    return strcmp(s->kiosk.run.program, "manual") == 0;
 }
 
-static int base_screen(const zk_snapshot_t *s)
-{
-    if (s->api_state == ZK_API_NEEDS_UPDATE) {
-        return ZK_SCREEN_NEEDS_UPDATE;
-    }
-    if (s->have_kiosk && s->kiosk.has_run) {
-        return ZK_SCREEN_RUNNING;
-    }
-    if (s->have_kiosk && s->kiosk.pause.paused) {
-        return ZK_SCREEN_PAUSED;
-    }
-    return ZK_SCREEN_HOME;
-}
-
-static int station_still_there(const zk_snapshot_t *s)
-{
-    if (!s->have_kiosk || !g_station_id[0]) {
-        return g_station_i >= 0 && s->have_kiosk && g_station_i < s->kiosk.n_stations;
-    }
-    return zk_kiosk_station_index(&s->kiosk, g_station_id) >= 0;
-}
-
-static void resolve(const zk_snapshot_t *s, int *content, int *modal)
-{
-    int base = base_screen(s);
-    if (g_nav == ZK_SCREEN_STATION && !station_still_there(s)) {
-        g_nav = -1;
-        g_station_id[0] = 0;
-        g_station_i = -1;
-    }
-    if (g_override == ZK_SCREEN_CONFIRM_STOP || g_override == ZK_SCREEN_CONFIRM_PAUSE) {
-        *modal = g_override;
-        *content = base;
-        if (g_nav == ZK_SCREEN_PICKER || g_nav == ZK_SCREEN_SCHEDULES || g_nav == ZK_SCREEN_STATION) {
-            if (base != ZK_SCREEN_NEEDS_UPDATE) {
-                *content = g_nav;
-            }
-        }
-        return;
-    }
-    if (g_override >= 0) {
-        *modal = 0;
-        *content = g_override;
-        return;
-    }
-    *modal = g_modal;
-    if (base == ZK_SCREEN_NEEDS_UPDATE) {
-        *content = base;
-        return;
-    }
-    if (g_nav == ZK_SCREEN_PICKER || g_nav == ZK_SCREEN_SCHEDULES || g_nav == ZK_SCREEN_STATION) {
-        *content = g_nav;
-    } else {
-        *content = base;
-    }
-}
-
-static void fill_key(const zk_snapshot_t *s, int content, int modal, view_key *k, zk_layout_in *in)
-{
-    int i;
-    int nst;
-    memset(k, 0, sizeof *k);
-    memset(in, 0, sizeof *in);
-    k->content = content;
-    k->modal = modal;
-    k->have = s->have_kiosk ? 1 : 0;
-    k->fault = fault_on(s);
-    k->rain = (s->have_kiosk && zk_rain_strip_visible(&s->kiosk)) ? 1 : 0;
-    nst = (s->have_kiosk && s->kiosk.n_stations > 0) ? s->kiosk.n_stations : 0;
-    if (nst > 8) {
-        nst = 8;
-    }
-    k->n_st = nst;
-    k->station_i = g_station_i;
-    if (s->have_kiosk) {
-        for (i = 0; i < nst; i++) {
-            if (zk_station_soil_percent(&s->kiosk, i) >= 0) {
-                k->soil_mask |= 1 << i;
-            }
-        }
-    }
-    if (s->have_schedules && s->schedules.n > 0) {
-        if (g_sched_i < 0) {
-            g_sched_i = 0;
-        }
-        if (g_sched_i >= s->schedules.n) {
-            g_sched_i = 0;
-        }
-        k->sched_i = g_sched_i;
-        if (content == ZK_SCREEN_SCHEDULES && g_sched_i < s->schedules.n) {
-            int steps = s->schedules.items[g_sched_i].n_steps;
-            if (steps < 0) {
-                steps = 0;
-            }
-            if (steps > 5) {
-                steps = 5;
-            }
-            k->steps = steps;
-        }
-    }
-    in->n_stations = nst;
-    in->n_schedules = k->steps;
-    if (content == ZK_SCREEN_HOME) {
-        in->rain_visible = (k->rain || k->fault) ? 1 : 0;
-    } else if (content == ZK_SCREEN_PAUSED) {
-        in->rain_visible = k->rain;
-    }
-}
-
-static const char *station_title(const zk_snapshot_t *s, const char *id)
-{
-    const zk_kiosk_station_t *st;
-    if (!id || !id[0]) {
-        return "";
-    }
-    st = s->have_kiosk ? zk_kiosk_station(&s->kiosk, id) : NULL;
-    if (st && st->title[0]) {
-        return st->title;
-    }
-    return id;
-}
-
-static void name_upper(const zk_schedule_t *sch, char *out, size_t cap)
-{
-    char tmp[ZK_NOTE_MAX];
-    zk_str_trim_copy(tmp, sizeof tmp, sch->name);
-    if (!tmp[0]) {
-        zk_str_trim_copy(tmp, sizeof tmp, sch->note);
-    }
-    if (!tmp[0]) {
-        zk_str_trim_copy(tmp, sizeof tmp, sch->id);
-    }
-    zk_str_upper(tmp);
-    zk_str_copy(out, cap, tmp);
-}
-
-static void sched_summary(const zk_schedule_t *sch, char *out, size_t cap)
-{
-    static const char *wd[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    static const int order[7] = {1, 2, 3, 4, 5, 6, 0};
-    char t[16];
-    char days[48];
-    unsigned m;
-    int n = 0;
-    int i;
-    size_t pos = 0;
-    if (!sch || !sch->has_start) {
-        zk_str_copy(out, cap, "--");
-        return;
-    }
-    zk_fmt_time12(sch->start_hh, sch->start_mm, t, sizeof t);
-    m = sch->weekdays;
-    if (m == 0 || m == ZK_WD_ALL) {
-        snprintf(out, cap, "Daily %s", t);
-        return;
-    }
-    if (m == (ZK_WD_MON | ZK_WD_TUE | ZK_WD_WED | ZK_WD_THU | ZK_WD_FRI)) {
-        snprintf(out, cap, "Weekdays %s", t);
-        return;
-    }
-    days[0] = 0;
-    for (i = 0; i < 7; i++) {
-        int w = order[i];
-        int wr;
-        if ((m & (1u << w)) == 0) {
-            continue;
-        }
-        wr = snprintf(days + pos, sizeof days - pos, n ? " %s" : "%s", wd[w]);
-        if (wr < 0 || pos + (size_t)wr >= sizeof days) {
-            break;
-        }
-        pos += (size_t)wr;
-        n++;
-    }
-    snprintf(out, cap, "%s %s", days, t);
-}
-
-static void ends_about(const zk_schedule_t *sch, char *line, size_t cap)
-{
-    int mins = 0;
-    int i;
-    int total;
-    char t[16];
-    if (!sch || !sch->has_start) {
-        zk_str_copy(line, cap, "--");
-        return;
-    }
-    for (i = 0; i < sch->n_steps; i++) {
-        if (sch->steps[i].minutes > 0) {
-            mins += sch->steps[i].minutes;
-        }
-    }
-    total = sch->start_hh * 60 + sch->start_mm + mins;
-    total %= 24 * 60;
-    if (total < 0) {
-        total += 24 * 60;
-    }
-    zk_fmt_time12(total / 60, total % 60, t, sizeof t);
-    snprintf(line, cap, "%s", t);
-}
-
-static void rain_parts(const zk_rain_strip_t *rs, char *bold, size_t cb, char *rest, size_t cr)
-{
-    char amt[16];
-    int hours;
-    hours = rs && (rs->hours == 24 || rs->hours == 72) ? rs->hours : (rs ? rs->hours : 24);
-    if (hours <= 0) {
-        hours = 24;
-    }
-    zk_fmt_inches(rs ? rs->inches : 0, amt, sizeof amt);
-    snprintf(bold, cb, "Rain %s in", amt);
-    snprintf(rest, cr, " in the last %d h", hours);
-}
-
-static void show_toast(const char *msg)
-{
-    snprintf(g_toast_text, sizeof g_toast_text, "%s", msg ? msg : "");
-    g_toast_until = zk_platform_mono() + 2.5;
-    if (g_w.toast_lbl) {
-        set_lab_fit(g_w.toast_lbl, g_toast_text);
-    }
-    if (g_w.toast) {
-        lv_obj_remove_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(g_w.toast);
-    }
-}
-
-static void note_result(void)
+static void note_actions(uint32_t version)
 {
     zk_action_result_t r;
-    char buf[64];
     zk_data_action_result(&r);
     if (!r.done) {
         return;
@@ -674,1206 +901,1005 @@ static void note_result(void)
     }
     g_seen_ok = 1;
     g_seen_seq = r.seq;
-    if (r.code == ZK_RO) {
-        show_toast("Read-only mode: no request sent");
-    } else if (r.code == ZK_OK) {
-        show_toast("Sent");
-    } else if (r.http_status > 0) {
-        snprintf(buf, sizeof buf, "Failed (HTTP %d)", r.http_status);
-        show_toast(buf);
-    } else {
-        show_toast("Could not reach the controller");
+    if (r.kind != ZK_ACT_STOP || g_stop_hold >= 0) {
+        return;
+    }
+    zk_stop_http(&g_stop, r.code == ZK_OK);
+    if (g_stop.phase == ZK_STOP_WAIT) {
+        g_ack_version = version;
     }
 }
 
-static void submit_pause(const zk_snapshot_t *s)
+static void advance_stop(const zk_snapshot_t *s, int unreachable, int watering)
 {
-    zk_pause_preview_t pv;
-    int chip = g_pick_chip;
-    if (chip < 0 || chip > 3) {
-        chip = 0;
-    }
-    if (zk_pause_preview(s->have_schedules ? &s->schedules : NULL, s->wall,
-                         (zk_pause_kind_t)chip, &pv) != ZK_OK) {
-        zk_data_submit_action(ZK_ACT_PAUSE, "{\"reason\":\"kiosk\"}");
+    if (g_stop_hold >= 0) {
         return;
     }
-    zk_data_submit_action(ZK_ACT_PAUSE, pv.body);
+    if (g_stop.phase != ZK_STOP_WAIT) {
+        return;
+    }
+    if (unreachable) {
+        zk_stop_snapshot(&g_stop, ZK_STOP_SNAP_UNAVAILABLE);
+        if (g_stop.phase == ZK_STOP_CONFIRMED) {
+            g_confirmed_reachable = 0;
+            g_confirmed_at = s->wall;
+            g_has_confirmed_at = 1;
+        }
+        return;
+    }
+    /* Same snapshot as the ack is not a decision yet. A newer poll is. */
+    if (s->version == g_ack_version) {
+        return;
+    }
+    zk_stop_snapshot(&g_stop, watering ? ZK_STOP_SNAP_STILL_ON : ZK_STOP_SNAP_CLEAR);
+    if (g_stop.phase == ZK_STOP_CONFIRMED) {
+        g_confirmed_reachable = 1;
+        g_confirmed_at = s->wall;
+        g_has_confirmed_at = 1;
+    }
 }
 
-static void close_modal(void)
+static void maybe_clear_confirmed(int unreachable, int watering, int manual, int paused)
 {
-    g_modal = 0;
-    if (g_override == ZK_SCREEN_CONFIRM_STOP || g_override == ZK_SCREEN_CONFIRM_PAUSE) {
-        g_override = -1;
+    int lost;
+    if (g_stop_hold >= 0 || g_stop.phase != ZK_STOP_CONFIRMED || !g_have_prev_flags) {
+        return;
     }
-    g_dirty = 1;
+    lost = g_confirmed_reachable && !g_prev_unreach && unreachable;
+    if (watering || manual || paused != g_prev_paused || lost) {
+        g_stop.phase = ZK_STOP_IDLE;
+        g_stop.inflight = 0;
+        g_has_confirmed_at = 0;
+    }
 }
 
-static void on_evt(lv_event_t *e)
+static void maybe_retry(uint32_t version)
 {
-    lv_event_code_t code = lv_event_get_code(e);
-    int id = (int)(intptr_t)lv_event_get_user_data(e);
-    zk_snapshot_t snap;
+    int64_t now;
+    if (g_stop_hold >= 0 || g_stop.phase != ZK_STOP_QUEUED || g_stop.inflight) {
+        return;
+    }
+    now = zk_platform_mono_ms();
+    if (g_last_retry_set && now >= g_last_retry && now - g_last_retry < 2000) {
+        return;
+    }
+    if (!zk_stop_retry(&g_stop)) {
+        return;
+    }
+    zk_data_submit_action(ZK_ACT_STOP, NULL);
+    g_last_retry = now;
+    g_last_retry_set = 1;
+    g_retry_pulse = 1;
+    note_actions(version);
+}
 
-    if (code == LV_EVENT_PRESSED || code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
-        if (id == ZK_TARGET_STOP && g_w.shadow) {
-            if (code == LV_EVENT_PRESSED) {
-                lv_obj_add_flag(g_w.shadow, LV_OBJ_FLAG_HIDDEN);
-            } else if (g_pressed != ZK_TARGET_STOP) {
-                lv_obj_remove_flag(g_w.shadow, LV_OBJ_FLAG_HIDDEN);
-            }
+static void apply_id(enum zk_target_id id)
+{
+    zk_flow_tile_t tile;
+    zk_flow_out_t out;
+    int64_t now;
+    int ti;
+    if (id == ZK_TARGET_NONE || !listed(id)) {
+        return;
+    }
+    now = zk_platform_mono_ms();
+    if (!zk_flow_debounce_ok(g_last_tap, now)) {
+        return;
+    }
+    memset(&tile, 0, sizeof tile);
+    tile.paused = g_paused;
+    if (id >= ZK_TARGET_TILE0 && id <= ZK_TARGET_TILE5) {
+        ti = (int)id - (int)ZK_TARGET_TILE0;
+        if (ti >= 0 && ti < g_view.n_tiles && g_view.tiles[ti].vis == ZK_TILE_ON) {
+            tile.tile_on = 1;
         }
-        if (id == ZK_TARGET_HOLD_EDIT && g_w.hold_face) {
-            if (code == LV_EVENT_PRESSED) {
-                lv_obj_add_state(g_w.hold_face, LV_STATE_PRESSED);
-            } else if (g_pressed != ZK_TARGET_HOLD_EDIT) {
-                lv_obj_remove_state(g_w.hold_face, LV_STATE_PRESSED);
-            }
+    }
+    zk_flow_tap(id, &tile, &out);
+    if (out.effect == ZK_TAP_NONE) {
+        return;
+    }
+    g_last_tap = now;
+    switch (out.effect) {
+    case ZK_TAP_OPEN_RUN:
+    case ZK_TAP_OPEN_ANYWAY:
+        if (id >= ZK_TARGET_TILE0 && id <= ZK_TARGET_TILE5) {
+            g_station = (int)id - (int)ZK_TARGET_TILE0;
         }
-        return;
-    }
-    if (code != LV_EVENT_CLICKED) {
-        return;
-    }
-    if (g_key.modal && id != ZK_TARGET_MODAL_OK && id != ZK_TARGET_MODAL_CANCEL) {
-        return;
-    }
-    /* 700 ms after OK: a stray tap must not open or confirm another pause or STOP. */
-    if (zk_platform_mono() < g_quiet_until &&
-        ((id >= ZK_TARGET_CHIP0 && id <= ZK_TARGET_CHIP3) || id == ZK_TARGET_MODAL_OK ||
-         id == ZK_TARGET_MODAL_CANCEL)) {
-        return;
-    }
-    switch (id) {
-    case ZK_TARGET_STOP:
-        g_modal = ZK_SCREEN_CONFIRM_STOP;
-        g_dirty = 1;
+        g_screen = out.effect == ZK_TAP_OPEN_ANYWAY ? ZK_SCREEN_SHEET_ANYWAY : ZK_SCREEN_SHEET_RUN;
+        g_min_key = -999;
         break;
-    case ZK_TARGET_PAUSE:
-        g_nav = ZK_SCREEN_PICKER;
-        g_modal = 0;
-        g_dirty = 1;
+    case ZK_TAP_OPEN_STOP_STATION:
+        if (id >= ZK_TARGET_TILE0 && id <= ZK_TARGET_TILE5) {
+            g_station = (int)id - (int)ZK_TARGET_TILE0;
+        }
+        g_screen = ZK_SCREEN_SHEET_STOP_STATION;
         break;
-    case ZK_TARGET_BACK:
-        g_nav = -1;
-        g_modal = 0;
-        g_dirty = 1;
+    case ZK_TAP_OPEN_STOP_ALL:
+        g_screen = ZK_SCREEN_SHEET_STOP_ALL;
         break;
-    case ZK_TARGET_RESUME:
-        zk_data_submit_action(ZK_ACT_RESUME, NULL);
-        note_result();
+    case ZK_TAP_OPEN_OVERLAP:
+        g_screen = ZK_SCREEN_SHEET_OVERLAP;
         break;
-    case ZK_TARGET_HEADER_NEXT:
-    case ZK_TARGET_INFO_CARD:
-    case ZK_TARGET_SCHEDULES:
-        g_nav = ZK_SCREEN_SCHEDULES;
-        g_modal = 0;
-        g_dirty = 1;
+    case ZK_TAP_CLOSE:
+        g_screen = ZK_SCREEN_HOME;
         break;
-    case ZK_TARGET_CHIP0:
-    case ZK_TARGET_CHIP1:
-    case ZK_TARGET_CHIP2:
-    case ZK_TARGET_CHIP3:
-        g_pick_chip = id - ZK_TARGET_CHIP0;
-        g_modal = ZK_SCREEN_CONFIRM_PAUSE;
-        g_dirty = 1;
-        break;
-    case ZK_TARGET_HOLD_EDIT:
-        show_toast("Editing arrives in a later update");
-        break;
-    case ACT_SCHED_BODY:
-        zk_data_get(&snap);
-        if (snap.have_schedules && snap.schedules.n > 1) {
-            g_sched_i = (g_sched_i + 1) % snap.schedules.n;
-            g_dirty = 1;
+    case ZK_TAP_STEPPER:
+        g_minutes += out.minutes_delta;
+        if (g_minutes < 1) {
+            g_minutes = 1;
+        }
+        if (g_minutes > 60) {
+            g_minutes = 60;
         }
         break;
-    case ZK_TARGET_MODAL_CANCEL:
-        close_modal();
+    case ZK_TAP_SUBMIT_RUN: {
+        char body[192];
+        const char *sid = "";
+        int preempt = 0;
+        if (g_snap.have_kiosk && g_station >= 0 && g_station < g_snap.kiosk.n_stations) {
+            sid = g_snap.kiosk.stations[g_station].id;
+            preempt = watering_of(&g_snap);
+        }
+        if (zk_action_run_body(body, sizeof body, sid, g_minutes * 60, preempt) == ZK_OK) {
+            zk_data_submit_action(ZK_ACT_RUN, body);
+        }
+        g_screen = ZK_SCREEN_HOME;
+        note_actions(g_snap.version);
         break;
-    case ZK_TARGET_MODAL_OK:
-        zk_data_get(&snap);
-        if (g_key.modal == ZK_SCREEN_CONFIRM_PAUSE) {
-            submit_pause(&snap);
-            g_nav = -1; /* leave the picker; back to the base screen */
-        } else {
+    }
+    case ZK_TAP_SUBMIT_STOP:
+        if (g_stop_hold < 0 && zk_stop_confirm(&g_stop)) {
             zk_data_submit_action(ZK_ACT_STOP, NULL);
+            g_last_retry = now;
+            g_last_retry_set = 1;
+            note_actions(g_snap.version);
+            advance_stop(&g_snap, unreachable_of(&g_snap), watering_of(&g_snap));
         }
-        g_quiet_until = zk_platform_mono() + 0.700;
-        close_modal();
-        note_result();
+        g_screen = ZK_SCREEN_HOME;
+        break;
+    case ZK_TAP_SUBMIT_PAUSE:
+        zk_data_submit_action(ZK_ACT_PAUSE, ZK_PAUSE_BODY);
+        break;
+    case ZK_TAP_SUBMIT_RESUME:
+        zk_data_submit_action(ZK_ACT_RESUME, NULL);
         break;
     default:
-        if (id >= ZK_TARGET_TILE0 && id <= ZK_TARGET_TILE7) {
-            int ti = id - ZK_TARGET_TILE0;
-            zk_data_get(&snap);
-            g_station_i = ti;
-            g_station_id[0] = 0;
-            if (snap.have_kiosk && ti >= 0 && ti < snap.kiosk.n_stations) {
-                zk_str_copy(g_station_id, sizeof g_station_id, snap.kiosk.stations[ti].id);
-            }
-            g_nav = ZK_SCREEN_STATION;
-            g_modal = 0;
-            g_dirty = 1;
-        }
         break;
     }
 }
 
-static void build_stop(lv_obj_t *scr, zk_rect r, int running)
+static void on_click(lv_event_t *e)
 {
-    zk_rect sh = r;
-    const lv_font_t *word_font = running ? &zk_font_xb_104 : &zk_font_xb_96;
-    int word_h = running ? 75 : 70;
-    int block;
-    int y0;
-    lv_obj_t *word;
-    lv_obj_t *sub;
-    sh.y += 6;
-    g_w.shadow = box_rect(scr, sh, COL_STOPSH, 30);
-    g_w.hit[ZK_TARGET_STOP] = target(scr, r, ZK_TARGET_STOP, COL_STOP, 30, 0);
-    block = 80 + word_h + 8 + 28;
-    y0 = (r.h - block) / 2;
-    if (y0 < 6) {
-        y0 = 6;
-    }
-    icon_at(g_w.hit[ZK_TARGET_STOP], &zk_icon_stop_oct_84, COL_WHITE, (r.w - 84) / 2, y0);
-    /* 84 px icon, then at least 8 px before the word. Button rect is unchanged. */
-    mark_lab("stop_word", 0);
-    word = lab(g_w.hit[ZK_TARGET_STOP], "STOP", word_font, COL_WHITE, 0, y0 + 92);
-    lab_width(word, r.w, LV_TEXT_ALIGN_CENTER);
-    lv_obj_set_style_text_letter_space(word, running ? 2 : 4, 0);
-    sub = lab(g_w.hit[ZK_TARGET_STOP], running ? "water off now" : "all water off",
-              &zk_font_sb_26, COL_WHITE, 0, y0 + 92 + word_h + 2);
-    lab_width(sub, r.w, LV_TEXT_ALIGN_CENTER);
-}
-
-static void build_slot(lv_obj_t *scr, zk_rect r, int id, const char *text, const void *ic, uint32_t bg, uint32_t fg, int horizontal)
-{
-    lv_obj_t *b = target(scr, r, id, bg, 26, 0);
-    lv_obj_t *lb;
-    if (horizontal) {
-        int y = (r.h - 44) / 2;
-        icon_at(b, ic, fg, 36, y);
-        lb = lab(b, text, &zk_font_xb_42, fg, 36 + 44 + 12, y + 2);
-        (void)lb;
-    } else {
-        int block = 44 + 10 + 43;
-        int y0 = (r.h - block) / 2;
-        icon_at(b, ic, fg, (r.w - 44) / 2, y0);
-        lb = lab(b, text, &zk_font_xb_42, fg, 0, y0 + 44 + 8);
-        lab_width(lb, r.w, LV_TEXT_ALIGN_CENTER);
-    }
-}
-
-static void build_rail(lv_obj_t *scr, const zk_layout_rects *L, int content)
-{
-    int running = content == ZK_SCREEN_RUNNING;
-    build_stop(scr, L->stop, running);
-    if (content == ZK_SCREEN_NEEDS_UPDATE) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
     }
-    if (content == ZK_SCREEN_HOME || content == ZK_SCREEN_RUNNING) {
-        build_slot(scr, L->slot, ZK_TARGET_PAUSE, "Pause", &zk_icon_pause_44, COL_PAUSE, COL_WHITE, running);
-    } else if (content == ZK_SCREEN_PAUSED) {
-        build_slot(scr, L->slot, ZK_TARGET_RESUME, "Resume", &zk_icon_play_44, COL_TEAL, COL_WHITE, 0);
-    } else if (content == ZK_SCREEN_STATION) {
-        build_slot(scr, L->slot, ZK_TARGET_BACK, "Close", &zk_icon_back_44, COL_BACK, COL_INK, 0);
-    } else {
-        build_slot(scr, L->slot, ZK_TARGET_BACK, "Back", &zk_icon_back_44, COL_BACK, COL_INK, 0);
-    }
+    apply_id(wid_of(lv_event_get_target(e)));
 }
 
-static void build_schedules_btn(lv_obj_t *scr, zk_rect r)
+static int run_index(const zk_view_t *v)
 {
-    lv_obj_t *b;
-    lv_obj_t *lb;
-    int y0;
-    if (r.w <= 0 || r.h <= 0) {
-        return;
-    }
-    b = target(scr, r, ZK_TARGET_SCHEDULES, COL_CARD, 22, 1);
-    y0 = (r.h - 44 - 8 - 28) / 2;
-    if (y0 < 6) {
-        y0 = 6;
-    }
-    icon_at(b, &zk_icon_list_52, COL_TEAL, (r.w - 52) / 2, y0);
-    mark_lab("sched_btn", 1);
-    /* 3 px border sits inside the button. x = 9 puts the label 12 px from the outer edge. */
-    lb = lab(b, "Schedules", &zk_font_b_26, COL_INK, 9, y0 + 44 + 4);
-    lab_width(lb, r.w - 24, LV_TEXT_ALIGN_CENTER);
-}
-
-static uint32_t station_color(const char *c)
-{
-    unsigned r, g, b;
-    if (!c || !c[0]) {
-        return COL_TEAL;
-    }
-    if (c[0] == '#' && strlen(c) >= 7 &&
-        sscanf(c, "#%2x%2x%2x", &r, &g, &b) == 3) {
-        return (r << 16) | (g << 8) | b;
-    }
-    if (strcmp(c, "red") == 0) {
-        return 0xC44536;
-    }
-    if (strcmp(c, "yellow") == 0) {
-        return 0xD4A017;
-    }
-    if (strcmp(c, "blue") == 0) {
-        return 0x2A6F97;
-    }
-    if (strcmp(c, "green") == 0) {
-        return 0x4F7C4A;
-    }
-    return COL_TEAL;
-}
-
-static void build_home(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapshot_t *s, const view_key *k)
-{
-    lv_obj_t *hdr;
     int i;
-    hdr = target(scr, L->header, ZK_TARGET_HEADER_NEXT, COL_BG, 0, 0);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, LV_STATE_PRESSED);
-    lv_obj_set_style_translate_y(hdr, 0, LV_STATE_PRESSED);
-    mark_lab("hdr_kicker", 1);
-    g_w.hdr_kicker = lab(hdr, "", &zk_font_b_26, COL_MUT, 4, 6);
-    lab_width(g_w.hdr_kicker, L->header.w - 8, LV_TEXT_ALIGN_LEFT);
-    lv_obj_set_style_text_letter_space(g_w.hdr_kicker, 1, 0);
-    mark_lab("hdr_big", 1);
-    g_w.hdr_big = lab(hdr, "", &zk_font_xb_50, COL_INK, 0, 38);
-    lab_width(g_w.hdr_big, L->header.w, LV_TEXT_ALIGN_LEFT);
-    build_schedules_btn(scr, L->schedules);
-    if (k->fault && L->rain.w > 0) {
-        lv_obj_t *pill = box_rect(scr, L->rain, COL_STOP, 16);
-        mark_lab("fault_lbl", 1);
-        g_w.fault_lbl = lab(pill, "", &zk_font_b_26, COL_WHITE, 16, 14);
-        lab_width(g_w.fault_lbl, L->rain.w - 32, LV_TEXT_ALIGN_LEFT);
-        lv_label_set_long_mode(g_w.fault_lbl, LV_LABEL_LONG_CLIP);
-    } else if (k->rain && L->rain.w > 0) {
-        lv_obj_t *strip = box_rect(scr, L->rain, COL_RAINBG, 16);
-        icon_at(strip, &zk_icon_cloud_36, COL_RAINFG, 14, 11);
-        mark_lab("rain_bold", 1);
-        g_w.rain_bold = lab(strip, "", &zk_font_xb_28, COL_RAINFG, 62, 14);
-        mark_lab("rain_rest", 1);
-        g_w.rain_rest = lab(strip, "", &zk_font_sb_28, COL_RAINFG, 200, 14);
-    }
-    g_w.n_tiles = L->n_tiles;
-    for (i = 0; i < L->n_tiles && i < 8; i++) {
-        zk_rect tr = L->tiles[i];
-        int soil = (k->soil_mask & (1 << i)) != 0;
-        lv_obj_t *tile = target(scr, tr, ZK_TARGET_TILE0 + i, COL_CARD, 22, 1);
-        int title_y = soil ? 10 : (tr.h - 36) / 2;
-        g_w.tile_obj[i] = tile;
-        {
-            /* Title keeps main's slot: 14 px inset on each side (tr.w - 28).
-               An On tile draws the drop in that same slot via left padding. */
-            int title_w = tr.w - 28;
-            int title_h = (int)lv_font_get_line_height(&zk_font_xb_32);
-            int drop_y;
-            if (title_h < 1) {
-                title_h = 33;
-            }
-            if (title_w < 24) {
-                title_w = 24;
-            }
-            mark_lab_n("tile_title", i, 1);
-            g_w.tile_title[i] = lab(tile, "", &zk_font_xb_32, COL_INK, 14, title_y);
-            lab_width(g_w.tile_title[i], title_w, LV_TEXT_ALIGN_LEFT);
-            drop_y = title_y + (title_h - 30) / 2;
-            if (drop_y < title_y) {
-                drop_y = title_y;
-            }
-            g_w.tile_drop[i] = icon_at(tile, &zk_icon_drop_30, COL_WHITE, 14, drop_y);
-            lv_obj_add_flag(g_w.tile_drop[i], LV_OBJ_FLAG_HIDDEN);
+    for (i = 0; i < v->n_tiles; i++) {
+        if (v->tiles[i].vis == ZK_TILE_ON) {
+            return i;
         }
-        if (!soil) {
+    }
+    return -1;
+}
+
+static int pick_event(const frame_t *prev, const frame_t *now, zk_repaint_ctx_t *ctx)
+{
+    int i;
+    memset(ctx, 0, sizeof *ctx);
+    ctx->tile_a = -1;
+    ctx->tile_b = -1;
+    ctx->n_stations = now->n_stations;
+    if (!prev->valid) {
+        return ZK_EVT_BOOT;
+    }
+    if (prev->screen != (int)ZK_SCREEN_SHEET_STOP_ALL && now->screen == (int)ZK_SCREEN_SHEET_STOP_ALL) {
+        return ZK_EVT_OPEN_STOP_ALL;
+    }
+    if (prev->screen == (int)ZK_SCREEN_SHEET_STOP_ALL && now->screen != (int)ZK_SCREEN_SHEET_STOP_ALL) {
+        if (now->phase == (int)ZK_STOP_QUEUED && now->unreach) {
+            return ZK_EVT_OFFLINE_CONFIRM;
+        }
+        return ZK_EVT_CLOSE_FULL_SHEET;
+    }
+    if (prev->screen != now->screen) {
+        return ZK_EVT_SHEET;
+    }
+    if (!prev->unreach && now->unreach) {
+        return ZK_EVT_CONTROLLER_LOST;
+    }
+    if (prev->unreach && !now->unreach) {
+        return ZK_EVT_RETURN_ONLINE;
+    }
+    if (prev->phase != (int)ZK_STOP_CONFIRMED && now->phase == (int)ZK_STOP_CONFIRMED) {
+        return ZK_EVT_ACK;
+    }
+    if (prev->paused != now->paused) {
+        return ZK_EVT_PAUSE_RESUME;
+    }
+    if (prev->style != now->style) {
+        if (prev->style == (int)ZK_HERO_MANUAL || now->style == (int)ZK_HERO_MANUAL) {
+            ctx->tile_a = now->run_tile >= 0 ? now->run_tile : prev->run_tile;
+            return ZK_EVT_MANUAL;
+        }
+        if (prev->style == (int)ZK_HERO_OVERLAP || now->style == (int)ZK_HERO_OVERLAP) {
+            return ZK_EVT_OVERLAP;
+        }
+        ctx->tile_a = now->run_tile >= 0 ? now->run_tile : prev->run_tile;
+        return ZK_EVT_IDLE_WATER;
+    }
+    if (prev->overlap != now->overlap) {
+        return ZK_EVT_OVERLAP;
+    }
+    if (prev->run_tile != now->run_tile) {
+        ctx->tile_a = prev->run_tile;
+        ctx->tile_b = now->run_tile;
+        return ZK_EVT_NEXT_STATION;
+    }
+    if (prev->minutes != now->minutes &&
+        (now->screen == (int)ZK_SCREEN_SHEET_RUN || now->screen == (int)ZK_SCREEN_SHEET_ANYWAY)) {
+        ctx->stepper_cross = (prev->minutes <= 1) != (now->minutes <= 1);
+        return ZK_EVT_STEPPER;
+    }
+    ctx->rain = (prev->rain_on != now->rain_on || strcmp(prev->rain_text, now->rain_text) != 0) ? 1 : 0;
+    for (i = 0; i < ZK_MAX_SHOWN; i++) {
+        if (strcmp(prev->slots[i], now->slots[i]) != 0) {
+            ctx->soil_mask |= (1u << i);
+        }
+    }
+    if (ctx->soil_mask || ctx->rain) {
+        return ZK_EVT_SOIL_RAIN;
+    }
+    if (now->n_stations >= 0 && g_retry_pulse) {
+        return ZK_EVT_RETRY_TICK;
+    }
+    if (strcmp(prev->time_line, now->time_line) != 0) {
+        ctx->tile_a = now->run_tile;
+        return ZK_EVT_MINUTE_TICK;
+    }
+    return -1;
+}
+
+static void log_dirty(int ev, const zk_repaint_ctx_t *ctx)
+{
+    zk_rect rects[16];
+    int n;
+    int i;
+    const char *env;
+    if (ev < 0) {
+        return;
+    }
+    env = getenv("ZK_DIRTY_LOG");
+    if (!env || !env[0] || strcmp(env, "0") == 0) {
+        return;
+    }
+    zk_repaint_log((zk_repaint_event_t)ev, ctx);
+    if (!g_disp) {
+        return;
+    }
+    n = zk_repaint_rects((zk_repaint_event_t)ev, ctx, rects, 16);
+    for (i = 0; i < n; i++) {
+        lv_area_t a;
+        if (rects[i].w <= 0 || rects[i].h <= 0) {
             continue;
         }
-        {
-            int pct_w = 92;
-            int bar_h = 38;
-            int bar_x = 14;
-            int bar_w = tr.w - 14 - 10 - pct_w - 12;
-            int bar_y = tr.h - 14 - bar_h;
-            lv_obj_t *bar;
-            int seg;
-            if (bar_w < 40) {
-                bar_w = 40;
-            }
-            if (bar_y < title_y + 36) {
-                bar_y = title_y + 36;
-            }
-            bar = box_at(tile, bar_x, bar_y, bar_w, bar_h, COL_TRACK, 12);
-            g_w.tile_bar[i] = bar;
-            border_on(bar, 2);
-            lv_obj_set_style_clip_corner(bar, true, 0);
-            g_w.tile_bar_w[i] = bar_w - 4;
-            g_w.tile_fill[i] = box_at(bar, 2, 2, 0, bar_h - 4, COL_FILL, 8);
-            for (seg = 1; seg <= 9; seg++) {
-                int x = 2 + seg * g_w.tile_bar_w[i] / 10 - 1;
-                box_at(bar, x, 2, 3, bar_h - 4, COL_CARD, 0);
-            }
-            g_w.tile_pct[i] = lab(tile, "", &zk_font_xb_44, COL_INK, tr.w - 12 - pct_w, bar_y + (bar_h - 45) / 2);
-            lab_width(g_w.tile_pct[i], pct_w, LV_TEXT_ALIGN_RIGHT);
-            (void)s;
-        }
+        a.x1 = rects[i].x;
+        a.y1 = rects[i].y;
+        a.x2 = rects[i].x + rects[i].w - 1;
+        a.y2 = rects[i].y + rects[i].h - 1;
+        lv_inv_area(g_disp, &a);
     }
 }
 
-static void build_running(lv_obj_t *scr, const zk_layout_rects *L)
-{
-    zk_rect card = L->main;
-    lv_obj_t *c = box_rect(scr, card, COL_RUNBG, 26);
-    int bar_w = card.w - 48;
-    int prog_y = card.h - 18 - 32 - 16 - 24;
-    mark_lab("run_title", 1);
-    g_w.run_title = lab(c, "", &zk_font_xb_58, COL_WHITE, 24, 58);
-    lab_width(g_w.run_title, card.w - 48, LV_TEXT_ALIGN_LEFT);
-    icon_at(c, &zk_icon_drop_30, COL_RUNLBL, 24, 16);
-    {
-        lv_obj_t *lb = lab(c, "WATERING NOW", &zk_font_b_26, COL_RUNLBL, 24 + 30 + 10, 18);
-        lv_obj_set_style_text_letter_space(lb, 1, 0);
-    }
-    g_w.run_count = lab(c, "", &zk_font_xb_172, COL_WHITE, 20, 128);
-    lv_obj_set_style_text_letter_space(g_w.run_count, -2, 0);
-    g_w.run_bar_w = bar_w;
-    {
-        lv_obj_t *track = box_at(c, 24, prog_y, bar_w, 24, COL_WHITE, 12);
-        lv_obj_set_style_bg_opa(track, 56, 0);
-        lv_obj_set_style_clip_corner(track, true, 0);
-        g_w.run_fill = box_at(track, 0, 0, 0, 24, COL_RUNFILL, 12);
-    }
-    mark_lab("run_step", 0);
-    g_w.run_step = lab(c, "", &zk_font_b_28, COL_WHITE, 24, card.h - 18 - 30);
-    mark_lab("run_next", 1);
-    g_w.run_next = lab(c, "", &zk_font_b_28, COL_WHITE, card.w / 2, card.h - 18 - 30);
-    lab_width(g_w.run_next, card.w / 2 - 24, LV_TEXT_ALIGN_RIGHT);
-}
-
-static void build_paused(lv_obj_t *scr, const zk_layout_rects *L, const view_key *k)
-{
-    lv_obj_t *ban;
-    lv_obj_t *info;
-    if (L->banner.w <= 0) {
-        return;
-    }
-    build_schedules_btn(scr, L->schedules);
-    ban = box_rect(scr, L->banner, COL_PAUSE, 24);
-    icon_at(ban, &zk_icon_cloud_36, COL_WHITE, 14, (L->banner.h - 36) / 2);
-    mark_lab("ban_title", 1);
-    g_w.ban_title = lab(ban, "", &zk_font_b_26, COL_WHITE, 14 + 36 + 12, 18);
-    lv_obj_set_style_text_letter_space(g_w.ban_title, 1, 0);
-    lab_width(g_w.ban_title, L->banner.w - 14 - 36 - 12 - 12, LV_TEXT_ALIGN_LEFT);
-    mark_lab("ban_until", 1);
-    g_w.ban_until = lab(ban, "", &zk_font_xb_36, COL_WHITE, 14 + 36 + 12, 54);
-    lab_width(g_w.ban_until, L->banner.w - 14 - 36 - 12 - 12, LV_TEXT_ALIGN_LEFT);
-    if (k->rain && L->rain.w > 0) {
-        lv_obj_t *strip = box_rect(scr, L->rain, COL_RAINBG, 16);
-        icon_at(strip, &zk_icon_cloud_36, COL_RAINFG, 14, 11);
-        mark_lab("rain_bold", 1);
-        g_w.rain_bold = lab(strip, "", &zk_font_xb_28, COL_RAINFG, 62, 14);
-        mark_lab("rain_rest", 1);
-        g_w.rain_rest = lab(strip, "", &zk_font_sb_28, COL_RAINFG, 200, 14);
-    }
-    if (L->info.w <= 0) {
-        return;
-    }
-    info = target(scr, L->info, ZK_TARGET_INFO_CARD, COL_CARD, 26, 1);
-    {
-        lv_obj_t *kicker = lab(info, "ON HOLD", &zk_font_b_26, COL_MUT, 20, 16);
-        lv_obj_set_style_text_letter_space(kicker, 1, 0);
-    }
-    mark_lab("info_name", 1);
-    g_w.info_name = lab(info, "", &zk_font_xb_32, COL_INK, 20, 54);
-    lab_width(g_w.info_name, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
-    mark_lab("info_sub0", 0);
-    g_w.info_sub0 = lab(info, "Runs again after you resume", &zk_font_sb_28, COL_MUT, 20, 112);
-    lab_width(g_w.info_sub0, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
-    mark_lab("info_sub1", 0);
-    g_w.info_sub1 = lab(info, "or when the pause ends.", &zk_font_sb_28, COL_MUT, 20, 146);
-    lab_width(g_w.info_sub1, L->info.w - 40, LV_TEXT_ALIGN_LEFT);
-}
-
-static const void *chip_icon(int i)
-{
-    switch (i) {
-    case 0:
-        return &zk_icon_sunrise_52;
-    case 1:
-        return &zk_icon_cloud_52;
-    case 2:
-        return &zk_icon_list_52;
-    default:
-        return &zk_icon_inf_52;
-    }
-}
-
-static void build_picker(lv_obj_t *scr, const zk_layout_rects *L)
+static void capture(frame_t *f)
 {
     int i;
-    lv_obj_t *title = lab(scr, "Pause watering", &zk_font_xb_44, COL_INK, L->title.x + 2, L->title.y + 2);
-    (void)title;
-    for (i = 0; i < 4; i++) {
-        lv_obj_t *c = target(scr, L->chips[i], ZK_TARGET_CHIP0 + i, COL_CARD, 24, 1);
-        icon_at(c, chip_icon(i), COL_TEAL, 16, 12);
-        mark_lab_n("chip_t", i, 1);
-        g_w.chip_t[i] = lab(c, "", &zk_font_xb_36, COL_INK, 16, 72);
-        lab_width(g_w.chip_t[i], L->chips[i].w - 32, LV_TEXT_ALIGN_LEFT);
-        lv_label_set_long_mode(g_w.chip_t[i], LV_LABEL_LONG_WRAP);
-        /* Two lines is the current picker copy. A longer primary clips here
-         * instead of pushing the subtitle. One line keeps its natural height. */
-        lv_obj_set_style_max_height(g_w.chip_t[i], 2 * lv_font_get_line_height(&zk_font_xb_36), 0);
-        mark_lab_n("chip_s", i, 1);
-        g_w.chip_s[i] = lab(c, "", &zk_font_sb_26, COL_MUT, 16, 120);
-        lab_width(g_w.chip_s[i], L->chips[i].w - 32, LV_TEXT_ALIGN_LEFT);
+    memset(f, 0, sizeof *f);
+    f->valid = 1;
+    f->screen = (int)g_screen;
+    f->unreach = g_lin.offline;
+    f->phase = g_stop_hold >= 0 ? g_stop_hold : (int)g_stop.phase;
+    f->paused = g_paused;
+    f->style = (int)g_view.hero.style;
+    f->overlap = g_view.overlap;
+    f->run_tile = run_index(&g_view);
+    f->minutes = g_minutes;
+    f->rain_on = g_view.hero.rain;
+    copy_cap(f->rain_text, sizeof f->rain_text, g_view.hero.rain_text);
+    copy_cap(f->time_line, sizeof f->time_line, g_view.hero.time_line);
+    f->n_stations = g_lin.n_stations;
+    for (i = 0; i < g_view.n_tiles && i < ZK_MAX_SHOWN; i++) {
+        copy_cap(f->slots[i], sizeof f->slots[i], g_view.tiles[i].slot);
     }
 }
 
-static void dashes(lv_obj_t *parent, int y, int x0, int x1)
+static void apply_hero(void)
 {
-    int x;
-    for (x = x0; x < x1; x += 16) {
-        int w = 10;
-        if (x + w > x1) {
-            w = x1 - x;
-        }
-        if (w > 0) {
-            box_at(parent, x, y, w, 3, COL_LINE, 0);
-        }
-    }
-}
-
-static void build_schedules(lv_obj_t *scr, const zk_layout_rects *L, const zk_snapshot_t *s, const view_key *k)
-{
-    lv_obj_t *card;
-    lv_obj_t *hold;
-    lv_obj_t *inner;
-    int i;
-    int nrows;
-    lv_obj_t *title = lab(scr, "Schedules", &zk_font_xb_44, COL_INK, L->title.x + 2, L->title.y + 2);
-    (void)title;
-    mark_lab("sched_count", 1);
-    g_w.sched_count = lab(scr, "", &zk_font_sb_26, COL_MUT, L->title.x, L->title.y + 12);
-    lab_width(g_w.sched_count, L->title.w - 4, LV_TEXT_ALIGN_RIGHT);
-    card = box_rect(scr, L->card, COL_CARD, 26);
-    border_on(card, 3);
-    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(card, on_evt, LV_EVENT_CLICKED, (void *)(intptr_t)ACT_SCHED_BODY);
-    mark_lab("sched_name", 1);
-    g_w.sched_name = lab(card, "", &zk_font_b_26, COL_MUT, 20, 8);
-    lv_obj_set_style_text_letter_space(g_w.sched_name, 1, 0);
-    lab_width(g_w.sched_name, L->card.w - 40 - 170, LV_TEXT_ALIGN_LEFT);
-    mark_lab("sched_sum", 1);
-    g_w.sched_sum = lab(card, "", &zk_font_xb_50, COL_INK, 20, 32);
-    lab_width(g_w.sched_sum, L->card.w - 40 - 170, LV_TEXT_ALIGN_LEFT);
-    g_w.sched_ends1 = lab(card, "Ends about", &zk_font_b_28, COL_MUT, L->card.w - 20 - 168, 8);
-    lab_width(g_w.sched_ends1, 168, LV_TEXT_ALIGN_RIGHT);
-    mark_lab("sched_ends2", 1);
-    g_w.sched_ends2 = lab(card, "", &zk_font_b_28, COL_MUT, L->card.w - 20 - 168, 38);
-    lab_width(g_w.sched_ends2, 168, LV_TEXT_ALIGN_RIGHT);
-    nrows = L->n_sched_rows;
-    if (nrows > k->steps) {
-        nrows = k->steps;
-    }
-    if (nrows > 5) {
-        nrows = 5;
-    }
-    g_w.n_rows = nrows;
-    for (i = 0; i < nrows; i++) {
-        int y = L->sched_rows[i].y - L->card.y;
-        int h = L->sched_rows[i].h;
-        mark_lab_n("row_name", i, 1);
-        g_w.row_name[i] = lab(card, "", &zk_font_b_34, COL_INK, 20, y + 6);
-        /* Right edge meets row_min (x = card.w-170). Short names stay left-aligned. */
-        lab_width(g_w.row_name[i], L->card.w - 190, LV_TEXT_ALIGN_LEFT);
-        g_w.row_min[i] = lab(card, "", &zk_font_xb_42, COL_INK, L->card.w - 20 - 150, y + 2);
-        lab_width(g_w.row_min[i], 80, LV_TEXT_ALIGN_RIGHT);
-        g_w.row_unit[i] = lab(card, "min", &zk_font_b_26, COL_INK, L->card.w - 20 - 64, y + 14);
-        if (i + 1 < nrows) {
-            dashes(card, y + h - 3, 20, L->card.w - 20);
-        }
-    }
-    hold = target(scr, L->hold_edit, ZK_TARGET_HOLD_EDIT, COL_CARD, 0, 0);
-    lv_obj_set_style_bg_opa(hold, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(hold, LV_OPA_TRANSP, LV_STATE_PRESSED);
-    lv_obj_set_style_translate_y(hold, 0, LV_STATE_PRESSED);
-    inner = box_at(hold, 20, 0, L->hold_edit.w - 40, L->hold_edit.h - 10, COL_PAUSE, 24);
-    g_w.hold_face = inner;
-    lv_obj_set_style_bg_color(inner, lv_color_darken(hex(COL_PAUSE), LV_OPA_30), LV_STATE_PRESSED);
-    lv_obj_set_style_translate_y(inner, 4, LV_STATE_PRESSED);
-    {
-        lv_point_t sz;
-        int group;
-        int x0;
-        int ih = L->hold_edit.h - 10;
-        int ring = 52;
-        lv_text_get_size(&sz, "Hold to edit", &zk_font_xb_40, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        group = ring + 16 + sz.x + 16 + 40;
-        x0 = (L->hold_edit.w - 40 - group) / 2;
-        if (x0 < 8) {
-            x0 = 8;
-        }
-        {
-            lv_obj_t *arc = lv_arc_create(inner);
-            lv_obj_set_size(arc, ring, ring);
-            lv_obj_set_pos(arc, x0, (ih - ring) / 2);
-            lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, 0);
-            lv_obj_set_style_border_width(arc, 0, 0);
-            lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
-            lv_arc_set_rotation(arc, 270);
-            lv_arc_set_bg_angles(arc, 0, 360);
-            lv_arc_set_value(arc, 25);
-            lv_obj_set_style_arc_width(arc, 5, LV_PART_MAIN);
-            lv_obj_set_style_arc_width(arc, 5, LV_PART_INDICATOR);
-            lv_obj_set_style_arc_color(arc, hex(COL_WHITE), LV_PART_MAIN);
-            lv_obj_set_style_arc_opa(arc, LV_OPA_30, LV_PART_MAIN);
-            lv_obj_set_style_arc_color(arc, hex(COL_WHITE), LV_PART_INDICATOR);
-            lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
-            lv_obj_set_style_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
-            plain(arc);
-        }
-        {
-            lv_obj_t *lb = lab(inner, "Hold to edit", &zk_font_xb_40, COL_WHITE, x0 + ring + 16, (ih - 41) / 2);
-            (void)lb;
-        }
-        icon_at(inner, &zk_icon_pencil_40, COL_WHITE, x0 + ring + 16 + sz.x + 16, (ih - 40) / 2);
-    }
-    (void)s;
-}
-
-static const char *station_state_label(const char *state)
-{
-    if (state && strcmp(state, "running") == 0) {
-        return "Running";
-    }
-    if (state && strcmp(state, "queued") == 0) {
-        return "Queued";
-    }
-    return "Idle";
-}
-
-static void build_station(lv_obj_t *scr, const zk_layout_rects *L)
-{
-    lv_obj_t *card;
-    lv_obj_t *bar;
-    int bar_w;
-    if (L->title.w > 0) {
-        lv_obj_t *t = lab(scr, "Station", &zk_font_xb_44, COL_INK, L->title.x + 2, L->title.y + 2);
-        (void)t;
-    }
-    card = box_rect(scr, L->card, COL_CARD, 26);
-    border_on(card, 3);
-    mark_lab("st_title", 1);
-    g_w.st_title = lab(card, "", &zk_font_xb_50, COL_INK, 20, 18);
-    lab_width(g_w.st_title, L->card.w - 40, LV_TEXT_ALIGN_LEFT);
-    g_w.st_dot = box_at(card, 20, 78, 22, 22, COL_TEAL, 11);
-    mark_lab("st_state", 1);
-    g_w.st_state = lab(card, "", &zk_font_xb_36, COL_INK, 52, 72);
-    lab_width(g_w.st_state, L->card.w - 72, LV_TEXT_ALIGN_LEFT);
-    mark_lab("st_exempt", 1);
-    g_w.st_exempt = lab(card, "", &zk_font_sb_28, COL_MUT, 20, 118);
-    lab_width(g_w.st_exempt, L->card.w - 40, LV_TEXT_ALIGN_LEFT);
-    mark_lab("st_soil_msg", 1);
-    g_w.st_soil_msg = lab(card, "", &zk_font_sb_28, COL_MUT, 20, 160);
-    lab_width(g_w.st_soil_msg, L->card.w - 40, LV_TEXT_ALIGN_LEFT);
-    bar_w = L->card.w - 40 - 92;
-    if (bar_w < 40) {
-        bar_w = 40;
-    }
-    bar = box_at(card, 20, 210, bar_w, 38, COL_TRACK, 12);
-    border_on(bar, 2);
-    lv_obj_set_style_clip_corner(bar, true, 0);
-    g_w.st_bar_w = bar_w - 4;
-    g_w.st_soil_fill = box_at(bar, 2, 2, 0, 34, COL_FILL, 8);
-    mark_lab("st_soil_pct", 1);
-    g_w.st_soil_pct = lab(card, "", &zk_font_xb_44, COL_INK, L->card.w - 20 - 92, 206);
-    lab_width(g_w.st_soil_pct, 92, LV_TEXT_ALIGN_RIGHT);
-}
-
-static void build_needs_update(lv_obj_t *scr, const zk_layout_rects *L)
-{
-    lv_obj_t *card = box_rect(scr, L->card, COL_CARD, 26);
-    border_on(card, 3);
-    mark_lab("nu_title", 0);
-    g_w.nu_title = lab(card, "Controller needs an update", &zk_font_xb_44, COL_INK, 24, 40);
-    lab_width(g_w.nu_title, L->card.w - 48, LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(g_w.nu_title, LV_LABEL_LONG_WRAP);
-    mark_lab("nu_body", 1);
-    g_w.nu_body = lab(card, "Please update the controller.", &zk_font_sb_28, COL_MUT, 24, 160);
-    lab_width(g_w.nu_body, L->card.w - 48, LV_TEXT_ALIGN_LEFT);
-    lv_label_set_long_mode(g_w.nu_body, LV_LABEL_LONG_WRAP);
-}
-
-static void build_modal(lv_obj_t *scr, int modal)
-{
-    zk_layout_in in;
-    zk_layout_rects M;
-    lv_obj_t *dim;
-    lv_obj_t *card;
-    lv_obj_t *ok;
-    lv_obj_t *cancel;
-    uint32_t ok_bg = (modal == ZK_SCREEN_CONFIRM_PAUSE) ? COL_PAUSE : COL_STOP;
-    const char *ok_txt = (modal == ZK_SCREEN_CONFIRM_PAUSE) ? "Pause" : "STOP";
-    memset(&in, 0, sizeof in);
-    zk_layout_rects_of((enum zk_screen)modal, &in, &M);
-    dim = box_at(scr, 0, 0, ZK_SCREEN_W, ZK_SCREEN_H, COL_DIM, 0);
-    lv_obj_set_style_bg_opa(dim, 150, 0);
-    lv_obj_add_flag(dim, LV_OBJ_FLAG_CLICKABLE);
-    card = box_at(dim, M.modal.x, M.modal.y, M.modal.w, M.modal.h, COL_CARD, 26);
-    border_on(card, 3);
-    g_w.m_title = lab(card, "", &zk_font_xb_44, COL_INK, 24, 22);
-    lab_width(g_w.m_title, M.modal.w - 48, LV_TEXT_ALIGN_CENTER);
-    mark_lab("m_body", 1);
-    g_w.m_body = lab(card, "", &zk_font_sb_28, COL_INK, 24, 84);
-    lab_width(g_w.m_body, M.modal.w - 48, LV_TEXT_ALIGN_CENTER);
-    mark_lab("m_sub", 1);
-    g_w.m_sub = lab(card, "", &zk_font_sb_26, COL_MUT, 24, 122);
-    lab_width(g_w.m_sub, M.modal.w - 48, LV_TEXT_ALIGN_CENTER);
-    ok = target(dim, M.modal_ok, ZK_TARGET_MODAL_OK, ok_bg, 22, 0);
-    cancel = target(dim, M.modal_cancel, ZK_TARGET_MODAL_CANCEL, COL_BACK, 22, 0);
-    {
-        lv_obj_t *lb = lab(ok, ok_txt, &zk_font_xb_42, COL_WHITE, 0, (M.modal_ok.h - 43) / 2);
-        lab_width(lb, M.modal_ok.w, LV_TEXT_ALIGN_CENTER);
-        lb = lab(cancel, "Cancel", &zk_font_xb_42, COL_INK, 0, (M.modal_cancel.h - 43) / 2);
-        lab_width(lb, M.modal_cancel.w, LV_TEXT_ALIGN_CENTER);
-    }
-}
-
-static void build_overlays(lv_obj_t *scr)
-{
-    g_w.stale = box_at(scr, 28, 416, 490, 48, COL_STALE_BG, 24);
-    border_on(g_w.stale, 2);
-    lv_obj_set_style_border_color(g_w.stale, hex(COL_STOP), 0);
-    {
-        lv_obj_t *lb = lab(g_w.stale, "Can't reach the controller", &zk_font_b_26, COL_STOP, 12, 10);
-        lab_width(lb, 466, LV_TEXT_ALIGN_CENTER);
-    }
-    lv_obj_add_flag(g_w.stale, LV_OBJ_FLAG_HIDDEN);
-    g_w.toast = box_at(scr, 28, 360, 490, 48, COL_INK, 24);
-    mark_lab("toast", 1);
-    g_w.toast_lbl = lab(g_w.toast, "", &zk_font_b_26, COL_CARD, 12, 10);
-    lab_width(g_w.toast_lbl, 466, LV_TEXT_ALIGN_CENTER);
-    lv_obj_add_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void apply_rain(const char *bold, const char *rest)
-{
-    lv_obj_t *parent;
+    const zk_hero_copy_t *h = &g_view.hero;
+    uint32_t bg = COL_CREAM;
+    uint32_t edge = COL_EDGE;
+    uint32_t lc = COL_LABEL;
+    uint32_t hc = COL_INK;
+    uint32_t sc = COL_MUTED;
+    uint32_t tc = COL_TEXT;
+    char fitted[192];
+    int clamped;
+    int head_h;
+    int y;
+    int sub_x;
+    int sub_w;
     lv_point_t sz;
-    const char *shown;
-    int parent_w;
-    int bold_max;
-    int x;
-    int rest_max;
-    if (!g_w.rain_bold || !g_w.rain_rest) {
-        return;
-    }
-    parent = lv_obj_get_parent(g_w.rain_bold);
-    parent_w = parent ? (int)lv_obj_get_style_width(parent, LV_PART_MAIN) : 0;
-    if (parent_w <= 0 || parent_w > 4000) {
-        if (parent) {
-            lv_obj_update_layout(parent);
-            parent_w = (int)lv_obj_get_width(parent);
-        }
-    }
-    bold_max = parent_w - 62 - 14;
-    if (bold_max < 8) {
-        set_lab(g_w.rain_bold, bold);
-        set_lab(g_w.rain_rest, rest);
-        shown = lv_label_get_text(g_w.rain_bold);
-        lv_text_get_size(&sz, shown ? shown : "", &zk_font_xb_28, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        lv_obj_set_pos(g_w.rain_rest, 62 + sz.x, 14);
-        return;
-    }
-    set_lab_fit_px(g_w.rain_bold, bold, bold_max);
-    shown = lv_label_get_text(g_w.rain_bold);
-    lv_text_get_size(&sz, shown ? shown : "", &zk_font_xb_28, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    x = 62 + sz.x;
-    lv_obj_set_pos(g_w.rain_rest, x, 14);
-    rest_max = parent_w - x - 14;
-    if (rest_max < 1) {
-        rest_max = 1;
-    }
-    lv_obj_set_width(g_w.rain_rest, rest_max);
-    set_lab_fit_px(g_w.rain_rest, rest, rest_max);
-}
+    const lv_font_t *hf = &zk_font_lit_48;
+    int sheet = sheet_kind_of(g_screen) != ZK_SHEET_NONE;
 
-static void apply_station_sheet(const zk_snapshot_t *s)
-{
-    const zk_kiosk_station_t *st = NULL;
-    int idx = -1;
-    int pct;
-    char a[160];
-    if (s->have_kiosk) {
-        if (g_station_id[0]) {
-            idx = zk_kiosk_station_index(&s->kiosk, g_station_id);
-        }
-        if (idx < 0) {
-            idx = g_station_i;
-        }
-        if (idx >= 0 && idx < s->kiosk.n_stations) {
-            st = &s->kiosk.stations[idx];
-            zk_str_copy(g_station_id, sizeof g_station_id, st->id);
-            g_station_i = idx;
-        }
+    switch (h->style) {
+    case ZK_HERO_PAUSED:
+        bg = COL_PLUM;
+        edge = COL_PLUM;
+        lc = COL_PLUM_MUT;
+        hc = COL_PLUM_INK;
+        sc = COL_PLUM_MUT;
+        tc = COL_PLUM_INK;
+        break;
+    case ZK_HERO_OFFLINE:
+    case ZK_HERO_STOP_PENDING:
+        edge = COL_ERR;
+        lc = COL_ERR;
+        break;
+    case ZK_HERO_OVERLAP:
+        edge = COL_TERRA;
+        lc = COL_TERRA_INK;
+        sc = COL_TERRA_INK;
+        break;
+    case ZK_HERO_WATERING:
+    case ZK_HERO_MANUAL:
+    case ZK_HERO_STOP_CONFIRMED:
+        lc = COL_TEAL_INK;
+        break;
+    case ZK_HERO_IDLE:
+        lc = COL_TERRA_INK;
+        break;
+    default:
+        break;
     }
-    if (!st) {
-        set_lab_fit(g_w.st_title, "--");
-        set_lab_fit(g_w.st_state, "");
-        set_lab_fit(g_w.st_exempt, "");
-        set_lab_fit(g_w.st_soil_msg, "");
-        set_lab(g_w.st_soil_pct, "");
-        return;
+    show(g_w.hero, !sheet);
+    paint_box(g_w.hero, bg, edge, 2, 16, LV_BORDER_SIDE_FULL);
+    /* CSS label tracking is 1.4 px. 2 px is what wraps "WEEKDAYS AM" onto
+     * the second line inside the 332 px slot, matching the spec screens. */
+    use_font(g_w.h_label, &zk_font_sb_18, 2);
+    lv_obj_set_style_text_line_space(g_w.h_label, 4, 0);
+    text_color(g_w.h_label, lc);
+    clamped = fit_text(fitted, sizeof fitted, h->label, &zk_font_sb_18, 2, 332, 2);
+    set_tracked(g_w.h_label, fitted, clamped);
+    {
+        int label_w = (int)lv_text_get_width(fitted, (uint32_t)strlen(fitted), &zk_font_sb_18, 2);
+        int label_lines = label_w > 332 ? 2 : 1;
+        place(g_w.h_label, 22, 18, 332, label_lines * 22);
+        /* Flex: 22 px label pitch, 8 px gap. +9 px compensates LVGL glyphs
+         * sitting at the top of the line box (CSS line-height 1.2 leads). */
+        y = 18 + label_lines * 22 + 8 + 9;
     }
-    set_lab_fit(g_w.st_title, st->title[0] ? st->title : st->id);
-    if (g_w.st_dot) {
-        lv_obj_set_style_bg_color(g_w.st_dot, hex(station_color(st->color)), 0);
+
+    use_font(g_w.h_head, hf, 0);
+    text_color(g_w.h_head, hc);
+    set_tracked(g_w.h_head, h->headline, 0);
+    lv_obj_set_style_text_line_space(g_w.h_head, 6, 0);
+    lv_text_get_size(&sz, h->headline[0] ? h->headline : " ", hf, 0, 6, 332, LV_TEXT_FLAG_NONE);
+    head_h = (int)sz.y;
+    if (head_h < 52) {
+        head_h = 52;
     }
-    set_lab_fit(g_w.st_state, station_state_label(st->state));
-    if (st->rain_pause_exempt) {
-        set_lab_fit(g_w.st_exempt, "Skips rain pauses");
-        lv_obj_remove_flag(g_w.st_exempt, LV_OBJ_FLAG_HIDDEN);
+    if (head_h > 52 * 3 + 12) {
+        head_h = 52 * 3 + 12;
+    }
+    place(g_w.h_head, 22, y, 332, head_h);
+
+    y = y + head_h + 8;
+    if (h->time_line[0]) {
+        use_font(g_w.h_time, &zk_font_sb_36, 0);
+        text_color(g_w.h_time, tc);
+        set_tracked(g_w.h_time, h->time_line, 0);
+        place(g_w.h_time, 22, y, 332, 40);
+        show(g_w.h_time, 1);
+        y += 44;
     } else {
-        set_lab_fit(g_w.st_exempt, "");
-        lv_obj_add_flag(g_w.st_exempt, LV_OBJ_FLAG_HIDDEN);
+        show(g_w.h_time, 0);
     }
-    pct = zk_station_soil_percent(&s->kiosk, idx);
-    if (pct >= 0) {
-        int low = zk_soil_low(pct);
-        int fill_w;
-        set_lab_fit(g_w.st_soil_msg, "");
-        lv_obj_add_flag(g_w.st_soil_msg, LV_OBJ_FLAG_HIDDEN);
-        snprintf(a, sizeof a, "%d%%", pct);
-        set_lab(g_w.st_soil_pct, a);
-        lv_obj_set_style_text_color(g_w.st_soil_pct, hex(low ? COL_LOWTX : COL_INK), 0);
-        fill_w = g_w.st_bar_w * pct / 100;
-        if (fill_w < 0) {
-            fill_w = 0;
-        }
-        if (g_w.st_soil_fill) {
-            lv_obj_remove_flag(lv_obj_get_parent(g_w.st_soil_fill), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_width(g_w.st_soil_fill, fill_w);
-            lv_obj_set_style_bg_color(g_w.st_soil_fill, hex(low ? COL_LOW : COL_FILL), 0);
-        }
-        if (g_w.st_soil_pct) {
-            lv_obj_remove_flag(g_w.st_soil_pct, LV_OBJ_FLAG_HIDDEN);
-        }
+    sub_x = 22;
+    sub_w = 332;
+    if (h->style == ZK_HERO_OVERLAP) {
+        sub_x = 48;
+        sub_w = 306;
+        use_font(g_w.h_sub, &zk_font_sb_24, 0);
+        place(g_w.warn, 22, y, 22, 22);
+        recolor(g_w.warn, COL_TERRA_INK);
+        show(g_w.warn, h->secondary[0] ? 1 : 0);
     } else {
-        if (g_w.st_soil_fill) {
-            lv_obj_add_flag(lv_obj_get_parent(g_w.st_soil_fill), LV_OBJ_FLAG_HIDDEN);
-        }
-        if (g_w.st_soil_pct) {
-            lv_obj_add_flag(g_w.st_soil_pct, LV_OBJ_FLAG_HIDDEN);
-        }
-        if (s->kiosk.soil.enabled && s->kiosk.soil.et_stale) {
-            set_lab_fit(g_w.st_soil_msg, "Soil estimate paused (ET data old)");
-            lv_obj_remove_flag(g_w.st_soil_msg, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            set_lab_fit(g_w.st_soil_msg, "");
-            lv_obj_add_flag(g_w.st_soil_msg, LV_OBJ_FLAG_HIDDEN);
-        }
+        use_font(g_w.h_sub, &zk_font_r_26, 0);
+        show(g_w.warn, 0);
     }
+    text_color(g_w.h_sub, sc);
+    set_tracked(g_w.h_sub, h->secondary, 0);
+    place(g_w.h_sub, sub_x, y, sub_w, 80);
+    show(g_w.h_sub, h->secondary[0] ? 1 : 0);
+    clickable(g_w.hero, listed(ZK_TARGET_HERO));
 }
 
-static int station_on(const zk_snapshot_t *s, const zk_kiosk_station_t *stn)
+static void apply_rain(void)
 {
-    int j;
-    if (!s || !stn || !s->have_kiosk) {
-        return 0;
-    }
-    if (stn->on || strcmp(stn->state, "running") == 0) {
-        return 1;
-    }
-    if (s->kiosk.current_station[0] && strcmp(s->kiosk.current_station, stn->id) == 0) {
-        return 1;
-    }
-    for (j = 0; j < s->kiosk.n_on; j++) {
-        if (strcmp(s->kiosk.stations_on[j], stn->id) == 0) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
-static void paint_bar_ticks(lv_obj_t *bar, lv_obj_t *fill, uint32_t color, lv_opa_t opa)
-{
-    uint32_t n;
-    uint32_t c;
-    if (!bar) {
+    int show_it = g_view.hero.rain && sheet_kind_of(g_screen) == ZK_SHEET_NONE;
+    int inner;
+    int fw;
+    show(g_w.rain, show_it);
+    if (!show_it) {
         return;
     }
-    n = lv_obj_get_child_count(bar);
-    for (c = 0; c < n; c++) {
-        lv_obj_t *ch = lv_obj_get_child(bar, (int32_t)c);
-        if (!ch || ch == fill) {
+    set_tracked(g_w.rain_tx, g_view.hero.rain_text, 0);
+    inner = ZK_RAIN_TRACK - 4;
+    if (inner < 1) {
+        inner = 1;
+    }
+    fw = g_view.hero.rain_fill_px * inner / ZK_RAIN_TRACK;
+    if (fw < 0) {
+        fw = 0;
+    }
+    if (fw > inner) {
+        fw = inner;
+    }
+    place(g_w.rain_fill, 2, 2, fw > 0 ? fw : 1, 6);
+    show(g_w.rain_fill, fw > 0);
+}
+
+static void apply_tiles(const zk_layout_rects *L)
+{
+    int i;
+    int six = L->n_tiles > 4;
+    const lv_font_t *nf = six ? &zk_font_lit_20 : &zk_font_lit_26;
+    int lines = six ? 2 : 3;
+    int sheet = sheet_kind_of(g_screen) != ZK_SHEET_NONE;
+    g_w.n_tiles = L->n_tiles;
+    for (i = 0; i < ZK_MAX_SHOWN; i++) {
+        const zk_tile_copy_t *c;
+        int title_w;
+        int pad;
+        int th;
+        int y0;
+        int lh;
+        int gap = 6;
+        int slot_h = 24;
+        int block;
+        int on;
+        int un;
+        char fitted[ZK_TITLE_MAX];
+        int clamped;
+        int slot_w;
+        uint32_t bg;
+        uint32_t bd;
+        uint32_t nc;
+        uint32_t sc;
+        if (i >= L->n_tiles || sheet) {
+            show(g_w.tile[i], 0);
+            show(g_w.title_ln[i], 0);
+            show(g_w.title_rest[i], 0);
             continue;
         }
-        lv_obj_set_style_bg_color(ch, hex(color), 0);
-        lv_obj_set_style_bg_opa(ch, opa, 0);
-    }
-}
+        c = &g_view.tiles[i];
+        on = c->vis == ZK_TILE_ON;
+        un = c->vis == ZK_TILE_UNAVAILABLE;
+        bg = on ? COL_TEAL : (un ? COL_DIM : COL_TILE);
+        bd = on ? COL_TEAL : (un ? COL_DIM : COL_LINE);
+        show(g_w.tile[i], 1);
+        place(g_w.tile[i], L->tiles[i].x, L->tiles[i].y, L->tiles[i].w, L->tiles[i].h);
+        paint_box(g_w.tile[i], bg, bd, 2, 16, LV_BORDER_SIDE_FULL);
+        clickable(g_w.tile[i], listed((enum zk_target_id)(ZK_TARGET_TILE0 + i)));
 
-static void apply_content(const zk_snapshot_t *s)
-{
-    char a[320];
-    char b[192];
-    char c[96];
-    int i;
-
-    if (g_key.content == ZK_SCREEN_HOME) {
-        if (!s->have_kiosk) {
-            set_next_kicker("--");
-            set_time_line(g_w.hdr_big, "Connecting" ELLIPSIS);
-        } else if (!s->kiosk.has_next_run) {
-            set_next_kicker("--");
-            set_time_line(g_w.hdr_big, "--");
-        } else {
-            set_next_kicker(s->kiosk.next_run.name);
-            zk_fmt_fire_when(&s->kiosk.next_run, s->wall, b, sizeof b);
-            set_time_line(g_w.hdr_big, b[0] ? b : "--");
+        title_w = L->tiles[i].w - 28;
+        if (title_w < 40) {
+            title_w = 40;
         }
-        if (g_w.fault_lbl) {
-            const char *err = (s->have_kiosk && s->kiosk.last_error[0]) ? s->kiosk.last_error : "check controller";
-            snprintf(a, sizeof a, "Fault: %s", err);
-            set_lab_fit(g_w.fault_lbl, a);
+        /* Drop is inline on line 1 only (22 px + 6 px gap). Later lines use the full width. */
+        pad = on ? 28 : 0;
+        use_font(g_w.title[i], nf, 0);
+        use_font(g_w.title_ln[i], nf, 0);
+        use_font(g_w.title_rest[i], nf, 0);
+        nc = on ? COL_WHITE : COL_INK;
+        if (un) {
+            nc = COL_TEXT;
         }
-        if (g_w.rain_bold && s->have_kiosk) {
-            rain_parts(&s->kiosk.rain_strip, a, sizeof a, b, sizeof b);
-            apply_rain(a, b);
-        }
-        for (i = 0; i < g_w.n_tiles; i++) {
-            const zk_kiosk_station_t *stn;
-            int pct = -1;
-            int low;
-            int fill_w;
-            int on;
-            int pad;
-            int fit_w;
-            if (!s->have_kiosk || i >= s->kiosk.n_stations) {
-                continue;
-            }
-            stn = &s->kiosk.stations[i];
-            on = station_on(s, stn);
-            pad = on ? 38 : 0;
-            if (g_w.tile_obj[i]) {
-                lv_obj_set_style_bg_color(g_w.tile_obj[i], hex(on ? COL_TEAL : COL_CARD), 0);
-                lv_obj_set_style_border_width(g_w.tile_obj[i], on ? 4 : 3, 0);
-                lv_obj_set_style_border_color(g_w.tile_obj[i], hex(on ? COL_TEAL : COL_LINE), 0);
-                lv_obj_set_style_border_opa(g_w.tile_obj[i], LV_OPA_COVER, 0);
-                lv_obj_set_style_bg_color(g_w.tile_obj[i], lv_color_darken(hex(on ? COL_TEAL : COL_CARD), LV_OPA_30), LV_STATE_PRESSED);
-            }
-            if (g_w.tile_title[i]) {
-                lv_obj_set_style_text_color(g_w.tile_title[i], hex(on ? COL_WHITE : COL_INK), 0);
-                lv_obj_set_style_pad_left(g_w.tile_title[i], pad, 0);
-                fit_w = slot_px(g_w.tile_title[i]) - pad;
-                if (fit_w < 1) {
-                    fit_w = 1;
-                }
-                set_lab_fit_px(g_w.tile_title[i], stn->title, fit_w);
-            }
-            if (g_w.tile_drop[i]) {
-                if (on) {
-                    lv_obj_remove_flag(g_w.tile_drop[i], LV_OBJ_FLAG_HIDDEN);
-                } else {
-                    lv_obj_add_flag(g_w.tile_drop[i], LV_OBJ_FLAG_HIDDEN);
-                }
-            }
-            pct = zk_station_soil_percent(&s->kiosk, i);
-            if (g_w.tile_bar[i]) {
-                if (on) {
-                    lv_obj_set_style_bg_color(g_w.tile_bar[i], hex(COL_WHITE), 0);
-                    lv_obj_set_style_bg_opa(g_w.tile_bar[i], 56, 0);
-                    lv_obj_set_style_border_color(g_w.tile_bar[i], hex(COL_WHITE), 0);
-                    lv_obj_set_style_border_opa(g_w.tile_bar[i], 89, 0);
-                    paint_bar_ticks(g_w.tile_bar[i], g_w.tile_fill[i], COL_WHITE, 70);
-                } else {
-                    lv_obj_set_style_bg_color(g_w.tile_bar[i], hex(COL_TRACK), 0);
-                    lv_obj_set_style_bg_opa(g_w.tile_bar[i], LV_OPA_COVER, 0);
-                    lv_obj_set_style_border_color(g_w.tile_bar[i], hex(COL_LINE), 0);
-                    lv_obj_set_style_border_opa(g_w.tile_bar[i], LV_OPA_COVER, 0);
-                    paint_bar_ticks(g_w.tile_bar[i], g_w.tile_fill[i], COL_CARD, LV_OPA_COVER);
-                }
-            }
-            if (g_w.tile_pct[i] && pct >= 0) {
-                low = zk_soil_low(pct);
-                snprintf(a, sizeof a, "%d%%", pct);
-                set_lab(g_w.tile_pct[i], a);
-                lv_obj_set_style_text_color(g_w.tile_pct[i], hex(on ? COL_WHITE : (low ? COL_LOWTX : COL_INK)), 0);
-                fill_w = g_w.tile_bar_w[i] * pct / 100;
-                if (fill_w < 0) {
-                    fill_w = 0;
-                }
-                if (g_w.tile_fill[i]) {
-                    lv_obj_set_width(g_w.tile_fill[i], fill_w);
-                    lv_obj_set_style_bg_color(g_w.tile_fill[i], hex(on ? COL_RUNLBL : (low ? COL_LOW : COL_FILL)), 0);
-                }
-            }
-        }
-    } else if (g_key.content == ZK_SCREEN_RUNNING) {
-        const zk_kiosk_run_t *run = s->have_kiosk && s->kiosk.has_run ? &s->kiosk.run : NULL;
-        const char *cur = "";
-        if (run) {
-            if (run->step_index < 0) {
-                cur = run->next_station[0] ? run->next_station : run->current_station;
-            } else {
-                cur = run->current_station;
-            }
-        }
-        set_lab_fit(g_w.run_title, cur[0] ? station_title(s, cur) : "--");
-        if (!run) {
-            set_lab(g_w.run_count, "--:--");
-            set_lab(g_w.run_step, "Step --");
-            set_lab_fit(g_w.run_next, "Next: --");
-        } else if (run->step_index < 0) {
-            set_lab(g_w.run_count, "--:--");
-            set_lab(g_w.run_step, "Starting");
-            if (run->next_station[0]) {
-                snprintf(b, sizeof b, "Next: %s", station_title(s, run->next_station));
-            } else {
-                snprintf(b, sizeof b, "Next: --");
-            }
-            set_lab_fit(g_w.run_next, b);
-        } else {
-            zk_fmt_mmss(run->step_remaining_sec, a, sizeof a);
-            set_lab(g_w.run_count, a);
-            if (run->step_count > 0) {
-                zk_fmt_step(run->step_index, run->step_count, a, sizeof a);
-            } else {
-                snprintf(a, sizeof a, "Step --");
-            }
-            set_lab(g_w.run_step, a);
-            if (run->next_station[0]) {
-                snprintf(b, sizeof b, "Next: %s", station_title(s, run->next_station));
-            } else {
-                snprintf(b, sizeof b, "Next: --");
-            }
-            set_lab_fit(g_w.run_next, b);
-        }
+        text_color(g_w.title[i], nc);
+        text_color(g_w.title_ln[i], nc);
+        text_color(g_w.title_rest[i], nc);
+        lh = (int)lv_font_get_line_height(nf);
         {
-            int fw = 0;
-            int planned;
-            if (run && run->step_index >= 0) {
-                planned = run->step_elapsed_sec + run->step_remaining_sec;
-                if (planned > 0) {
-                    fw = g_w.run_bar_w * run->step_elapsed_sec / planned;
+            int first_w = title_w - pad;
+            int rest_w = title_w;
+            const char *shown = c->name;
+            wrap_info_t wr;
+            int hang;
+            if (first_w < 40) {
+                first_w = 40;
+            }
+            wr = measure_wrap(shown, nf, first_w, rest_w, lines);
+            clamped = 0;
+            if (wr.overflow || !shown[0]) {
+                int spaced = shown[0] && strchr(shown, ' ') != NULL;
+                clamped = fit_text(fitted, sizeof fitted, shown, nf, 0, first_w, spaced ? lines : 1);
+                shown = fitted;
+                wr = measure_wrap(shown, nf, first_w, rest_w, lines);
+            }
+            if (wr.nlines < 1) {
+                wr.nlines = 1;
+            }
+            if (wr.nlines > lines) {
+                wr.nlines = lines;
+            }
+            set_tracked(g_w.title[i], shown, clamped);
+            hang = on && wr.nlines > 1 && wr.line1 > 0 && shown[wr.line1];
+            th = lh * wr.nlines;
+            block = th + gap + slot_h;
+            y0 = (L->tiles[i].h - block) / 2;
+            if (y0 < 8) {
+                y0 = 8;
+            }
+            if (y0 + block > L->tiles[i].h - 6) {
+                th = L->tiles[i].h - 6 - y0 - gap - slot_h;
+                if (th < lh) {
+                    th = lh;
                 }
             }
-            if (g_w.run_fill) {
-                lv_obj_set_width(g_w.run_fill, fw);
-            }
-        }
-    } else if (g_key.content == ZK_SCREEN_PAUSED) {
-        if (s->have_kiosk) {
-            zk_pause_title(&s->kiosk.pause, a, sizeof a);
-            zk_pause_until_text(&s->kiosk.pause, s->wall, b, sizeof b);
-        } else {
-            snprintf(a, sizeof a, "PAUSED");
-            snprintf(b, sizeof b, "--");
-        }
-        set_lab_fit(g_w.ban_title, a);
-        set_lab_fit(g_w.ban_until, b);
-        if (g_w.rain_bold && s->have_kiosk) {
-            rain_parts(&s->kiosk.rain_strip, a, sizeof a, b, sizeof b);
-            apply_rain(a, b);
-        }
-        if (s->have_kiosk && s->kiosk.has_next_effective) {
-            zk_str_trim_copy(c, sizeof c, s->kiosk.next_effective.name);
-            zk_fmt_fire_when(&s->kiosk.next_effective, s->wall, b, sizeof b);
-            snprintf(a, sizeof a, "%s " MIDDOT " %s", c[0] ? c : "--", b);
-            set_lab_fit(g_w.info_name, a);
-            if (s->kiosk.has_next_run && s->kiosk.next_run.skipped_by_pause) {
-                zk_str_trim_copy(c, sizeof c, s->kiosk.next_run.name);
-                snprintf(a, sizeof a, "%s will be skipped", c[0] ? c : "Next run");
-                set_lab_fit(g_w.info_sub0, a);
-                set_lab_fit(g_w.info_sub1, "");
+            lv_obj_set_style_pad_left(g_w.title[i], hang ? 0 : pad, 0);
+            lv_obj_set_style_text_opa(g_w.title[i], hang ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+            lv_label_set_long_mode(g_w.title[i], LV_LABEL_LONG_WRAP);
+            place(g_w.title[i], 14, y0, title_w, th);
+            if (hang) {
+                char line1[ZK_TITLE_MAX];
+                char rest[ZK_TITLE_MAX];
+                copy_span(line1, sizeof line1, shown, wr.line1);
+                rest_with_breaks(rest, sizeof rest, shown + wr.line1, nf, rest_w, lines - 1);
+                lv_label_set_text(g_w.title_ln[i], line1[0] ? line1 : " ");
+                lv_label_set_text(g_w.title_rest[i], rest);
+                place(g_w.title_ln[i], 14 + pad, y0, first_w, lh);
+                place(g_w.title_rest[i], 14, y0 + lh, rest_w, th > lh ? th - lh : lh);
+                show(g_w.title_ln[i], 1);
+                show(g_w.title_rest[i], rest[0] ? 1 : 0);
             } else {
-                set_lab_fit(g_w.info_sub0, "");
-                set_lab_fit(g_w.info_sub1, "");
+                show(g_w.title_ln[i], 0);
+                show(g_w.title_rest[i], 0);
             }
+        }
+        if (on) {
+            place(g_w.drop[i], 14, y0 + (lh > 22 ? (lh - 22) / 2 : 0), 22, 22);
+            recolor(g_w.drop[i], COL_WHITE);
+            show(g_w.drop[i], 1);
         } else {
-            set_lab_fit(g_w.info_name, "Runs again when you resume");
-            if (s->have_kiosk && s->kiosk.has_next_run && s->kiosk.next_run.skipped_by_pause) {
-                zk_str_trim_copy(c, sizeof c, s->kiosk.next_run.name);
-                snprintf(a, sizeof a, "%s will be skipped", c[0] ? c : "Next run");
-                set_lab_fit(g_w.info_sub0, a);
-            } else {
-                set_lab_fit(g_w.info_sub0, "");
-            }
-            set_lab_fit(g_w.info_sub1, "");
+            show(g_w.drop[i], 0);
         }
-    } else if (g_key.content == ZK_SCREEN_STATION) {
-        apply_station_sheet(s);
-    } else if (g_key.content == ZK_SCREEN_NEEDS_UPDATE) {
-        if (g_w.nu_title) {
-            set_lab(g_w.nu_title, "Controller needs an update");
-        }
-        if (g_w.nu_body) {
-            set_lab_fit(g_w.nu_body, "Please update the controller.");
-        }
-    } else if (g_key.content == ZK_SCREEN_PICKER) {
-        for (i = 0; i < 4; i++) {
-            zk_pause_preview_t pv;
-            memset(&pv, 0, sizeof pv);
-            zk_pause_preview(s->have_schedules ? &s->schedules : NULL, s->wall, (zk_pause_kind_t)i, &pv);
-            set_lab(g_w.chip_t[i], pv.primary);
-            set_lab_fit(g_w.chip_s[i], pv.secondary);
-            if (g_w.chip_t[i] && g_w.chip_s[i]) {
-                lv_obj_update_layout(g_w.chip_t[i]);
-                lv_obj_align_to(g_w.chip_s[i], g_w.chip_t[i], LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
-            }
-        }
-    } else if (g_key.content == ZK_SCREEN_SCHEDULES) {
-        const zk_schedule_t *sch = NULL;
-        int nsch = s->have_schedules ? s->schedules.n : 0;
-        if (nsch > 1) {
-            snprintf(a, sizeof a, "%d of %d", g_sched_i + 1, nsch);
-            set_lab_fit(g_w.sched_count, a);
-        } else {
-            set_lab_fit(g_w.sched_count, "");
-        }
-        if (nsch > 0 && g_sched_i >= 0 && g_sched_i < nsch) {
-            sch = &s->schedules.items[g_sched_i];
-        }
-        if (sch) {
-            name_upper(sch, a, sizeof a);
-            set_lab_fit(g_w.sched_name, a);
-            sched_summary(sch, b, sizeof b);
-            set_lab_fit(g_w.sched_sum, b);
-            ends_about(sch, c, sizeof c);
-            set_lab_fit(g_w.sched_ends2, c);
-            for (i = 0; i < g_w.n_rows; i++) {
-                const char *nm = "--";
-                if (i < sch->n_steps) {
-                    nm = station_title(s, sch->steps[i].station_id);
-                    snprintf(a, sizeof a, "%d", sch->steps[i].minutes);
-                } else {
-                    snprintf(a, sizeof a, "--");
-                }
-                set_lab_fit(g_w.row_name[i], nm);
-                set_lab(g_w.row_min[i], a);
-            }
-        }
-    }
 
-    if (g_key.modal == ZK_SCREEN_CONFIRM_STOP) {
-        set_lab(g_w.m_title, "Stop all watering?");
-        set_lab_fit(g_w.m_body, "Turns every valve off.");
-        set_lab_fit(g_w.m_sub, "");
-    } else if (g_key.modal == ZK_SCREEN_CONFIRM_PAUSE) {
-        zk_pause_preview_t pv;
-        int chip = g_pick_chip;
-        memset(&pv, 0, sizeof pv);
-        if (chip < 0 || chip > 3) {
-            chip = 0;
+        slot_w = L->tiles[i].w - 20;
+        if (slot_w < title_w) {
+            slot_w = title_w;
         }
-        zk_pause_preview(s->have_schedules ? &s->schedules : NULL, s->wall, (zk_pause_kind_t)chip, &pv);
-        set_lab(g_w.m_title, "Pause watering?");
-        set_lab_fit(g_w.m_body, pv.primary);
-        set_lab_fit(g_w.m_sub, pv.secondary);
+        place(g_w.slot[i], 14, y0 + th + gap, slot_w, slot_h);
+        show(g_w.slot[i], c->slot[0] ? 1 : 0);
+        sc = on ? COL_WHITE : (c->muted_slot || un ? COL_MUTED : COL_TEXT);
+        if (c->soil == ZK_SOIL_VALUE && !on) {
+            use_font(g_w.slot_tx[i], &zk_font_sb_18, 0);
+        } else if (c->soil == ZK_SOIL_NONE || c->soil == ZK_SOIL_STALE) {
+            use_font(g_w.slot_tx[i], &zk_font_m_18, 0);
+        } else {
+            use_font(g_w.slot_tx[i], &zk_font_r_20, 0);
+        }
+        text_color(g_w.slot_tx[i], sc);
+        set_tracked(g_w.slot_tx[i], c->slot, 0);
+        if (c->soil == ZK_SOIL_NONE) {
+            paint_box(g_w.bar[i], COL_CREAM, on ? COL_WHITE : COL_LINE, 2, 2, LV_BORDER_SIDE_FULL);
+            lv_obj_set_style_bg_opa(g_w.bar[i], LV_OPA_TRANSP, 0);
+            place(g_w.bar[i], 0, 7, 20, 10);
+            show(g_w.bar[i], 1);
+            show(g_w.fill[i], 0);
+            place(g_w.slot_tx[i], 26, 1, slot_w - 26, 22);
+        } else if (c->soil == ZK_SOIL_VALUE || c->soil == ZK_SOIL_STALE) {
+            int bw = 56;
+            int fw = c->percent < 0 ? 0 : c->percent * bw / 100;
+            uint32_t track = on ? COL_ON_TRACK : COL_TRACK;
+            uint32_t fill = on ? COL_ON_FILL : (c->soil == ZK_SOIL_STALE ? COL_STALE : COL_TEAL);
+            paint_box(g_w.bar[i], track, track, 0, 4, LV_BORDER_SIDE_NONE);
+            place(g_w.bar[i], 0, 8, bw, 8);
+            show(g_w.bar[i], 1);
+            paint_box(g_w.fill[i], fill, fill, 0, 4, LV_BORDER_SIDE_NONE);
+            place(g_w.fill[i], 0, 0, fw > 0 ? fw : 1, 8);
+            show(g_w.fill[i], fw > 0);
+            place(g_w.slot_tx[i], bw + 8, 2, slot_w - bw - 8, 20);
+        } else {
+            show(g_w.bar[i], 0);
+            show(g_w.fill[i], 0);
+            place(g_w.slot_tx[i], 0, 2, slot_w, 20);
+        }
     }
 }
 
-static int g_ov_have_prev, g_ov_prev_stale, g_ov_prev_toast;
-static char g_ov_prev_text[96];
-static lv_obj_t *g_ov_prev_stale_obj, *g_ov_prev_toast_obj;
-
-static void overlays_reset(void)
+static void apply_bar(const zk_layout_rects *L)
 {
-    g_ov_have_prev = 0;
-    g_ov_prev_stale = 0;
-    g_ov_prev_toast = 0;
-    g_ov_prev_text[0] = 0;
-    g_ov_prev_stale_obj = NULL;
-    g_ov_prev_toast_obj = NULL;
-}
-
-/* Toast and stale pill. The removed step strip was the bottom 6 px;
- * the pill is 48 px tall with a 10 px gap, so this stays at 416. */
-#define OVERLAY_Y (ZK_SCREEN_H - 6 - 10 - 48)
-
-static void overlays(const zk_snapshot_t *s)
-{
-    /* Touch LVGL only when the overlay state changes: set_pos and
-     * move_foreground invalidate the area and would redraw every tick.
-     * After rebuild, LVGL may reuse object addresses, so rebuild clears
-     * this cache via overlays_reset. */
-    int show_toast = g_toast_text[0] && zk_platform_mono() < g_toast_until;
-    int y = OVERLAY_Y;
-    int stale = s->stale ? 1 : 0;
-    if (!show_toast) {
-        g_toast_text[0] = 0;
-    }
-    if (g_ov_have_prev && stale == g_ov_prev_stale && show_toast == g_ov_prev_toast &&
-        strcmp(g_ov_prev_text, g_toast_text) == 0 && g_ov_prev_stale_obj == g_w.stale &&
-        g_ov_prev_toast_obj == g_w.toast) {
+    int full = sheet_kind_of(g_screen) == ZK_SHEET_STOP_ALL;
+    int resume = g_view.bar_is_resume;
+    int dis = g_view.bar_disabled;
+    uint32_t bg;
+    uint32_t fg;
+    uint32_t bd;
+    const lv_font_t *font;
+    const void *icon;
+    int iw;
+    int ih;
+    show(g_w.pause, !full);
+    show(g_w.stop, !full);
+    if (full) {
         return;
     }
-    g_ov_have_prev = 1;
-    g_ov_prev_stale = stale;
-    g_ov_prev_toast = show_toast;
-    g_ov_prev_stale_obj = g_w.stale;
-    g_ov_prev_toast_obj = g_w.toast;
-    snprintf(g_ov_prev_text, sizeof g_ov_prev_text, "%s", g_toast_text);
-    if (g_w.stale) {
-        if (stale) {
-            lv_obj_set_pos(g_w.stale, 28, y);
-            lv_obj_remove_flag(g_w.stale, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(g_w.stale);
-            y -= 56;
-        } else {
-            lv_obj_add_flag(g_w.stale, LV_OBJ_FLAG_HIDDEN);
-        }
+    place(g_w.pause, L->pause.x, L->pause.y, L->pause.w, L->pause.h);
+    place(g_w.stop, L->stop.x, L->stop.y, L->stop.w, L->stop.h);
+    if (dis) {
+        bg = COL_DIM;
+        fg = COL_MUTED;
+        bd = COL_DIM;
+        font = &zk_font_m_26;
+    } else if (resume) {
+        bg = COL_TEAL;
+        fg = COL_WHITE;
+        bd = COL_TEAL;
+        font = &zk_font_sb_26;
+    } else {
+        bg = COL_CREAM;
+        fg = COL_INK;
+        bd = COL_LINE;
+        font = &zk_font_m_26;
     }
-    if (g_w.toast) {
-        if (show_toast) {
-            set_lab_fit(g_w.toast_lbl, g_toast_text);
-            lv_obj_set_pos(g_w.toast, 28, y);
-            lv_obj_remove_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(g_w.toast);
-        } else {
-            lv_obj_add_flag(g_w.toast, LV_OBJ_FLAG_HIDDEN);
-        }
+    paint_box(g_w.pause, bg, bd, 2, 16, LV_BORDER_SIDE_FULL);
+    use_font(g_w.pause_tx, font, 0);
+    text_color(g_w.pause_tx, fg);
+    set_tracked(g_w.pause_tx, g_view.bar_word, 0);
+    if (resume && !dis) {
+        icon = &g_play30_dsc;
+        iw = 30;
+        ih = 30;
+    } else {
+        icon = &zk_icon_cloud_36;
+        iw = 36;
+        ih = 36;
+    }
+    lv_image_set_src(g_w.pause_ic, icon);
+    recolor(g_w.pause_ic, fg);
+    center_pair(g_w.pause, g_w.pause_ic, iw, ih, g_w.pause_tx, 10);
+    clickable(g_w.pause, listed(resume ? ZK_TARGET_RESUME : ZK_TARGET_PAUSE));
+
+    if (g_view.stop_filled) {
+        paint_box(g_w.stop, COL_STOP, COL_BAND, 4, 16, LV_BORDER_SIDE_BOTTOM);
+        fg = COL_WHITE;
+    } else {
+        paint_box(g_w.stop, COL_CREAM, COL_STOP, 2, 16, LV_BORDER_SIDE_FULL);
+        fg = COL_STOP;
+    }
+    use_font(g_w.stop_tx, &zk_font_b_36, 3);
+    text_color(g_w.stop_tx, fg);
+    set_tracked(g_w.stop_tx, ZK_WORD_STOP, 0);
+    recolor(g_w.stop_ic, fg);
+    center_pair(g_w.stop, g_w.stop_ic, 44, 44, g_w.stop_tx, 12);
+    clickable(g_w.stop, listed(ZK_TARGET_STOP));
+}
+
+static void rel(const zk_rect *sheet, const zk_rect *r, lv_obj_t *o)
+{
+    if (!o || r->w <= 0) {
+        return;
+    }
+    place(o, r->x - sheet->x, r->y - sheet->y, r->w, r->h);
+}
+
+static void apply_sheet(const zk_layout_rects *L)
+{
+    int kind = sheet_kind_of(g_screen);
+    int full = kind == ZK_SHEET_STOP_ALL;
+    int run = kind == ZK_SHEET_RUN || kind == ZK_SHEET_ANYWAY;
+    uint32_t edge = kind == ZK_SHEET_OVERLAP ? COL_TERRA : COL_EDGE;
+    uint32_t lc = COL_LABEL;
+    char value[32];
+    if (kind == ZK_SHEET_NONE) {
+        show(g_w.sheet, 0);
+        return;
+    }
+    show(g_w.sheet, 1);
+    place(g_w.sheet, L->sheet.x, L->sheet.y, L->sheet.w, L->sheet.h);
+    paint_box(g_w.sheet, COL_CREAM, edge, 2, full ? 24 : 16, LV_BORDER_SIDE_FULL);
+    clickable(g_w.sheet, 1);
+    if (kind == ZK_SHEET_ANYWAY) {
+        lc = COL_PLUM;
+    } else if (kind == ZK_SHEET_STOP_ALL && g_lin.offline) {
+        lc = COL_ERR;
+    } else if (kind == ZK_SHEET_OVERLAP) {
+        lc = COL_TERRA_INK;
+    }
+    use_font(g_w.s_label, &zk_font_sb_18, 1);
+    text_color(g_w.s_label, lc);
+    set_tracked(g_w.s_label, g_view.sheet.label, 0);
+    place(g_w.s_label, full ? 24 : 20, full ? 22 : 18, 728, 28);
+
+    use_font(g_w.s_title, full ? &zk_font_lit_48 : &zk_font_lit_32, 0);
+    text_color(g_w.s_title, COL_INK);
+    set_tracked(g_w.s_title, g_view.sheet.title, 0);
+    place(g_w.s_title, full ? 24 : 20, full ? 52 : 46, 728, full ? 70 : 80);
+
+    use_font(g_w.s_body, full ? &zk_font_r_24 : &zk_font_r_22, 0);
+    text_color(g_w.s_body, COL_MUTED);
+    set_tracked(g_w.s_body, g_view.sheet.body, 0);
+    /* Overlap title is one line, so the body starts at sheet-y+100. */
+    place(g_w.s_body, full ? 24 : 20,
+          kind == ZK_SHEET_OVERLAP ? 100 : (full ? 126 : 132),
+          728, kind == ZK_SHEET_OVERLAP ? 90 : (full ? 120 : 72));
+
+    show(g_w.minus, run);
+    show(g_w.plus, run);
+    show(g_w.value_box, run);
+    show(g_w.value, run);
+    show(g_w.run, run);
+    show(g_w.stop_st, kind == ZK_SHEET_STOP_STATION);
+    show(g_w.stop_all, full);
+    show(g_w.ok, kind == ZK_SHEET_OVERLAP);
+    show(g_w.cancel, kind != ZK_SHEET_OVERLAP);
+
+    if (run) {
+        int minus_on = g_view.sheet.minus_enabled;
+        rel(&L->sheet, &L->minus, g_w.minus);
+        rel(&L->sheet, &L->plus, g_w.plus);
+        rel(&L->sheet, &L->value, g_w.value_box);
+        rel(&L->sheet, &L->cancel, g_w.cancel);
+        rel(&L->sheet, &L->run, g_w.run);
+        paint_box(g_w.minus, minus_on ? COL_CREAM : COL_DIM, minus_on ? COL_LINE : COL_DIM, 2, 16, LV_BORDER_SIDE_FULL);
+        text_color(g_w.minus_tx, minus_on ? COL_INK : COL_MUTED);
+        set_tracked(g_w.minus_tx, "-", 0);
+        center_pair(g_w.minus, NULL, 0, 0, g_w.minus_tx, 0);
+        clickable(g_w.minus, listed(ZK_TARGET_MINUS));
+        paint_box(g_w.plus, COL_CREAM, COL_LINE, 2, 16, LV_BORDER_SIDE_FULL);
+        set_tracked(g_w.plus_tx, "+", 0);
+        center_pair(g_w.plus, NULL, 0, 0, g_w.plus_tx, 0);
+        clickable(g_w.plus, listed(ZK_TARGET_PLUS));
+        snprintf(value, sizeof value, "%d min", g_view.sheet.minutes);
+        set_tracked(g_w.value, value, 0);
+        center_pair(g_w.value_box, NULL, 0, 0, g_w.value, 0);
+        paint_box(g_w.run, COL_TEAL, COL_TEAL, 2, 16, LV_BORDER_SIDE_FULL);
+        text_color(g_w.run_tx, COL_WHITE);
+        set_tracked(g_w.run_tx, ZK_WORD_RUN, 0);
+        recolor(g_w.run_ic, COL_WHITE);
+        center_pair(g_w.run, g_w.run_ic, 28, 28, g_w.run_tx, 8);
+        clickable(g_w.run, listed(ZK_TARGET_RUN));
+    }
+    if (kind == ZK_SHEET_STOP_STATION) {
+        rel(&L->sheet, &L->cancel, g_w.cancel);
+        rel(&L->sheet, &L->stop_station, g_w.stop_st);
+        paint_box(g_w.stop_st, COL_CREAM, COL_STOP, 2, 16, LV_BORDER_SIDE_FULL);
+        text_color(g_w.stop_st_tx, COL_STOP);
+        set_tracked(g_w.stop_st_tx, ZK_WORD_STOP_STATION, 0);
+        recolor(g_w.stop_st_ic, COL_STOP);
+        center_pair(g_w.stop_st, g_w.stop_st_ic, 30, 30, g_w.stop_st_tx, 8);
+        clickable(g_w.stop_st, listed(ZK_TARGET_STOP_STATION));
+    }
+    if (full) {
+        rel(&L->sheet, &L->cancel, g_w.cancel);
+        rel(&L->sheet, &L->stop_all, g_w.stop_all);
+        paint_box(g_w.stop_all, COL_STOP, COL_BAND, 4, 16, LV_BORDER_SIDE_BOTTOM);
+        text_color(g_w.stop_all_tx, COL_WHITE);
+        use_font(g_w.stop_all_tx, &zk_font_b_30, 1);
+        set_tracked(g_w.stop_all_tx, ZK_WORD_STOP_ALL, 0);
+        recolor(g_w.stop_all_ic, COL_WHITE);
+        center_pair(g_w.stop_all, g_w.stop_all_ic, 40, 40, g_w.stop_all_tx, 10);
+        clickable(g_w.stop_all, listed(ZK_TARGET_STOP_ALL));
+        use_font(g_w.cancel_tx, &zk_font_m_28, 0);
+    } else {
+        use_font(g_w.cancel_tx, &zk_font_m_26, 0);
+    }
+    if (kind != ZK_SHEET_OVERLAP) {
+        paint_box(g_w.cancel, COL_CREAM, COL_LINE, 2, 16, LV_BORDER_SIDE_FULL);
+        text_color(g_w.cancel_tx, COL_INK);
+        set_tracked(g_w.cancel_tx, ZK_WORD_CANCEL, 0);
+        center_pair(g_w.cancel, NULL, 0, 0, g_w.cancel_tx, 0);
+        clickable(g_w.cancel, listed(ZK_TARGET_CANCEL));
+    }
+    if (kind == ZK_SHEET_OVERLAP) {
+        rel(&L->sheet, &L->ok, g_w.ok);
+        paint_box(g_w.ok, COL_CREAM, COL_LINE, 2, 16, LV_BORDER_SIDE_FULL);
+        set_tracked(g_w.ok_tx, ZK_WORD_OK, 0);
+        center_pair(g_w.ok, NULL, 0, 0, g_w.ok_tx, 0);
+        clickable(g_w.ok, listed(ZK_TARGET_OK));
     }
 }
 
-static void rebuild(const zk_snapshot_t *s)
+static void sync_hits(void)
 {
-    lv_obj_t *scr = lv_screen_active();
-    zk_layout_in in;
-    zk_layout_rects L;
-    view_key key = g_key;
+    int i;
+    memset(g_w.hit, 0, sizeof g_w.hit);
+    g_w.hit[ZK_TARGET_HERO] = g_w.hero;
+    g_w.hit[ZK_TARGET_PAUSE] = g_w.pause;
+    g_w.hit[ZK_TARGET_RESUME] = g_w.pause;
+    g_w.hit[ZK_TARGET_STOP] = g_w.stop;
+    g_w.hit[ZK_TARGET_MINUS] = g_w.minus;
+    g_w.hit[ZK_TARGET_PLUS] = g_w.plus;
+    g_w.hit[ZK_TARGET_CANCEL] = g_w.cancel;
+    g_w.hit[ZK_TARGET_RUN] = g_w.run;
+    g_w.hit[ZK_TARGET_STOP_STATION] = g_w.stop_st;
+    g_w.hit[ZK_TARGET_STOP_ALL] = g_w.stop_all;
+    g_w.hit[ZK_TARGET_OK] = g_w.ok;
+    for (i = 0; i < ZK_MAX_SHOWN; i++) {
+        g_w.hit[ZK_TARGET_TILE0 + i] = g_w.tile[i];
+    }
+}
+
+static void build_tree(lv_obj_t *scr)
+{
+    int i;
+    blit_a8(&zk_icon_stop_oct_84, 44, 44, g_oct44, &g_oct44_dsc);
+    blit_a8(&zk_icon_stop_oct_84, 40, 40, g_oct40, &g_oct40_dsc);
+    blit_a8(&zk_icon_stop_oct_84, 30, 30, g_oct30, &g_oct30_dsc);
+    blit_a8(&zk_icon_play_44, 30, 30, g_play30, &g_play30_dsc);
+    blit_a8(&zk_icon_play_44, 28, 28, g_play28, &g_play28_dsc);
+    blit_a8(&zk_icon_drop_30, 22, 22, g_drop22, &g_drop22_dsc);
+    build_warn();
     tracks_reset();
-    overlays_reset();
-    lv_obj_clean(scr);
-    memset(&g_w, 0, sizeof g_w);
-    fill_key(s, key.content, key.modal, &g_key, &in);
-    zk_layout_rects_of((enum zk_screen)g_key.content, &in, &L);
-    if (g_key.content != ZK_SCREEN_CONFIRM_STOP && g_key.content != ZK_SCREEN_CONFIRM_PAUSE) {
-        build_rail(scr, &L, g_key.content);
-        if (g_key.content == ZK_SCREEN_HOME) {
-            build_home(scr, &L, s, &g_key);
-        } else if (g_key.content == ZK_SCREEN_RUNNING) {
-            build_running(scr, &L);
-        } else if (g_key.content == ZK_SCREEN_PAUSED) {
-            build_paused(scr, &L, &g_key);
-        } else if (g_key.content == ZK_SCREEN_PICKER) {
-            build_picker(scr, &L);
-        } else if (g_key.content == ZK_SCREEN_SCHEDULES) {
-            build_schedules(scr, &L, s, &g_key);
-        } else if (g_key.content == ZK_SCREEN_STATION) {
-            build_station(scr, &L);
-        } else if (g_key.content == ZK_SCREEN_NEEDS_UPDATE) {
-            build_needs_update(scr, &L);
+
+    g_w.hero = make_box(scr);
+    place(g_w.hero, ZK_HERO_X, ZK_HERO_Y, ZK_HERO_W, ZK_HERO_H);
+    listen(g_w.hero);
+    mark_lab("hero_label", 0);
+    g_w.h_label = make_label(g_w.hero, &zk_font_sb_18, COL_LABEL);
+    mark_lab("hero_headline", 0);
+    g_w.h_head = make_label(g_w.hero, &zk_font_lit_48, COL_INK);
+    mark_lab("hero_time", 0);
+    g_w.h_time = make_label(g_w.hero, &zk_font_sb_36, COL_TEXT);
+    mark_lab("hero_secondary", 0);
+    g_w.h_sub = make_label(g_w.hero, &zk_font_r_26, COL_MUTED);
+    g_w.warn = make_icon(g_w.hero, &g_warn_dsc);
+
+    g_w.rain = make_box(scr);
+    lv_obj_set_style_bg_opa(g_w.rain, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_w.rain, 0, 0);
+    place(g_w.rain, ZK_RAIN_X, ZK_RAIN_Y, ZK_RAIN_W, ZK_RAIN_H);
+    mark_lab("rain_text", 0);
+    g_w.rain_tx = make_label(g_w.rain, &zk_font_m_20, COL_TEXT);
+    place(g_w.rain_tx, 0, 0, 328, 22);
+    g_w.rain_meter = make_box(g_w.rain);
+    place(g_w.rain_meter, 0, 26, ZK_RAIN_TRACK, 10);
+    paint_box(g_w.rain_meter, COL_CREAM, COL_TEAL_INK, 2, 5, LV_BORDER_SIDE_FULL);
+    lv_obj_set_style_bg_opa(g_w.rain_meter, LV_OPA_TRANSP, 0);
+    g_w.rain_fill = make_box(g_w.rain_meter);
+    paint_box(g_w.rain_fill, COL_TEAL_INK, COL_TEAL_INK, 0, 2, LV_BORDER_SIDE_NONE);
+    mark_lab("rain_0", 0);
+    g_w.rain_0 = make_label(g_w.rain, &zk_font_m_18, COL_MUTED);
+    set_tracked(g_w.rain_0, "0", 0);
+    place(g_w.rain_0, 0, 40, 40, 20);
+    mark_lab("rain_1", 0);
+    g_w.rain_1 = make_label(g_w.rain, &zk_font_m_18, COL_MUTED);
+    set_tracked(g_w.rain_1, "1 in", 0);
+    place(g_w.rain_1, 220, 40, 60, 20);
+    lv_obj_set_style_text_align(g_w.rain_1, LV_TEXT_ALIGN_RIGHT, 0);
+
+    for (i = 0; i < ZK_MAX_SHOWN; i++) {
+        g_w.tile[i] = make_box(scr);
+        listen(g_w.tile[i]);
+        mark_lab_n("tile_title", i, 0);
+        g_w.title[i] = make_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
+        g_w.title_ln[i] = make_quiet_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
+        g_w.title_rest[i] = make_quiet_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
+        g_w.drop[i] = make_icon(g_w.tile[i], &g_drop22_dsc);
+        g_w.slot[i] = make_box(g_w.tile[i]);
+        lv_obj_set_style_bg_opa(g_w.slot[i], LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(g_w.slot[i], 0, 0);
+        g_w.bar[i] = make_box(g_w.slot[i]);
+        g_w.fill[i] = make_box(g_w.bar[i]);
+        mark_lab_n("tile_slot", i, 0);
+        g_w.slot_tx[i] = make_label(g_w.slot[i], &zk_font_r_20, COL_MUTED);
+        lv_label_set_long_mode(g_w.slot_tx[i], LV_LABEL_LONG_CLIP);
+    }
+
+    g_w.pause = make_box(scr);
+    listen(g_w.pause);
+    g_w.pause_ic = make_icon(g_w.pause, &zk_icon_cloud_36);
+    mark_lab("pause_word", 0);
+    g_w.pause_tx = make_label(g_w.pause, &zk_font_m_26, COL_INK);
+    lv_label_set_long_mode(g_w.pause_tx, LV_LABEL_LONG_CLIP);
+
+    g_w.stop = make_box(scr);
+    listen(g_w.stop);
+    g_w.stop_ic = make_icon(g_w.stop, &g_oct44_dsc);
+    mark_lab("stop_word", 0);
+    g_w.stop_tx = make_label(g_w.stop, &zk_font_b_36, COL_STOP);
+    lv_label_set_long_mode(g_w.stop_tx, LV_LABEL_LONG_CLIP);
+
+    g_w.sheet = make_box(scr);
+    listen(g_w.sheet);
+    mark_lab("sheet_label", 0);
+    g_w.s_label = make_label(g_w.sheet, &zk_font_sb_18, COL_LABEL);
+    mark_lab("sheet_title", 0);
+    g_w.s_title = make_label(g_w.sheet, &zk_font_lit_32, COL_INK);
+    mark_lab("sheet_body", 0);
+    g_w.s_body = make_label(g_w.sheet, &zk_font_r_22, COL_MUTED);
+
+    g_w.minus = make_box(g_w.sheet);
+    listen(g_w.minus);
+    g_w.minus_tx = make_label(g_w.minus, &zk_font_m_28, COL_INK);
+    g_w.plus = make_box(g_w.sheet);
+    listen(g_w.plus);
+    g_w.plus_tx = make_label(g_w.plus, &zk_font_m_28, COL_INK);
+    g_w.value_box = make_box(g_w.sheet);
+    lv_obj_set_style_bg_opa(g_w.value_box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_w.value_box, 0, 0);
+    lv_obj_set_style_border_opa(g_w.value_box, LV_OPA_TRANSP, 0);
+    g_w.value = make_label(g_w.value_box, &zk_font_lit_40, COL_INK);
+    lv_label_set_long_mode(g_w.value, LV_LABEL_LONG_CLIP);
+
+    g_w.cancel = make_box(g_w.sheet);
+    listen(g_w.cancel);
+    g_w.cancel_tx = make_label(g_w.cancel, &zk_font_m_26, COL_INK);
+    g_w.run = make_box(g_w.sheet);
+    listen(g_w.run);
+    g_w.run_ic = make_icon(g_w.run, &g_play28_dsc);
+    g_w.run_tx = make_label(g_w.run, &zk_font_sb_26, COL_WHITE);
+    g_w.stop_st = make_box(g_w.sheet);
+    listen(g_w.stop_st);
+    g_w.stop_st_ic = make_icon(g_w.stop_st, &g_oct30_dsc);
+    g_w.stop_st_tx = make_label(g_w.stop_st, &zk_font_sb_26, COL_STOP);
+    g_w.stop_all = make_box(g_w.sheet);
+    listen(g_w.stop_all);
+    g_w.stop_all_ic = make_icon(g_w.stop_all, &g_oct40_dsc);
+    g_w.stop_all_tx = make_label(g_w.stop_all, &zk_font_b_30, COL_WHITE);
+    g_w.ok = make_box(g_w.sheet);
+    listen(g_w.ok);
+    g_w.ok_tx = make_label(g_w.ok, &zk_font_m_26, COL_INK);
+
+    g_w.hit[ZK_TARGET_HERO] = g_w.hero;
+    g_built = 1;
+}
+
+static void paint(void)
+{
+    zk_layout_rects L;
+    zk_repaint_ctx_t ctx;
+    frame_t now;
+    int ev;
+    int i;
+    zk_layout_rects_of(g_screen, &g_lin, &L);
+    g_ntg = zk_layout_targets(g_screen, &g_lin, g_tg, TG_MAX);
+    if (g_ntg > TG_MAX) {
+        g_ntg = TG_MAX;
+    }
+    apply_hero();
+    apply_rain();
+    apply_tiles(&L);
+    apply_bar(&L);
+    apply_sheet(&L);
+    sync_hits();
+    for (i = 1; i < HIT_N; i++) {
+        if (g_w.hit[i]) {
+            lv_obj_remove_state(g_w.hit[i], LV_STATE_PRESSED);
         }
     }
-    build_overlays(scr);
-    if (g_key.modal == ZK_SCREEN_CONFIRM_STOP || g_key.modal == ZK_SCREEN_CONFIRM_PAUSE) {
-        build_modal(scr, g_key.modal);
-    }
-    apply_content(s);
+    capture(&now);
+    ev = pick_event(&g_prev, &now, &ctx);
+    log_dirty(ev, &ctx);
+    g_prev = now;
+    g_retry_pulse = 0;
+    g_ready = 1;
+}
+
+void zk_ui_debug_set_stop(int phase)
+{
+    g_stop_hold = phase;
+}
+
+void zk_ui_debug_tap(int x, int y)
+{
+    apply_id(zk_hit_test(g_tg, g_ntg, x, y));
+    zk_ui_refresh();
 }
 
 int zk_ui_debug_label_boxes(zk_ui_label_box_t *out, int cap)
@@ -1930,11 +1956,11 @@ int zk_ui_debug_tile(int index, zk_ui_tile_dbg_t *out)
         return 0;
     }
     memset(out, 0, sizeof *out);
-    if (index < 0 || index >= g_w.n_tiles || index >= 8) {
+    if (index < 0 || index >= g_w.n_tiles || index >= ZK_MAX_SHOWN) {
         return 0;
     }
-    tile = g_w.tile_obj[index];
-    if (!tile) {
+    tile = g_w.tile[index];
+    if (!tile || lv_obj_has_flag(tile, LV_OBJ_FLAG_HIDDEN)) {
         return 0;
     }
     out->present = 1;
@@ -1944,9 +1970,9 @@ int zk_ui_debug_tile(int index, zk_ui_tile_dbg_t *out)
     out->border = lv_color_to_u32(bd) & 0xFFFFFFu;
     out->border_w = (int)lv_obj_get_style_border_width(tile, LV_PART_MAIN);
     out->on = out->bg == COL_TEAL ? 1 : 0;
-    out->drop_visible = (g_w.tile_drop[index] && lv_obj_is_visible(g_w.tile_drop[index])) ? 1 : 0;
-    if (g_w.tile_title[index]) {
-        out->title_w = (int)lv_obj_get_width(g_w.tile_title[index]);
+    out->drop_visible = (g_w.drop[index] && lv_obj_is_visible(g_w.drop[index])) ? 1 : 0;
+    if (g_w.title[index]) {
+        out->title_w = (int)lv_obj_get_width(g_w.title[index]);
     }
     out->tile_w = (int)lv_obj_get_width(tile);
     return 1;
@@ -1967,66 +1993,106 @@ void zk_ui_debug_set_view(int screen, int pressed_target, int pick_chip)
 {
     g_override = screen;
     g_pressed = pressed_target;
-    g_pick_chip = pick_chip;
-    g_toast_text[0] = 0;
-    if (screen == ZK_SCREEN_CONFIRM_STOP || screen == ZK_SCREEN_CONFIRM_PAUSE) {
-        g_modal = screen;
-        g_nav = -1;
-    } else if (screen >= 0) {
-        g_modal = 0;
-        if (screen == ZK_SCREEN_PICKER || screen == ZK_SCREEN_SCHEDULES ||
-            screen == ZK_SCREEN_STATION) {
-            g_nav = screen;
-            if (screen == ZK_SCREEN_STATION) {
-                g_station_i = pick_chip;
-                g_station_id[0] = 0;
-            }
-        } else {
-            g_nav = -1;
-        }
-    } else {
-        g_modal = 0;
-        g_nav = -1;
+    if (pick_chip >= 0) {
+        g_station = pick_chip;
     }
-    g_dirty = 1;
+    if (screen >= 0) {
+        g_screen = (enum zk_screen)screen;
+    } else {
+        g_screen = ZK_SCREEN_HOME;
+    }
+    g_min_key = -999;
 }
 
 void zk_ui_tick(void)
 {
-    zk_snapshot_t snap;
-    view_key key;
-    zk_layout_in in;
-    int content;
-    int modal;
-    zk_data_get(&snap);
-    resolve(&snap, &content, &modal);
-    fill_key(&snap, content, modal, &key, &in);
-    g_lin = in;
-    g_lin_ready = 1;
-    g_hit_content = content;
-    g_hit_modal = modal;
-    if (!g_have_key || g_dirty || memcmp(&key, &g_key, sizeof key) != 0) {
-        g_key = key;
-        g_have_key = 1;
-        g_dirty = 0;
-        rebuild(&snap);
-    } else if (snap.version != g_ver) {
-        apply_content(&snap);
+    zk_copy_src_t src;
+    zk_view_in_t vin;
+    zk_stop_phase_t phase;
+    int unreachable;
+    int watering;
+    int manual;
+    int paused;
+    int key;
+    lv_obj_t *scr;
+
+    if (!g_built) {
+        scr = lv_screen_active();
+        if (!scr) {
+            return;
+        }
+        build_tree(scr);
     }
-    g_ver = snap.version;
-    note_result();
-    overlays(&snap);
+    zk_data_get(&g_snap);
+    unreachable = unreachable_of(&g_snap);
+    watering = watering_of(&g_snap);
+    manual = manual_of(&g_snap);
+    paused = (g_snap.have_kiosk && g_snap.kiosk.pause.paused) ? 1 : 0;
+    maybe_clear_confirmed(unreachable, watering, manual, paused);
+    note_actions(g_snap.version);
+    advance_stop(&g_snap, unreachable, watering);
+    maybe_retry(g_snap.version);
+    advance_stop(&g_snap, unreachable, watering);
+
+    if (g_override >= 0) {
+        g_screen = (enum zk_screen)g_override;
+    }
+    key = (g_screen == ZK_SCREEN_SHEET_RUN || g_screen == ZK_SCREEN_SHEET_ANYWAY) ? ((int)g_screen * 100 + g_station)
+                                                                                    : -1;
+    memset(&src, 0, sizeof src);
+    src.kiosk = g_snap.have_kiosk ? &g_snap.kiosk : NULL;
+    src.have_kiosk = g_snap.have_kiosk;
+    src.schedules = &g_snap.schedules;
+    src.have_schedules = g_snap.have_schedules;
+    src.unreachable = unreachable;
+    src.wall = g_snap.wall;
+    src.soil_doc = g_snap.have_soil_doc ? &g_snap.soil_doc : NULL;
+    src.lasts = g_snap.lasts;
+    src.n_lasts = g_snap.n_lasts;
+    if (key != g_min_key) {
+        g_min_key = key;
+        if (key >= 0) {
+            g_minutes = zk_usual_minutes(&src, g_station);
+        }
+    }
+    phase = g_stop_hold >= 0 ? (zk_stop_phase_t)g_stop_hold : g_stop.phase;
+    memset(&vin, 0, sizeof vin);
+    vin.sheet_kind = sheet_kind_of(g_screen);
+    vin.station_index = g_station;
+    vin.minutes = g_minutes;
+    vin.stop_phase = phase;
+    vin.offline_pending = (phase == ZK_STOP_QUEUED || phase == ZK_STOP_WAIT) && unreachable;
+    if (g_stop_hold < 0 && g_has_confirmed_at) {
+        vin.confirmed_at = g_confirmed_at;
+        vin.has_confirmed_at = 1;
+    }
+    vin.soil_cfg = &g_soil;
+    zk_view_build(&src, &vin, &g_view);
+
+    memset(&g_lin, 0, sizeof g_lin);
+    g_lin.n_stations = g_snap.have_kiosk ? g_snap.kiosk.n_stations : 0;
+    g_lin.paused = paused;
+    g_lin.offline = unreachable;
+    g_lin.overlap = g_view.overlap;
+    g_lin.minutes = g_minutes;
+    g_paused = paused;
+    g_prev_paused = paused;
+    g_prev_unreach = unreachable;
+    g_have_prev_flags = 1;
+    paint();
 }
 
 void zk_ui_refresh(void)
 {
-    g_dirty = 1;
+    int i;
     zk_ui_tick();
+    for (i = 1; i < HIT_N; i++) {
+        if (g_w.hit[i]) {
+            lv_obj_remove_state(g_w.hit[i], LV_STATE_PRESSED);
+        }
+    }
     if (g_pressed > 0 && g_pressed < HIT_N && g_w.hit[g_pressed]) {
         lv_obj_add_state(g_w.hit[g_pressed], LV_STATE_PRESSED);
-        if (g_pressed == ZK_TARGET_STOP && g_w.shadow) {
-            lv_obj_add_flag(g_w.shadow, LV_OBJ_FLAG_HIDDEN);
-        }
     }
     if (g_disp) {
         lv_refr_now(g_disp);
@@ -2046,64 +2112,52 @@ void zk_ui_init(lv_display_t *disp, const zk_app_t *app)
             g_app.fixture_dir = NULL;
         }
     }
+    zk_soil_cfg_load(&g_soil, NULL);
     g_override = -1;
-    g_nav = -1;
-    g_modal = 0;
-    g_quiet_until = 0;
-    g_pick_chip = -1;
-    g_station_i = -1;
-    g_station_id[0] = 0;
     g_pressed = 0;
-    g_have_key = 0;
-    g_lin_ready = 0;
-    g_hit_content = 0;
-    g_hit_modal = 0;
-    g_dirty = 1;
+    g_screen = ZK_SCREEN_HOME;
+    g_station = 0;
+    g_minutes = 10;
+    g_min_key = -999;
+    g_ready = 0;
+    g_stop_hold = -1;
+    memset(&g_stop, 0, sizeof g_stop);
+    memset(&g_prev, 0, sizeof g_prev);
     scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, hex(COL_BG), 0);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    if (scr) {
+        lv_obj_set_style_bg_color(scr, hex(COL_SAND), 0);
+        lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+    }
     zk_ui_refresh();
 }
 
 int zk_ui_hit_is_stop(int x, int y)
 {
-    enum zk_screen screen;
-
-    if (!g_have_key || !g_lin_ready) {
+    if (!g_ready) {
         return 0;
     }
-    if (g_hit_modal == ZK_SCREEN_CONFIRM_STOP || g_hit_modal == ZK_SCREEN_CONFIRM_PAUSE) {
-        screen = (enum zk_screen)g_hit_modal;
-    } else {
-        screen = (enum zk_screen)g_hit_content;
-    }
-    return zk_layout_hit_is_stop(screen, &g_lin, x, y);
+    return zk_layout_hit_is_stop(g_screen, &g_lin, x, y);
 }
 
 void zk_ui_power_inputs(zk_power_inputs_t *out)
 {
-    zk_snapshot_t snap;
-
     if (!out) {
         return;
     }
     memset(out, 0, sizeof *out);
-    zk_data_get(&snap);
-    if (!snap.have_kiosk || snap.api_state != ZK_API_OK || snap.stale) {
+    if (!g_snap.have_kiosk || g_snap.api_state != ZK_API_OK || g_snap.stale) {
         out->unreachable = 1;
     }
-    if (snap.have_kiosk) {
-        out->watering = (snap.kiosk.watering || snap.kiosk.has_run || snap.kiosk.current_station[0] ||
-                         snap.kiosk.n_on > 0)
-                            ? 1
-                            : 0;
-        out->lockout = snap.kiosk.lockout ? 1 : 0;
-        out->fault = (snap.kiosk.fault || snap.kiosk.last_error[0] || strcmp(snap.kiosk.phase, "Fault") == 0) ? 1
-                                                                                                              : 0;
-        out->paused = snap.kiosk.pause.paused ? 1 : 0;
+    if (g_snap.have_kiosk) {
+        out->watering = watering_of(&g_snap);
+        out->lockout = g_snap.kiosk.lockout ? 1 : 0;
+        out->fault = (g_snap.kiosk.fault || g_snap.kiosk.last_error[0] || strcmp(g_snap.kiosk.phase, "Fault") == 0) ? 1
+                                                                                                                    : 0;
+        out->paused = g_snap.kiosk.pause.paused ? 1 : 0;
     }
-    if (g_hit_modal == ZK_SCREEN_CONFIRM_STOP || g_hit_modal == ZK_SCREEN_CONFIRM_PAUSE) {
+    if (sheet_kind_of(g_screen) != ZK_SHEET_NONE) {
         out->modal_open = 1;
     }
 }

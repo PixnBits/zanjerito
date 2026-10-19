@@ -4,34 +4,52 @@ A native C and [LVGL](https://lvgl.io/) client of the irrigation daemon's HTTP J
 
 ## Design
 
-Visual language is **Cards + desert light** (Style A) from [docs/ui-directions.md](../docs/ui-directions.md): flat sand page, cream cards, terracotta STOP, canal teal for an active run, dusk plum for pause. No photo thumbnails.
-
-Screens the client actually builds:
+Direction C. Flat sand page (`#FBECD6`), cream cards, 2 px borders, corner radius 16 (24 on the full-screen sheet). No gradients, shadows, blur, or animation. Teal (`#0F6E6C`) marks a running station, Resume, and Run. Plum (`#4E3F63`) is the paused hero. STOP is outlined cream with a 2 px `#B5361A` border when nothing is running, and filled `#B5361A` with a 4 px `#7C2411` bottom band only while watering. A manual run wins over every other hero state.
 
 | Screen | What you see |
 |---|---|
-| Home | Next-run header, Schedules button, optional rain strip, station tiles, STOP and Pause |
-| Running | Step countdown from `run.*`, taller STOP, Pause |
-| Paused | Pause banner, ON HOLD card from `next_effective_run`, Schedules button, STOP and Resume |
-| Station sheet | Read-only detail for one station. Close on the rail; STOP stays |
-| Needs update | Card when `GET /api/kiosk` is HTTP 404. STOP stays; Pause and Schedules are hidden |
-| Pause picker | Tomorrow morning, 2 days, 1 week, until further notice |
-| Schedules | Read-only rows. Hold to edit shows a toast; it does not edit |
-| Confirm STOP / Confirm pause | Modal over the screen. Only OK and Cancel are tappable |
+| Home | Status hero on the left. Station tiles on the right (2×2 up to 4 stations, 2×3 for 5–6; five leaves the last cell empty). Bottom bar: Pause for rain, or Resume when paused, and STOP |
+| Run sheet | "Run {Station} for {N} min?" Stepper 1–60, default the station's usual minutes. Minus is not a target at 1. Run is what starts the valve |
+| Run anyway | Same sheet while paused. The pause stays on. Run is teal |
+| Stop station | Confirm before ending the running station's step. Cancel or Stop station. This sheet does not POST: the API has no per-station stop |
+| Stop all | Full sheet over the bar. Cancel or Stop all. Stop all posts `POST /api/run/cancel` |
+| Overlap | The hero is a target. The sheet is read-only, with OK and "Fix on phone" |
+| Offline | Hero says the controller cannot be reached. Tiles are not targets. Pause is disabled. STOP still opens the offline Stop all sheet |
 
-The daemon owns next run, run progress, rain-strip visibility, and soil percents. The client formats those fields. Pause-picker preview still uses `/api/schedules` (`zk_pause_preview` / `zk_morning_cutoff`).
+A tile never starts a valve on one tap. STOP always confirms.
 
 ## Layout
 
-The framebuffer is 800×480. Hit targets use **267 px/in** (`ZK_PX_PER_INCH`). `tests/test_layout` checks the heights and the 107 px floor.
+The framebuffer is 800×480, 32 bpp on the panel (the host renderer also writes 32 bpp PNGs). Every live target has a short side of at least 95 px, and live targets stay at least 12 px apart. `tests/test_layout` checks that.
 
-| Target | Size | At 267 px/in |
-|---|---|---|
-| Screen | 800×480 | — |
-| STOP (home, paused, picker, schedules, station, needs-update) | 236×264 | height 0.99 in |
-| STOP while running | 236×304 | height 1.14 in |
-| Schedules button (Home idle, Paused) | 134×108 | at least 0.4 in |
-| Every other hit target | at least 107×107 | at least 0.4 in |
+| Region | Rect |
+|---|---|
+| Hero | 16,16 376×332 |
+| Tile column | x=404 and x=600, each 184 wide (12 px gap). 4-up tiles are 160 tall; 6-up tiles are 102 tall |
+| Pause / Resume | 16,360 376×104 |
+| STOP | 404,360 380×104 |
+
+Touch counts on release inside the same rect, with a 300 ms debounce. A pressed target draws a darker 2 px border.
+
+## Soil words
+
+The second line of a tile is today's last-run line unless the controller's soil feature is configured (`GET /api/soil`, or percents already on `/api/kiosk`). Turning soil on does not move any other rect. A running tile shows "{n} min left" instead of soil. A missing input shows "Rate not measured", never 0%. A measured value shows "{n}% · Dry|OK|Wet". A stale value shows "{n}% · {age}d old".
+
+Dry and Wet are display-only placeholder cuts, default below 30 and above 80. They do not change watering. Configure them in `/etc/default/zan-kiosk` or a small JSON file. See `deploy/zan-kiosk.default.example`.
+
+```
+ZAN_SOIL_DRY_LT=30
+ZAN_SOIL_WET_GT=80
+# ZAN_SOIL_THRESHOLDS=/etc/zan-kiosk-soil.json
+```
+
+The JSON may set global cuts and per-station cuts: `{"dry_lt":30,"wet_gt":80,"stations":{"lawn-a":{"dry_lt":25,"wet_gt":75}}}`. `ZAN_SOIL_DRY_LT` and `ZAN_SOIL_WET_GT` override the global cuts only.
+
+## Offline STOP
+
+When the controller is unreachable, STOP still opens "Stop all watering?". Confirm posts `POST /api/run/cancel` and the hero switches to "Stop not sent yet:" / "can't reach controller. Retrying…". The same request is retried until it succeeds. Confirming again while that is pending does not queue a second POST. "Watering stopped" is shown only after the cancel succeeds and a following `/api/kiosk` snapshot shows nothing on (or no snapshot is available to contradict it). A retry tick repaints only the hero label.
+
+Set `ZK_DIRTY_LOG=1` to log dirty rectangles, one line per event: `dirty event=<name> rects=x,y,wxh;...`.
 
 ## Build
 
@@ -44,7 +62,7 @@ From `native-kiosk/`:
 | `make fetch-lvgl` | Clone the pinned LVGL tree if `.cache/lvgl` is missing |
 | `make host` | `build/zan-kiosk-host` for this machine |
 | `make arm` | Static 32-bit ARM hard-float binary `build/zan-kiosk-arm` via Docker (`debian:bookworm-slim`, `gcc-arm-linux-gnueabihf`, `-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard -static`) |
-| `make test` | Host unit tests (`test_json`, `test_logic`, `test_layout`, `test_http`, `test_data`, `test_stop_latency`, `test_boot`) |
+| `make test` | Host unit tests, including `test_layout`, `test_flow`, and `test_ui_text` |
 | `make e2e` | Build the host binary, then `tests/e2e.sh` |
 | `make check` | `test`, then `e2e`, then `deploy-check` |
 | `make deploy-check` | `tests/deploy_test.sh` (unit, installer, wrapper). No LVGL build |
@@ -71,7 +89,7 @@ The base URL is never compiled in. With no `--api`, no `ZAN_API`, and no `--fixt
 | `ZAN_API` | Same as `--api` when that flag is omitted |
 | `--fixture DIR` | Load one scenario directory from disk. No socket |
 | `--live-clock` | Advance the clock from the system clock. Fixture mode otherwise freezes `kiosk.now` |
-| `--allow-writes` | Permit the three mutating POSTs. Default is read-only |
+| `--allow-writes` | Permit cancel, pause, resume, and station run. Default is read-only |
 | `--fb PATH` | Framebuffer to open. There is no default device |
 | `--fbshot FILE` | Read that framebuffer and write a PNG. Requires `--fb`. Does not start the UI. Exit 0 if any pixel is non-black, 3 if the frame is all black, 1 on error, 2 without `--fb` or combined with `--script`, `--shot`, or `--shot-all` |
 | `--touch PATH` | evdev device. Default is autodetect |
@@ -94,34 +112,9 @@ Example against a daemon already listening on localhost (nothing in this tree st
 
 ## Fixtures and shots
 
-`tests/fixtures/<scenario>/` holds `kiosk.json` (same keys as `GET /api/kiosk`) and `schedules.json` when the Schedules screen or pause preview needs it. Scenarios: `home-rain`, `home-norain`, `home-nosoil`, `home-stale`, `home-fault`, `running`, `paused-rain`, `paused-manual`, `paused-long`, `home-longnames`, `running-long`. Names and station ids are generic (`Test Station N`, timezone `America/Denver`).
+`tests/fixtures/<scenario>/` holds `kiosk.json` (same keys as `GET /api/kiosk`). `schedules.json` is used for overlap and usual minutes. Optional `soil.json` and `history.json` feed the soil line and last-run text. Older scenarios (`home-rain`, `home-nosoil`, `running`, `paused-manual`, and the rest) still exercise parsing and copy. Direction C shots use the `dc-*` fixtures (Lawn A, Lawn B, Beds, Trees, Drip, Side yard; program names "Front Summer" and "Drip · All year", plus the long example "Lawn A + B · Weekdays AM").
 
-`make shots` writes `build/shots/`:
-
-| File | Scenario | Screen |
-|---|---|---|
-| `01-home-idle-rain.png` | home-rain | Home (includes Schedules button) |
-| `01b-home-idle-no-rain.png` | home-norain | Home |
-| `01c-home-no-soil.png` | home-nosoil | Home |
-| `01d-home-soil-stale.png` | home-stale | Home |
-| `01e-home-fault.png` | home-fault | Home |
-| `02-running.png` | running | Running (`run.*` from the fixture) |
-| `03-paused-rain.png` | paused-rain | Paused |
-| `03b-paused-manual.png` | paused-manual | Paused |
-| `04-pause-picker.png` | home-rain | Pause picker |
-| `05-schedules.png` | home-rain | Schedules |
-| `06-confirm-stop.png` | home-rain | Confirm STOP |
-| `07-confirm-pause.png` | home-rain | Confirm pause (tomorrow-morning chip) |
-| `08-home-stop-pressed.png` | home-rain | Home, STOP pressed |
-| `09-offline.png` | home-rain | Home with the stale pill |
-| `10-station-sheet-soil.png` | home-rain | Station sheet, tile 0 |
-| `10b-station-sheet-soil-stale.png` | home-stale | Station sheet |
-| `10c-station-sheet-nosoil.png` | home-nosoil | Station sheet |
-| `10d-station-sheet-running.png` | running | Station sheet, running station |
-| `10e-station-sheet-exempt.png` | home-rain | Station sheet, rain-exempt tile |
-| `11-controller-needs-update.png` | home-rain | Needs-update card |
-| `12-home-schedules-button.png` | home-rain | Same Home as `01` |
-| `13-paused-schedules-button.png` | paused-rain | Paused with Schedules button |
+`make shots` writes `build/shots/` with the Direction C names: `C-idle-4`, `C-idle-6`, `C-watering-4`, `C-watering-6`, `C-paused-4`, `C-paused-6`, `C-nothing-4`, `C-nothing-6`, `C-overlap-6`, `S5-overlap-detail`, `C-offline-6`, `C-offline-stop-1-confirm`, `C-offline-stop-2-pending`, `C-offline-stop-3-stopped`, `S1-confirm-run`, `S2-confirm-anyway`, `S3-confirm-stop-station`, `S4-confirm-stop-all`, `C-soil-mix-4`, `C-soil-mix-6`, `C-soil-watering-6`, `C-manual-run-4`.
 
 `--shot`, `--shot-all`, and `--script` `shot:` use the memory display. They do not open a framebuffer and do not prove what the panel shows. `--fbshot` reads the framebuffer passed to `--fb`.
 
@@ -133,7 +126,9 @@ Example against a daemon already listening on localhost (nothing in this tree st
 |---|---|
 | `test_json` | Parse every fixture kiosk.json; nulls and missing optional; garbage, truncated, wrong types; 1e999 / huge arrays; `rain_strip.show` is the only visibility input; console cursor write to `ZK_TTY` |
 | `test_logic` | Formatting (relative day, fire when, rain strip text, inches clamp); remaining pause-preview from `/api/schedules`; pause title and until text |
-| `test_layout` | Every screen including station sheet and needs-update; no overlap; STOP 264/304; Schedules button and tiles ≥107; 1..8 stations |
+| `test_layout` | Every screen's live targets: short side ≥95, gaps ≥12, 1..6 stations, five stations leave the last cell empty |
+| `test_flow` | Copy for every hero and sheet; a tile tap does not POST a run; offline STOP stays pending until the ack; soil never shows 0% for a missing input; dirty rects match the repaint table |
+| `test_ui_text` | Rendered strings, tile geometry identical with soil on and off, STOP ink gap |
 | `test_http` | GET and POST to a localhost stub; read-only stop does not connect; cancel, pause, and resume paths; timeout; oversized body; non-`http` URL rejected |
 | `test_data` | `/api/kiosk` poll and `/api/schedules` slow poll; 404 => NEEDS_UPDATE and no `/api/status`; stale after the stub stops; fixture load opens no socket; writes POST and repoll kiosk |
 | `test_stop_latency` | STOP is posted while a GET is in flight; a repeated STOP or resume is one POST; identical pause bodies collapse; a different pause is still sent; the queue still overflows; read-only sends no POST |
@@ -141,21 +136,19 @@ Example against a daemon already listening on localhost (nothing in this tree st
 
 `ZK_POLL_MS_STATUS` overrides the 2 second `/api/kiosk` poll inside those data tests. It is not a user-facing flag.
 
-`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, the three write POSTs, a confirm modal that ignores the rail, an unreachable API (stale pill, exit 0), and exit 2 when no API is configured. It also checks tile tap (station sheet, zero non-GET writes), Schedules button, STOP from the sheet, `--kiosk-404` needs-update with STOP still working, and display power against a temp backlight directory (`ZK_POWER_FORCE=1`: dim, off, swallowed wake, STOP while dimmed, watering and fault stay on, pause dims but does not blank, SIGTERM and SIGINT restore brightness). The stub takes `--get-delay SEC`, `--post-delay SEC`, and `--kiosk-404`. Each connection is its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
+`make e2e` runs `tests/e2e.sh` against `tools/stub_server.py` on an ephemeral localhost port. It checks read-only taps, pause / resume / cancel POSTs, a confirm that ignores taps outside its buttons, an unreachable API (exit 0), and exit 2 when no API is configured. A tile tap sends no POST. STOP still confirms, including after a 404 on `/api/kiosk`. Display power is checked against a temp backlight directory (`ZK_POWER_FORCE=1`: dim, off, swallowed wake, STOP while dimmed, watering and fault stay on, pause dims but does not blank, SIGTERM and SIGINT restore brightness). The stub takes `--get-delay SEC`, `--post-delay SEC`, and `--kiosk-404`. Each connection is its own thread so a slow GET does not hold a POST. Timestamps for logged writes are appended to `<log>.ts` as monotonic seconds; the request log lines themselves stay `METHOD path body`.
 
 ## Behaviour
 
-In HTTP mode a poll thread GETs `/api/kiosk` about every 2 seconds and `/api/schedules` about every 30 seconds. It does not poll `/api/status`, `/api/stations`, or `/api/soil`. HTTP 404 from `/api/kiosk` is the needs-update state: the main area shows a card, Pause and Schedules are hidden, STOP still works, and the client does not fall back to `/api/status` or recompute. Transport, 5xx, and malformed bodies are unreachable (existing stale pill). STOP, pause, and resume run on a second thread. That thread opens its own sockets and does not wait for a poll to finish, so STOP is not stuck behind a slow GET. After a write succeeds, `/api/kiosk` is polled again.
+In HTTP mode a poll thread GETs `/api/kiosk` about every 2 seconds. About every 30 seconds it also GETs `/api/soil`, `/api/history?limit=50`, and `/api/schedules`. It does not poll `/api/status` or `/api/stations`. HTTP 404 from `/api/kiosk` is unreachable on the hero (the client does not fall back to `/api/status`). A 404 from `/api/soil` or `/api/history` does not mark the controller unreachable. Transport, 5xx, and malformed kiosk bodies are unreachable. STOP, pause, resume, and run run on a second thread. That thread opens its own sockets and does not wait for a poll to finish, so STOP is not stuck behind a slow GET. After a write succeeds, `/api/kiosk` is polled again.
 
-A station tile opens a read-only sheet (title, colour, Running/Queued/Idle, rain-exempt line, soil bar only when `soil.show_bars` and `soil_percent` are set). Last run is not in `/api/kiosk` and is omitted; adding `last_run` to that snapshot later would fill it. The sheet never POSTs. If the station disappears from a later snapshot, the sheet closes.
+Pause for rain is one tap. The body is `{"until":"tomorrow_morning","reason":"rain"}`. Resume is one tap. A station tile opens the run sheet; only Run posts `POST /api/stations/{id}/run`. While a sheet is open, only its buttons, STOP, and (when paused) Resume are live. Taps outside the sheet do nothing.
 
-A visible Schedules button (icon + label, at least 107×107) is on Home idle and Paused. Next-run header and the paused info card remain shortcuts. Running has no Schedules button. The Home brand mark is dropped so that button fits in the header's right slot without shrinking STOP or Pause.
-
-A second STOP is not posted while one is already queued or in flight. Resume is treated the same way. A pause is skipped only when the same body is already queued or in flight; a different pause body is sent. The screen still gets one result for the submit it is waiting on. The queue holds 8 actions; one more reports overflow and sends nothing.
+A second STOP is not posted while one is already queued or in flight. Resume is treated the same way. A pause is skipped only when the same body is already queued or in flight. The queue holds 8 actions; one more reports overflow and sends nothing.
 
 Read-only mode does not open a socket for those POSTs. Fixture mode loads the scenario from disk: no threads and no socket.
 
-STOP and pause are sent only after OK, and only with `--allow-writes`. Pause OK closes the picker and returns to the base screen. For 700 ms after OK, taps on a pause chip or on OK/Cancel are ignored, so a stray tap cannot open or confirm another pause or STOP. Resume sends as soon as Resume is tapped. Cancel sends nothing.
+Writes go out only with `--allow-writes`. Cancel sends nothing. While paused, Run anyway does not clear the pause.
 
 A hostname in `--api` is resolved with `getaddrinfo`, which has no timeout. A slow resolver stalls that request. Use an IPv4 literal on the kiosk (`inet_pton` handles numeric hosts).
 
@@ -163,7 +156,7 @@ A hostname in `--api` is resolved with `getaddrinfo`, which has no timeout. A sl
 
 The default is read-only. Mutating calls are not sent, and the screen says so.
 
-The only writes are `POST /api/run/cancel`, `POST /api/pause`, and `POST /api/pause/resume`. The URL is never compiled in. This tree does not change the daemon. Writes are tested only against the local stub (`tools/stub_server.py`, `test_http`, `test_data`, and `test_stop_latency`), not against a real controller.
+The only writes are `POST /api/run/cancel`, `POST /api/pause`, `POST /api/pause/resume`, and `POST /api/stations/{id}/run`. The URL is never compiled in. This tree does not change the daemon. Writes are tested only against the local stub (`tools/stub_server.py`, `test_http`, `test_data`, `test_flow`, and `test_stop_latency`), not against a real controller.
 
 ## Raspberry Pi
 
@@ -281,10 +274,9 @@ Rollback restores lightdm and `graphical.target`. Installed files can stay, or b
 
 ## Known gaps
 
-- Last run is omitted on the station sheet because it is not in `GET /api/kiosk`. Recommend adding `last_run` to that snapshot later.
-- Pause-picker preview is still computed on the client from `/api/schedules`.
+- Stop station closes the sheet and does not POST. The API has no per-station stop.
+- A stale soil line uses the soil document's `updated_at` / `et_stale`. There is no separate rain-input timestamp on the existing API.
 - `getaddrinfo` has no timeout. A hostname in `--api` can stall one request for as long as the resolver takes. Use an IPv4 literal on the kiosk.
-- Hold to edit is not implemented (toast only).
 - The client does not set the tty to KD_GRAPHICS. Kernel messages can still draw on tty1.
 
 ## Licenses
