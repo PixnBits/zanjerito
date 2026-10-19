@@ -34,6 +34,9 @@
 #   ae Schedules, Stop all, Cancel, Next, and Home send no POST
 #   af a tile tap during a pending stop sends no station POST
 #   ag 2xx then unreachable stays pending; all-off after it returns confirms
+#   ah idle timeout on Stop all returns Home and posts nothing
+#   ai instant ack, water stays on: cancel POSTs stay within one per 2 s
+#   aj same bound in the 10 s after an outage clears
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -406,6 +409,63 @@ post_lines() {
         return 0
     fi
     sed -e 's/\r$//' -e 's/[[:space:]]*$//' "$LOG" | sed '/^$/d' | grep '^POST ' || true
+}
+
+cancel_count() {
+    post_lines | grep -c '^POST /api/run/cancel' || true
+}
+
+# Monotonic seconds, same clock as the stub's <log>.ts lines.
+mono_now() {
+    python3 -c 'import time; print("%.6f" % time.monotonic())'
+}
+
+# POST /api/run/cancel lines in <log>.ts with t0 <= ts < t1.
+cancel_between() {
+    local t0=$1 t1=$2
+    python3 - "$LOG.ts" "$t0" "$t1" <<'PY'
+import sys
+path, t0, t1 = sys.argv[1:]
+t0 = float(t0)
+t1 = float(t1)
+n = 0
+try:
+    fh = open(path, encoding="utf-8")
+except OSError:
+    print(0)
+    raise SystemExit(0)
+with fh:
+    for line in fh:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            ts = float(parts[0])
+        except ValueError:
+            continue
+        if ts < t0 or ts >= t1:
+            continue
+        if parts[1] == "POST" and parts[2] == "/api/run/cancel":
+            n += 1
+print(n)
+PY
+}
+
+first_cancel_ts() {
+    python3 - "$LOG.ts" <<'PY'
+import sys
+path = sys.argv[1]
+try:
+    fh = open(path, encoding="utf-8")
+except OSError:
+    raise SystemExit(0)
+with fh:
+    for line in fh:
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "POST" and parts[2] == "/api/run/cancel":
+            print(parts[0])
+            break
+PY
 }
 
 assert_posts() {
@@ -1631,6 +1691,76 @@ case_ah() {
     fi
 }
 
+# Instant ack, water stays on. Over the 10 s after the first cancel, POSTs
+# stay at or under one per 2 s (ceil(10/2)+1) and at least one retry fires.
+case_ai() {
+    local t0 n
+    start_stub "$FIX/dc-watering-4" --post-delay 0 --stay-watering || return 1
+    # 400 ms between taps: a 250 ms wait plus the 50 ms hold lands inside the
+    # 300 ms debounce, so Stop all is swallowed and nothing is posted.
+    kiosk_bg 18 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:400;tap:${OK_X},${OK_Y};wait:15000" \
+        24 --allow-writes || return 1
+    if ! wait_posts 1 40; then
+        echo "ai: no cancel" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    t0=$(first_cancel_ts)
+    if [[ -z "$t0" ]]; then
+        echo "ai: missing timestamp" >&2
+        stop_kiosk
+        return 1
+    fi
+    sleep 10.3
+    n=$(cancel_between "$t0" "$(python3 -c "print('%.6f' % ($t0 + 10))")")
+    echo "ai: POST /api/run/cancel in 10s from first send: $n"
+    if [[ "$n" -lt 2 || "$n" -gt 6 ]]; then
+        echo "ai: expected 2..6 cancels, got $n" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
+# Outage, then water still on. The 10 s after reach comes back has the same bound.
+case_aj() {
+    local ctl=$TMP/aj.ctl
+    local t0 n
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    start_stub "$FIX/dc-watering-4" --post-delay 0 --control "$ctl" || return 1
+    # Same gap as case_ai. 250 ms loses the confirm to the 300 ms debounce.
+    kiosk_bg 26 \
+        "wait:800;tap:${STOP_X},${STOP_Y};wait:400;tap:${OK_X},${OK_Y};wait:22000" \
+        34 --allow-writes || return 1
+    if ! wait_posts 1 40; then
+        echo "aj: no cancel" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    printf 'watering=stay\nreach=down\n' >"$ctl"
+    sleep 3
+    printf 'watering=stay\nreach=up\n' >"$ctl"
+    t0=$(mono_now)
+    sleep 10.3
+    n=$(cancel_between "$t0" "$(python3 -c "print('%.6f' % ($t0 + 10))")")
+    echo "aj: POST /api/run/cancel in 10s after recovery: $n"
+    if [[ "$n" -lt 2 || "$n" -gt 6 ]]; then
+        echo "aj: expected 2..6 cancels after recovery, got $n" >&2
+        post_lines >&2 || true
+        show_kiosk_err
+        stop_kiosk
+        return 1
+    fi
+    stop_kiosk
+}
+
 # Reachable controller, ack slower than the 5s HTTP timeout. Pending copy, STOP stays filled.
 case_ad() {
     local png=$TMP/ad.png
@@ -1790,6 +1920,8 @@ run_case ae case_ae
 run_case af case_af
 run_case ag case_ag
 run_case ah case_ah
+run_case ai case_ai
+run_case aj case_aj
 
 if [[ "$FAILS" -ne 0 ]]; then
     exit 1

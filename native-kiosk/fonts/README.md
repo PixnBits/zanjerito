@@ -8,7 +8,7 @@ TrueType sources used by the kiosk UI, converted to LVGL C arrays in `generated/
 | `BarlowSemiCondensed-Medium.ttf` | Barlow Semi Condensed Medium (500) | `zk_font_m_*` |
 | `BarlowSemiCondensed-SemiBold.ttf` | Barlow Semi Condensed SemiBold (600) | `zk_font_sb_*` |
 | `BarlowSemiCondensed-Bold.ttf` | Barlow Semi Condensed Bold (700) | `zk_font_b_*` |
-| `Literata-SemiBold-Text.ttf` | Literata SemiBold, text optical size | `zk_font_lit_20`, `lit_26`, `lit_32` |
+| `Literata-SemiBold-Text.ttf` | Literata SemiBold, text optical size | `zk_font_lit_18`, `lit_20`, `lit_26`, `lit_32` |
 | `Literata-SemiBold.ttf` | Literata SemiBold, display optical size | `zk_font_lit_40`, `lit_48` |
 
 Upstream (SIL Open Font License 1.1):

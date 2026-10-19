@@ -175,15 +175,35 @@ int zk_stop_snapshot(zk_stop_flow_t *f, zk_stop_snap_t snap)
         f->failed = 0;
         return 0;
     }
-    /* Still on, or no snapshot: stay pending. From WAIT, send again now. */
+    /* Still on, or no snapshot: stay pending. The retry timer owns the POST. */
     if (f->phase == ZK_STOP_WAIT) {
         f->phase = ZK_STOP_QUEUED;
-        f->inflight = 1;
+        f->inflight = 0;
         f->again = 0;
-        f->failed = 0;
-        return 1;
+        f->failed = 1;
+        return 0;
     }
     return 0;
+}
+
+void zk_stop_mark_sent(zk_stop_flow_t *f, int64_t now_ms)
+{
+    if (!f) {
+        return;
+    }
+    f->sent_ms = now_ms;
+    f->sent_set = 1;
+}
+
+int zk_stop_retry_due(const zk_stop_flow_t *f, int64_t now_ms)
+{
+    if (!f || f->phase != ZK_STOP_QUEUED || f->inflight) {
+        return 0;
+    }
+    if (!f->sent_set || now_ms < f->sent_ms) {
+        return 1;
+    }
+    return (now_ms - f->sent_ms) >= (int64_t)ZK_STOP_RETRY_MS;
 }
 
 int zk_stop_retry(zk_stop_flow_t *f)

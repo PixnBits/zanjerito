@@ -33,6 +33,9 @@ typedef struct {
     int visible;
     int clamped;
     char text[ZK_UI_LABEL_TEXT_MAX];
+    const lv_font_t *font;
+    int line_space;
+    uint32_t rgb;
 } zk_ui_label_box_t;
 
 /* Writes one entry per label built for the current screen. Returns the count,

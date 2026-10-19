@@ -593,23 +593,28 @@ static void test_offline_stop_ack(void)
     TEQ_I((int)f.phase, (int)ZK_STOP_WAIT);
     TEQ_I(zk_stop_shows_stopped(&f), 0);
 
-    /* 2xx while water is still on stays pending and the caller posts again. */
+    /* 2xx while water is still on stays pending. The timer posts, not this call. */
     memset(&f, 0, sizeof f);
     TEQ_I(zk_stop_confirm(&f), 1);
+    zk_stop_mark_sent(&f, 0);
     zk_stop_http(&f, 1);
-    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 1);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
     TEQ_I(zk_stop_shows_stopped(&f), 0);
     TEQ_I((int)f.phase, (int)ZK_STOP_QUEUED);
-    TEQ_I(f.inflight, 1);
+    TEQ_I(f.inflight, 0);
+    TEQ_I(zk_stop_retry_due(&f, (int64_t)ZK_STOP_RETRY_MS - 1), 0);
+    TEQ_I(zk_stop_retry_due(&f, (int64_t)ZK_STOP_RETRY_MS), 1);
 
-    /* 2xx, then the controller is unreachable: stay pending and post again. */
+    /* 2xx, then the controller is unreachable: stay pending. Same timer. */
     memset(&f, 0, sizeof f);
     TEQ_I(zk_stop_confirm(&f), 1);
+    zk_stop_mark_sent(&f, 0);
     zk_stop_http(&f, 1);
-    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_UNAVAILABLE), 1);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_UNAVAILABLE), 0);
     TEQ_I(zk_stop_shows_stopped(&f), 0);
     TEQ_I((int)f.phase, (int)ZK_STOP_QUEUED);
-    TEQ_I(f.inflight, 1);
+    TEQ_I(f.inflight, 0);
+    TEQ_I(zk_stop_retry_due(&f, (int64_t)ZK_STOP_RETRY_MS - 1), 0);
 
     memset(&f, 0, sizeof f);
     zk_stop_confirm(&f);
@@ -673,6 +678,74 @@ static void test_offline_stop_ack(void)
     TEQ_I((int)v.hero.style, (int)ZK_HERO_STOP_PENDING);
     TEQ_I(v.stop_filled, 1);
     TCHECK(strcmp(v.hero.headline, "Watering stopped") != 0, "unreachable after 2xx is not stopped");
+}
+
+/* Instant ack, water still on, repeated on a fake clock. Each resend is at
+ * least ZK_STOP_RETRY_MS after the previous POST started. */
+static void test_stop_resend_spacing(void)
+{
+    zk_stop_flow_t f;
+    int64_t t;
+    int64_t last;
+    int sends;
+    int i;
+
+    memset(&f, 0, sizeof f);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    zk_stop_mark_sent(&f, 0);
+    last = 0;
+    sends = 1;
+    for (t = 0; t <= 10000; t += 50) {
+        if (f.inflight) {
+            zk_stop_http(&f, 1);
+            TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
+            TEQ_I(f.inflight, 0);
+            TEQ_I((int)f.phase, (int)ZK_STOP_QUEUED);
+            TEQ_I(zk_stop_shows_stopped(&f), 0);
+        }
+        if (zk_stop_retry_due(&f, t)) {
+            TCHECK(t - last >= (int64_t)ZK_STOP_RETRY_MS, "resend at %ld after %ld", (long)t, (long)last);
+            TEQ_I(zk_stop_retry(&f), 1);
+            zk_stop_mark_sent(&f, t);
+            last = t;
+            sends++;
+        }
+    }
+    TEQ_I(sends, 6);
+    TEQ_I((int)last, 10000);
+    if (f.inflight) {
+        zk_stop_http(&f, 1);
+        TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
+    }
+    for (i = 0; i < 50; i++) {
+        TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
+        TEQ_I(f.inflight, 0);
+        TEQ_I(zk_stop_retry_due(&f, last), 0);
+    }
+
+    /* A confirm while nothing is in flight sends now. The next still-on waits. */
+    memset(&f, 0, sizeof f);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    zk_stop_mark_sent(&f, 0);
+    zk_stop_http(&f, 1);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
+    TEQ_I(zk_stop_retry_due(&f, 1000), 0);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    TEQ_I(f.inflight, 1);
+    zk_stop_mark_sent(&f, 1000);
+    zk_stop_http(&f, 1);
+    TEQ_I(zk_stop_snapshot(&f, ZK_STOP_SNAP_STILL_ON), 0);
+    TEQ_I(zk_stop_retry_due(&f, 2999), 0);
+    TEQ_I(zk_stop_retry_due(&f, 3000), 1);
+
+    /* A failed POST and a clock step backwards use the same timer. */
+    memset(&f, 0, sizeof f);
+    TEQ_I(zk_stop_confirm(&f), 1);
+    zk_stop_mark_sent(&f, 1000);
+    zk_stop_http(&f, 0);
+    TEQ_I(zk_stop_retry_due(&f, 999), 1);
+    TEQ_I(zk_stop_retry_due(&f, 2999), 0);
+    TEQ_I(zk_stop_retry_due(&f, 3000), 1);
 }
 
 static void test_soil_never_zero_and_layout(void)
@@ -1025,6 +1098,7 @@ int main(void)
     test_tile_tap_never_runs();
     test_schedules_copy();
     test_offline_stop_ack();
+    test_stop_resend_spacing();
     test_idle_home();
     test_soil_never_zero_and_layout();
     test_dirty_rects();

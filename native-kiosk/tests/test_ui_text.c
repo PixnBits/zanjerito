@@ -10,6 +10,7 @@
 #include "generated/zk_fonts.h"
 
 #include <sys/stat.h>
+#include <unistd.h>
 
 static int ends_ellipsis(const char *s)
 {
@@ -818,6 +819,21 @@ static void test_running_sheet(void)
     if (stop) {
         TEQ_S(stop->text, "STOP");
         TCHECK(stop->visible, "STOP hidden on the running sheet");
+        TEQ_I((int)stop->rgb, 0xFFFFFF);
+    }
+    {
+        const zk_ui_label_box_t *pause = find_box(b, n, "pause_word");
+        const zk_ui_label_box_t *sched = find_box(b, n, "sched_word");
+        TCHECK(pause && pause->visible, "pause hidden on the running sheet");
+        TCHECK(sched && sched->visible, "schedules hidden on the running sheet");
+        if (pause) {
+            TEQ_S(pause->text, ZK_WORD_PAUSE);
+            TEQ_I((int)pause->rgb, 0x6E5A45);
+        }
+        if (sched) {
+            TEQ_S(sched->text, ZK_WORD_SCHEDULES);
+            TEQ_I((int)sched->rgb, 0x6E5A45);
+        }
     }
     ok = NULL;
     for (i = 0; i < n; i++) {
@@ -1292,6 +1308,437 @@ static void test_unavailable_names(void)
     zk_data_debug_force_stale(0);
 }
 
+/* Newlines stand in for a space, or, when allow_char is set, for a glyph break. */
+static int text_covers(const char *shown, const char *full, int allow_char)
+{
+    const char *s = shown ? shown : "";
+    const char *f = full ? full : "";
+    while (*s || *f) {
+        if (*s == '\n') {
+            if (*f == ' ') {
+                s++;
+                f++;
+                continue;
+            }
+            if (allow_char) {
+                s++;
+                continue;
+            }
+            return 0;
+        }
+        if (!*s || !*f || *s != *f) {
+            return 0;
+        }
+        s++;
+        f++;
+    }
+    return 1;
+}
+
+static int each_word_fits(const char *s, const lv_font_t *font, int width)
+{
+    const char *p = s ? s : "";
+    if (!font || width < 1) {
+        return 0;
+    }
+    while (*p) {
+        const char *e = p;
+        int w;
+        while (*e && *e != ' ' && *e != '\n') {
+            e++;
+        }
+        if (e > p) {
+            w = (int)lv_text_get_width(p, (uint32_t)(e - p), font, 0);
+            if (w > width + 1) {
+                return 0;
+            }
+        }
+        if (*e == ' ' || *e == '\n') {
+            e++;
+        }
+        p = e;
+    }
+    return 1;
+}
+
+static int explicit_lines_fit(const char *s, const lv_font_t *font, int width)
+{
+    const char *p = s ? s : "";
+    if (!font || width < 1) {
+        return 0;
+    }
+    if (!*p) {
+        return 1;
+    }
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        uint32_t n = nl ? (uint32_t)(nl - p) : (uint32_t)strlen(p);
+        int w;
+        if (n == 0) {
+            return 0;
+        }
+        w = (int)lv_text_get_width(p, n, font, 0);
+        if (w > width + 1) {
+            return 0;
+        }
+        if (!nl) {
+            return 1;
+        }
+        p = nl + 1;
+    }
+    return 1;
+}
+
+static int hang_lines_fit(const char *s, const zk_ui_label_box_t *ln, const zk_ui_label_box_t *rest)
+{
+    const char *nl;
+    const char *p;
+    int w;
+    if (!s || !ln || !ln->font || !rest || !rest->font) {
+        return 0;
+    }
+    nl = strchr(s, '\n');
+    if (!nl) {
+        return 0;
+    }
+    w = (int)lv_text_get_width(s, (uint32_t)(nl - s), ln->font, 0);
+    if (w > ln->w + 1) {
+        return 0;
+    }
+    p = nl + 1;
+    while (*p) {
+        const char *n2 = strchr(p, '\n');
+        uint32_t n = n2 ? (uint32_t)(n2 - p) : (uint32_t)strlen(p);
+        if (n == 0) {
+            return 0;
+        }
+        w = (int)lv_text_get_width(p, n, rest->font, 0);
+        if (w > rest->w + 1) {
+            return 0;
+        }
+        if (!n2) {
+            return 1;
+        }
+        p = n2 + 1;
+    }
+    return 0;
+}
+
+static void assert_box_clear(const zk_ui_label_box_t *box, const zk_ui_label_box_t *a, const zk_ui_label_box_t *b,
+                             const char *what)
+{
+    lv_point_t sz;
+    if (!box || box->w < 1 || box->h < 1 || !box->font) {
+        TCHECK(0, "%s has no box", what);
+        return;
+    }
+    TCHECK(inside_parent(box), "%s outside parent (%d,%d %dx%d) parent (%d,%d %dx%d)", what, box->x, box->y, box->w,
+           box->h, box->parent_x, box->parent_y, box->parent_w, box->parent_h);
+    lv_text_get_size(&sz, box->text[0] ? box->text : " ", box->font, 0, box->line_space, box->w, LV_TEXT_FLAG_NONE);
+    TCHECK((int)sz.y <= box->h + 1, "%s glyphs %d taller than box %d [%s]", what, (int)sz.y, box->h, box->text);
+    if (a && a->visible && a->w > 0 && a->h > 0) {
+        TCHECK(!overlaps(box, a), "%s overlaps %s (%d,%d %dx%d) vs (%d,%d %dx%d)", what, a->id, box->x, box->y,
+               box->w, box->h, a->x, a->y, a->w, a->h);
+    }
+    if (b && b->visible && b->w > 0 && b->h > 0) {
+        TCHECK(!overlaps(box, b), "%s overlaps %s (%d,%d %dx%d) vs (%d,%d %dx%d)", what, b->id, box->x, box->y,
+               box->w, box->h, b->x, b->y, b->w, b->h);
+    }
+}
+
+static void assert_wrap(const zk_ui_label_box_t *box, const char *what)
+{
+    int ok;
+    if (!box || !box->font || box->w < 1) {
+        TCHECK(0, "%s wrap box", what);
+        return;
+    }
+    /* A newline is a drawn break. Without one, every word has to fit the line. */
+    if (strchr(box->text, '\n')) {
+        ok = explicit_lines_fit(box->text, box->font, box->w);
+    } else {
+        ok = each_word_fits(box->text, box->font, box->w);
+    }
+    TCHECK(ok, "%s breaks mid-word or past the line [%s] w=%d", what, box->text, box->w);
+}
+
+static int load_abs(const char *path, int screen)
+{
+    zk_app_t app;
+    zk_data_stop();
+    memset(&app, 0, sizeof app);
+    app.fixture_dir = path;
+    app.live_clock = 0;
+    zk_ui_set_fixture(path);
+    if (zk_data_start(&app) != 0) {
+        return -1;
+    }
+    zk_data_debug_force_stale(0);
+    zk_data_debug_force_needs_update(0);
+    zk_ui_debug_set_stop(-1);
+    zk_ui_debug_set_view(screen, 0, -1);
+    zk_ui_refresh();
+    return 0;
+}
+
+/* mode: 0 idle, 1 schedule watering, 2 manual. The focus name is station 0. */
+static int write_scene(char *dir, size_t cap, const char *name, int nstat, int mode)
+{
+    char path[256];
+    FILE *f;
+    int i;
+    if (!dir || cap < 32 || !name || nstat < 1 || nstat > 6) {
+        return -1;
+    }
+    if (!mkdtemp(dir)) {
+        return -1;
+    }
+    snprintf(path, sizeof path, "%s/kiosk.json", dir);
+    f = fopen(path, "w");
+    if (!f) {
+        return -1;
+    }
+    fprintf(f,
+            "{\n"
+            " \"now\": \"2026-10-19T18:00:00-06:00\",\n"
+            " \"timezone\": \"America/Denver\",\n"
+            " \"phase\": \"%s\",\n"
+            " \"lockout\": false,\n"
+            " \"last_error\": \"\",\n"
+            " \"current_station\": \"%s\",\n"
+            " \"stations_on\": [%s],\n",
+            mode ? "StationOn" : "Idle", mode ? "s0" : "", mode ? "\"s0\"" : "");
+    fprintf(f,
+            " \"pause\": {\"paused\": false, \"until\": null, \"label\": \"\", \"reason\": \"\", \"source\": \"\", "
+            "\"rain_inches\": 0.0, \"last_rain_at\": null},\n"
+            " \"rain_strip\": {\"show\": false, \"inches\": 0.0, \"hours\": 72},\n"
+            " \"rain\": {\"enabled\": true, \"unavailable\": false, \"total_24h_inches\": 0.0, "
+            "\"total_72h_inches\": 0.0, \"have_totals\": false},\n"
+            " \"next_run\": {\"schedule_id\": \"weekdays\", \"name\": \"Weekdays\", "
+            "\"at\": \"2026-10-20T06:10:00-06:00\", \"ends_at\": \"2026-10-20T06:28:00-06:00\", "
+            "\"total_min\": 18, \"skipped_by_pause\": false},\n"
+            " \"next_effective_run\": {\"schedule_id\": \"weekdays\", \"name\": \"Weekdays\", "
+            "\"at\": \"2026-10-20T06:10:00-06:00\", \"ends_at\": \"2026-10-20T06:28:00-06:00\", "
+            "\"total_min\": 18, \"skipped_by_pause\": false},\n");
+    if (!mode) {
+        fprintf(f, " \"run\": null,\n");
+    } else {
+        fprintf(f,
+                " \"run\": {\"kind\": \"%s\", \"program_id\": \"%s\", \"program\": \"%s\", "
+                "\"started_at\": \"2026-10-19T18:00:00-06:00\", \"step_index\": 0, \"step_count\": 1, "
+                "\"current_station\": \"s0\", \"next_station\": \"\", \"step_elapsed_sec\": 0, "
+                "\"step_remaining_sec\": 120, \"run_remaining_sec\": 120, \"run_total_sec\": 120, \"steps\": [{"
+                "\"station_id\": \"s0\", \"title\": \"%s\", \"planned_sec\": 120, \"elapsed_sec\": 0, "
+                "\"remaining_sec\": 120, \"state\": \"active\"}]},\n",
+                mode == 2 ? "manual" : "schedule", mode == 2 ? "manual" : "weekdays", mode == 2 ? "manual" : "Weekdays",
+                name);
+    }
+    fprintf(f, " \"stations\": [\n");
+    for (i = 0; i < nstat; i++) {
+        const char *colors[] = {"red", "yellow", "blue", "green", "red", "yellow"};
+        fprintf(f,
+                "  {\"id\": \"s%d\", \"title\": \"%s\", \"color\": \"%s\", \"on\": %s, \"state\": \"%s\", "
+                "\"rain_pause_exempt\": false, \"soil_percent\": null}%s\n",
+                i, i == 0 ? name : "Beds", colors[i], (mode && i == 0) ? "true" : "false",
+                (mode && i == 0) ? "running" : "idle", i + 1 < nstat ? "," : "");
+    }
+    fprintf(f,
+            " ],\n"
+            " \"soil\": {\"enabled\": false, \"et_known\": false, \"et_stale\": false, \"show_bars\": false, "
+            "\"updated_at\": null}\n}\n");
+    fclose(f);
+    snprintf(path, sizeof path, "%s/history.json", dir);
+    f = fopen(path, "w");
+    if (!f) {
+        return -1;
+    }
+    fprintf(f, "{\"entries\":[\n");
+    for (i = 0; i < nstat; i++) {
+        fprintf(f,
+                " {\"outcome\": \"completed\", \"started_at\": \"2026-10-13T06:10:00-06:00\", "
+                "\"stations\": [{\"station_id\": \"s%d\"}]}%s\n",
+                i, i + 1 < nstat ? "," : "");
+    }
+    fprintf(f, "]}\n");
+    fclose(f);
+    return 0;
+}
+
+static void drop_scene(const char *dir)
+{
+    char path[256];
+    if (!dir || !dir[0]) {
+        return;
+    }
+    snprintf(path, sizeof path, "%s/kiosk.json", dir);
+    remove(path);
+    snprintf(path, sizeof path, "%s/history.json", dir);
+    remove(path);
+    rmdir(dir);
+}
+
+static void assert_tile(const zk_ui_label_box_t *b, int n, const char *full, int allow_char, const char *what)
+{
+    const zk_ui_label_box_t *title = find_box(b, n, "tile_title0");
+    const zk_ui_label_box_t *slot = find_box(b, n, "tile_slot0");
+    const zk_ui_label_box_t *ln = find_box(b, n, "tile_ln0");
+    const zk_ui_label_box_t *rest = find_box(b, n, "tile_rest0");
+    TCHECK(title != NULL, "%s title", what);
+    if (!title) {
+        return;
+    }
+    TCHECK(text_covers(title->text, full, allow_char), "%s text [%s] want [%s]", what, title->text, full);
+    TCHECK(!title->clamped, "%s clamped [%s]", what, title->text);
+    TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, title->text);
+    if (ln && ln->visible) {
+        TCHECK(rest && rest->visible, "%s rest hidden", what);
+        TCHECK(hang_lines_fit(title->text, ln, rest), "%s hang [%s] ln %d rest %d", what, title->text, ln ? ln->w : 0,
+               rest ? rest->w : 0);
+        if (ln->text[0]) {
+            TCHECK(strstr(ln->text, "\xE2\x80\xA6") == NULL, "%s line ellipsis", what);
+        }
+        assert_box_clear(ln, slot, NULL, what);
+        if (rest && rest->visible) {
+            TCHECK(strstr(rest->text, "\xE2\x80\xA6") == NULL, "%s rest ellipsis [%s]", what, rest->text);
+            assert_box_clear(rest, slot, NULL, what);
+        }
+        return;
+    }
+    assert_wrap(title, what);
+    assert_box_clear(title, slot, NULL, what);
+}
+
+static void assert_hero_name(const zk_ui_label_box_t *b, int n, const char *full, int allow_char, const char *what)
+{
+    const zk_ui_label_box_t *head = find_box(b, n, "hero_headline");
+    const zk_ui_label_box_t *time = find_box(b, n, "hero_time");
+    const zk_ui_label_box_t *sub = find_box(b, n, "hero_secondary");
+    TCHECK(head != NULL, "%s headline", what);
+    if (!head) {
+        return;
+    }
+    TCHECK(text_covers(head->text, full, allow_char), "%s text [%s] want [%s]", what, head->text, full);
+    TCHECK(!head->clamped, "%s clamped [%s]", what, head->text);
+    TCHECK(strstr(head->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, head->text);
+    assert_wrap(head, what);
+    assert_box_clear(head, time, sub, what);
+}
+
+static void assert_sheet_name(const zk_ui_label_box_t *b, int n, const char *full, int allow_char, const char *what)
+{
+    const zk_ui_label_box_t *title = find_box(b, n, "sheet_title");
+    const zk_ui_label_box_t *timed = find_box(b, n, "sheet_time");
+    TCHECK(title != NULL, "%s sheet", what);
+    if (!title) {
+        return;
+    }
+    TCHECK(text_covers(title->text, full, allow_char), "%s text [%s] want [%s]", what, title->text, full);
+    TCHECK(!title->clamped, "%s clamped [%s]", what, title->text);
+    TCHECK(strstr(title->text, "\xE2\x80\xA6") == NULL, "%s ellipsis [%s]", what, title->text);
+    assert_wrap(title, what);
+    assert_box_clear(title, timed, NULL, what);
+}
+
+/* Idle Literata headline is the next-run time (spec). The station name is on the tile. */
+static void assert_idle_hero_is_time(const zk_ui_label_box_t *b, int n, const char *name, const char *what)
+{
+    const zk_ui_label_box_t *head = find_box(b, n, "hero_headline");
+    const zk_ui_label_box_t *sub = find_box(b, n, "hero_secondary");
+    TCHECK(head != NULL, "%s idle headline", what);
+    if (!head) {
+        return;
+    }
+    TCHECK(strstr(head->text, "\xE2\x80\xA6") == NULL, "%s idle headline ellipsis [%s]", what, head->text);
+    TCHECK(!head->clamped, "%s idle headline clamped", what);
+    TCHECK(strstr(head->text, "AM") != NULL || strstr(head->text, "PM") != NULL, "%s idle headline [%s]", what,
+           head->text);
+    TCHECK(strcmp(head->text, name) != 0, "%s idle headline is the station name", what);
+    assert_box_clear(head, sub, NULL, what);
+}
+
+static void check_name_slots(const char *name)
+{
+    zk_ui_label_box_t b[96];
+    char dir[64];
+    char sheet[160];
+    int allow = strchr(name, ' ') == NULL;
+    int n;
+    snprintf(dir, sizeof dir, "/tmp/zk-names-XXXXXX");
+    TCHECK(write_scene(dir, sizeof dir, name, 4, 1) == 0, "scene water4 %s", name);
+    TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load water4 %s", name);
+    n = grab(b, 96);
+    if (n > 0) {
+        assert_hero_name(b, n, name, allow, "hero watering");
+        assert_tile(b, n, name, allow, "4-up running");
+        zk_ui_debug_set_view(ZK_SCREEN_SHEET_STOP_STATION, 0, 0);
+        zk_ui_refresh();
+        n = grab(b, 96);
+        snprintf(sheet, sizeof sheet, "%s is watering", name);
+        if (n > 0) {
+            assert_sheet_name(b, n, sheet, allow, "sheet title");
+        }
+    }
+    drop_scene(dir);
+
+    snprintf(dir, sizeof dir, "/tmp/zk-names-XXXXXX");
+    TCHECK(write_scene(dir, sizeof dir, name, 4, 2) == 0, "scene manual %s", name);
+    TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load manual %s", name);
+    n = grab(b, 96);
+    if (n > 0) {
+        assert_hero_name(b, n, name, allow, "hero manual");
+    }
+    drop_scene(dir);
+
+    snprintf(dir, sizeof dir, "/tmp/zk-names-XXXXXX");
+    TCHECK(write_scene(dir, sizeof dir, name, 4, 0) == 0, "scene idle4 %s", name);
+    TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load idle4 %s", name);
+    n = grab(b, 96);
+    if (n > 0) {
+        assert_idle_hero_is_time(b, n, name, "hero idle");
+        assert_tile(b, n, name, allow, "4-up idle");
+    }
+    drop_scene(dir);
+
+    snprintf(dir, sizeof dir, "/tmp/zk-names-XXXXXX");
+    TCHECK(write_scene(dir, sizeof dir, name, 6, 1) == 0, "scene water6 %s", name);
+    TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load water6 %s", name);
+    n = grab(b, 96);
+    if (n > 0) {
+        assert_tile(b, n, name, allow, "6-up running");
+    }
+    drop_scene(dir);
+
+    snprintf(dir, sizeof dir, "/tmp/zk-names-XXXXXX");
+    TCHECK(write_scene(dir, sizeof dir, name, 6, 0) == 0, "scene idle6 %s", name);
+    TCHECK(load_abs(dir, ZK_SCREEN_HOME) == 0, "load idle6 %s", name);
+    n = grab(b, 96);
+    if (n > 0) {
+        assert_tile(b, n, name, allow, "6-up idle");
+    }
+    drop_scene(dir);
+}
+
+static void test_names_24(void)
+{
+    static const char *names[] = {
+        "NORTH MEADOW WILDFLOWERS",
+        "Hummingbird Mowed Meadow",
+        "Backyard Vegetable Patch",
+        "Wildflower Meadow Waters",
+        "Front Yard Drip Emitters",
+    };
+    char wide[25];
+    size_t i;
+    memset(wide, 'W', 24);
+    wide[24] = 0;
+    for (i = 0; i < sizeof names / sizeof names[0]; i++) {
+        TEQ_I((int)strlen(names[i]), 24);
+        check_name_slots(names[i]);
+    }
+    TEQ_I((int)strlen(wide), 24);
+    check_name_slots(wide);
+}
+
 int main(void)
 {
     zk_platform_opts_t opts;
@@ -1320,6 +1767,7 @@ int main(void)
     test_schedules_empty_offline();
     test_button_rects();
     test_unavailable_names();
+    test_names_24();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");

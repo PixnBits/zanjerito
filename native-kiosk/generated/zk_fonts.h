@@ -26,6 +26,7 @@ LV_FONT_DECLARE(zk_font_sb_26);
 LV_FONT_DECLARE(zk_font_sb_36);
 LV_FONT_DECLARE(zk_font_b_30);
 LV_FONT_DECLARE(zk_font_b_36);
+LV_FONT_DECLARE(zk_font_lit_18);
 LV_FONT_DECLARE(zk_font_lit_20);
 LV_FONT_DECLARE(zk_font_lit_26);
 LV_FONT_DECLARE(zk_font_lit_32);

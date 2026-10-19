@@ -73,7 +73,7 @@ for s in 30 36; do
 done
 
 # lit: Literata SemiBold. Text optical size for small sizes, Display for large.
-for s in 20 26 32; do
+for s in 18 20 26 32; do
   gen_one "fonts/Literata-SemiBold-Text.ttf" "zk_font_lit_${s}" "$s"
 done
 for s in 40 48; do
@@ -101,7 +101,7 @@ HEADER="$GEN/zk_fonts.h"
     zk_font_m_18 zk_font_m_20 zk_font_m_26 zk_font_m_28 \
     zk_font_sb_18 zk_font_sb_24 zk_font_sb_26 zk_font_sb_36 \
     zk_font_b_30 zk_font_b_36 \
-    zk_font_lit_20 zk_font_lit_26 zk_font_lit_32 zk_font_lit_40 zk_font_lit_48
+    zk_font_lit_18 zk_font_lit_20 zk_font_lit_26 zk_font_lit_32 zk_font_lit_40 zk_font_lit_48
   do
     echo "LV_FONT_DECLARE(${name});"
   done

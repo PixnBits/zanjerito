@@ -21,7 +21,10 @@ enum {
     BODY_MAX = 768,
     BASE_MAX = 128,
     SLOW_POLL_MS = 30000,
-    HTTP_TIMEOUT_MS = 5000
+    HTTP_TIMEOUT_MS = 5000,
+    /* A forced /api/kiosk poll waits until this long after the previous one started.
+     * The scheduled cadence is not delayed. */
+    STATUS_FORCE_MIN_MS = 500
 };
 
 typedef struct {
@@ -66,6 +69,7 @@ static uint32_t g_seq;
 static uint32_t g_latest;
 static zk_action_result_t g_res;
 static int g_force_status;
+static int64_t g_status_at; /* monotonic ms when the last /api/kiosk poll started */
 
 static int g_stop;
 static int g_running;
@@ -194,6 +198,7 @@ static void reset_locked(void)
     g_latest = 0;
     memset(&g_res, 0, sizeof g_res);
     g_force_status = 0;
+    g_status_at = 0;
     g_stop = 0;
     g_running = 0;
     g_poll_alive = 0;
@@ -556,14 +561,31 @@ static void *worker_main(void *arg)
         }
         {
             int64_t now = mono_ms();
-            if (g_force_status || now >= next_status) {
+            int scheduled = now >= next_status;
+            int force_ready = 0;
+            if (g_force_status) {
+                if (g_status_at <= 0 || now < g_status_at ||
+                    (now - g_status_at) >= (int64_t)STATUS_FORCE_MIN_MS) {
+                    force_ready = 1;
+                }
+            }
+            if (scheduled || force_ready) {
                 g_force_status = 0;
+                g_status_at = now;
                 do_status = 1;
             } else if (now >= next_slow) {
                 do_slow = 1;
             } else {
-                int64_t wait_ms = (next_status < next_slow ? next_status : next_slow) - now;
+                int64_t wake_at = next_status < next_slow ? next_status : next_slow;
+                int64_t wait_ms;
                 struct timespec dl;
+                if (g_force_status && g_status_at > 0) {
+                    int64_t force_at = g_status_at + (int64_t)STATUS_FORCE_MIN_MS;
+                    if (force_at < wake_at) {
+                        wake_at = force_at;
+                    }
+                }
+                wait_ms = wake_at - now;
                 if (wait_ms < 0) {
                     wait_ms = 0;
                 }

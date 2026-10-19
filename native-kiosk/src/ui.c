@@ -175,8 +175,6 @@ static zk_target g_tg[TG_MAX];
 static int g_ntg;
 static zk_stop_flow_t g_stop;
 static int g_stop_hold = -1;
-static int g_last_retry_set;
-static int64_t g_last_retry;
 static int64_t g_last_tap;
 static uint32_t g_seen_seq;
 static int g_seen_ok;
@@ -391,7 +389,7 @@ static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, uint32_t co
     return lb;
 }
 
-/* Visual-only label. Not tracked, so tests keep reading the logical title. */
+/* Hanging ink for a running title. The logical string stays on the tracked title. */
 static lv_obj_t *make_quiet_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color)
 {
     lv_obj_t *lb = lv_label_create(parent);
@@ -780,6 +778,396 @@ static int fit_wrapped(char *dst, size_t cap, const char *src, const lv_font_t *
     }
 }
 
+typedef struct {
+    const lv_font_t *font;
+    int x;
+    int w;
+    int pad;
+    int nlines;
+    char text[384];
+} name_fit_t;
+
+static int utf8_count(const char *s)
+{
+    uint32_t i = 0;
+    int n = 0;
+    if (!s) {
+        return 0;
+    }
+    while (s[i]) {
+        uint32_t next = utf8_next(s, i);
+        if (next <= i) {
+            break;
+        }
+        i = next;
+        n++;
+    }
+    return n;
+}
+
+/* A station name of 24 scalars or fewer, with no authored line break. */
+static int protected_name(const char *s)
+{
+    int n;
+    if (!s || !s[0] || strchr(s, '\n')) {
+        return 0;
+    }
+    n = utf8_count(s);
+    return n > 0 && n <= 24;
+}
+
+/* Sheet titles are "{name} is watering". The limit applies to the name. */
+static int protected_label(const char *s)
+{
+    static const char suf[] = " is watering";
+    size_t n;
+    size_t sl = sizeof suf - 1;
+    char name[192];
+    if (!s) {
+        return 0;
+    }
+    n = strlen(s);
+    if (n > sl && memcmp(s + (n - sl), suf, sl) == 0) {
+        size_t keep = n - sl;
+        if (keep >= sizeof name) {
+            return 0;
+        }
+        memcpy(name, s, keep);
+        name[keep] = 0;
+        return protected_name(name);
+    }
+    return protected_name(s);
+}
+
+/* 1 when src word-wraps into max_lines. A word wider than its line fails.
+ * One fitting line, or keep_src with equal line widths, copies src unchanged
+ * so LVGL wraps at the same spaces. Otherwise those spaces become newlines. */
+static int wrap_words(char *dst, size_t cap, const char *src, const lv_font_t *font, int first_w, int rest_w,
+                      int max_lines, int keep_src, int *nlines_out)
+{
+    const char *p;
+    char buf[384];
+    size_t used = 0;
+    int nlines = 0;
+    if (nlines_out) {
+        *nlines_out = 0;
+    }
+    if (!dst || cap == 0) {
+        return 0;
+    }
+    dst[0] = 0;
+    if (!src || !src[0]) {
+        return 1;
+    }
+    if (!font || max_lines < 1 || first_w < 1) {
+        return 0;
+    }
+    if (rest_w < 1) {
+        rest_w = first_w;
+    }
+    p = src;
+    buf[0] = 0;
+    while (*p) {
+        int w = nlines == 0 ? first_w : rest_w;
+        uint32_t i = 0;
+        uint32_t last_space = 0;
+        uint32_t nbytes = (uint32_t)strlen(p);
+        int have_space = 0;
+        uint32_t adv;
+        uint32_t ncopy;
+        if (nlines >= max_lines) {
+            return 0;
+        }
+        while (i < nbytes && p[i] && p[i] != '\n') {
+            uint32_t n = utf8_next(p, i);
+            int lw;
+            if (n <= i || n > nbytes) {
+                return 0;
+            }
+            lw = (int)lv_text_get_width(p, n, font, 0);
+            if (lw > w) {
+                if (!(have_space && last_space > 0)) {
+                    return 0;
+                }
+                break;
+            }
+            if (p[n - 1] == ' ') {
+                last_space = n;
+                have_space = 1;
+            }
+            i = n;
+        }
+        adv = i;
+        if (have_space && i < nbytes && p[i] && p[i] != '\n') {
+            adv = last_space;
+        }
+        if (adv == 0) {
+            return 0;
+        }
+        ncopy = adv;
+        while (ncopy > 0 && p[ncopy - 1] == ' ') {
+            ncopy--;
+        }
+        if (nlines > 0) {
+            if (used + 1 >= sizeof buf) {
+                return 0;
+            }
+            buf[used++] = '\n';
+        }
+        if (used + ncopy >= sizeof buf) {
+            return 0;
+        }
+        memcpy(buf + used, p, ncopy);
+        used += ncopy;
+        buf[used] = 0;
+        p += adv;
+        if (*p == '\n') {
+            p++;
+        }
+        nlines++;
+    }
+    if (nlines < 1) {
+        return 0;
+    }
+    if (nlines <= 1 || (keep_src && first_w == rest_w)) {
+        copy_cap(dst, cap, src);
+    } else {
+        copy_cap(dst, cap, buf);
+    }
+    if (nlines_out) {
+        *nlines_out = nlines;
+    }
+    return 1;
+}
+
+/* Character breaks, no ellipsis. Used only when a single word is wider than the line. */
+static int wrap_chars(char *dst, size_t cap, const char *src, const lv_font_t *font, int first_w, int rest_w,
+                      int max_lines, int *nlines_out)
+{
+    const char *p;
+    char buf[384];
+    size_t used = 0;
+    int nlines = 0;
+    if (nlines_out) {
+        *nlines_out = 0;
+    }
+    if (!dst || cap == 0) {
+        return 0;
+    }
+    dst[0] = 0;
+    if (!src || !src[0]) {
+        return 1;
+    }
+    if (!font || max_lines < 1 || first_w < 1) {
+        return 0;
+    }
+    if (rest_w < 1) {
+        rest_w = first_w;
+    }
+    p = src;
+    buf[0] = 0;
+    while (*p) {
+        int w = nlines == 0 ? first_w : rest_w;
+        uint32_t adv;
+        uint32_t ncopy;
+        if (nlines >= max_lines || w < 1) {
+            return 0;
+        }
+        adv = wrap_line(p, (uint32_t)strlen(p), font, w);
+        if (adv == 0) {
+            return 0;
+        }
+        ncopy = adv;
+        while (ncopy > 0 && (p[ncopy - 1] == ' ' || p[ncopy - 1] == '\n')) {
+            ncopy--;
+        }
+        if (ncopy == 0) {
+            return 0;
+        }
+        if (nlines > 0) {
+            if (used + 1 >= sizeof buf) {
+                return 0;
+            }
+            buf[used++] = '\n';
+        }
+        if (used + ncopy >= sizeof buf) {
+            return 0;
+        }
+        memcpy(buf + used, p, ncopy);
+        used += ncopy;
+        buf[used] = 0;
+        p += adv;
+        if (*p == '\n') {
+            p++;
+        }
+        nlines++;
+    }
+    if (nlines < 1) {
+        return 0;
+    }
+    if (nlines <= 1) {
+        copy_cap(dst, cap, src);
+    } else {
+        copy_cap(dst, cap, buf);
+    }
+    if (nlines_out) {
+        *nlines_out = nlines;
+    }
+    return 1;
+}
+
+static int try_words(name_fit_t *out, const lv_font_t *font, int x, int w, int pad, const char *src, int lines,
+                     int keep_src)
+{
+    int first;
+    if (!out || !font || pad < 0 || w < 8 || pad >= w) {
+        return 0;
+    }
+    first = w - pad;
+    if (!wrap_words(out->text, sizeof out->text, src, font, first, w, lines, keep_src, &out->nlines)) {
+        return 0;
+    }
+    out->font = font;
+    out->x = x;
+    out->w = w;
+    out->pad = pad;
+    return 1;
+}
+
+static int try_chars(name_fit_t *out, const lv_font_t *font, int x, int w, int pad, const char *src, int lines)
+{
+    int first;
+    if (!out || !font || pad < 0 || w < 8 || pad >= w) {
+        return 0;
+    }
+    first = w - pad;
+    if (!wrap_chars(out->text, sizeof out->text, src, font, first, w, lines, &out->nlines)) {
+        return 0;
+    }
+    out->font = font;
+    out->x = x;
+    out->w = w;
+    out->pad = pad;
+    return 1;
+}
+
+static int widen_box(int x, int w, int extra, int min_x, int max_right, int *ox, int *ow)
+{
+    int nx = x - extra / 2;
+    int nw = w + extra;
+    if (nx < min_x) {
+        nw -= min_x - nx;
+        nx = min_x;
+    }
+    if (nx + nw > max_right) {
+        nw = max_right - nx;
+    }
+    if (nw <= w || nx < min_x || nw < 8) {
+        return 0;
+    }
+    *ox = nx;
+    *ow = nw;
+    return 1;
+}
+
+/* Largest font that word-wraps. Then a smaller pad, a wider box, extra lines,
+ * and only then a character break. Never ellipsizes. */
+static int choose_name(name_fit_t *out, const char *src, const lv_font_t *const *fonts, int nfonts, int x, int w,
+                       int pad, int spec_lines, int max_lines, int min_x, int max_right, int keep_src)
+{
+    int fi;
+    int p;
+    int extra;
+    int ln;
+    const lv_font_t *small;
+    if (!out || !fonts || nfonts < 1 || spec_lines < 1) {
+        return 0;
+    }
+    if (max_lines < spec_lines) {
+        max_lines = spec_lines;
+    }
+    if (pad < 0 || pad >= w) {
+        pad = 0;
+    }
+    for (fi = 0; fi < nfonts; fi++) {
+        if (try_words(out, fonts[fi], x, w, pad, src, spec_lines, keep_src)) {
+            return 1;
+        }
+    }
+    small = fonts[nfonts - 1];
+    for (p = pad; p >= 0; p -= 2) {
+        if (try_words(out, small, x, w, p, src, spec_lines, keep_src)) {
+            return 1;
+        }
+        if (p == 0) {
+            break;
+        }
+    }
+    for (extra = 4; extra <= 48; extra += 4) {
+        int nx, nw;
+        if (!widen_box(x, w, extra, min_x, max_right, &nx, &nw)) {
+            break;
+        }
+        for (p = pad; p >= 0; p -= 2) {
+            if (p < nw && try_words(out, small, nx, nw, p, src, spec_lines, keep_src)) {
+                return 1;
+            }
+            if (p == 0) {
+                break;
+            }
+        }
+    }
+    for (ln = spec_lines + 1; ln <= max_lines; ln++) {
+        for (p = pad; p >= 0; p -= 2) {
+            if (try_words(out, small, x, w, p, src, ln, keep_src)) {
+                return 1;
+            }
+            if (p == 0) {
+                break;
+            }
+        }
+        for (extra = 4; extra <= 48; extra += 4) {
+            int nx, nw;
+            if (!widen_box(x, w, extra, min_x, max_right, &nx, &nw)) {
+                break;
+            }
+            for (p = pad; p >= 0; p -= 2) {
+                if (p < nw && try_words(out, small, nx, nw, p, src, ln, keep_src)) {
+                    return 1;
+                }
+                if (p == 0) {
+                    break;
+                }
+            }
+        }
+    }
+    for (ln = spec_lines; ln <= max_lines; ln++) {
+        for (p = pad; p >= 0; p -= 2) {
+            if (try_chars(out, small, x, w, p, src, ln)) {
+                return 1;
+            }
+            if (p == 0) {
+                break;
+            }
+        }
+        for (extra = 4; extra <= 48; extra += 4) {
+            int nx, nw;
+            if (!widen_box(x, w, extra, min_x, max_right, &nx, &nw)) {
+                break;
+            }
+            for (p = pad; p >= 0; p -= 2) {
+                if (p < nw && try_chars(out, small, nx, nw, p, src, ln)) {
+                    return 1;
+                }
+                if (p == 0) {
+                    break;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 static void copy_span(char *dst, size_t cap, const char *s, uint32_t n)
 {
     if (!dst || cap == 0) {
@@ -1045,13 +1433,11 @@ static void note_actions(const zk_snapshot_t *s)
 static void submit_stop_now(void)
 {
     zk_data_submit_action(ZK_ACT_STOP, NULL);
-    g_last_retry = zk_platform_mono_ms();
-    g_last_retry_set = 1;
+    zk_stop_mark_sent(&g_stop, zk_platform_mono_ms());
 }
 
 static void advance_stop(const zk_snapshot_t *s, int unreachable, int watering)
 {
-    int send;
     zk_stop_snap_t snap;
     if (g_stop_hold >= 0 || !s) {
         return;
@@ -1063,10 +1449,8 @@ static void advance_stop(const zk_snapshot_t *s, int unreachable, int watering)
         return;
     }
     if (unreachable) {
-        /* Unreachable is sticky across frames. WAIT means the last POST got
-         * 2xx and there is still no all-off snapshot. Hand the resend to the
-         * 2s retry timer. Calling the snapshot machine here would POST again
-         * on the next tick and spin. */
+        /* Unreachable is sticky across frames. Move WAIT onto the retry
+         * queue. maybe_retry is the only resend; this function does not POST. */
         if (g_stop.phase == ZK_STOP_WAIT) {
             g_stop.phase = ZK_STOP_QUEUED;
             g_stop.failed = 1;
@@ -1081,14 +1465,11 @@ static void advance_stop(const zk_snapshot_t *s, int unreachable, int watering)
     } else {
         snap = watering ? ZK_STOP_SNAP_STILL_ON : ZK_STOP_SNAP_CLEAR;
     }
-    send = zk_stop_snapshot(&g_stop, snap);
+    zk_stop_snapshot(&g_stop, snap);
     if (g_stop.phase == ZK_STOP_CONFIRMED) {
         g_confirmed_reachable = unreachable ? 0 : 1;
         g_confirmed_at = s->wall;
         g_has_confirmed_at = 1;
-    }
-    if (send) {
-        submit_stop_now();
     }
 }
 
@@ -1110,12 +1491,10 @@ static void maybe_clear_confirmed(int unreachable, int watering, int manual, int
 
 static void maybe_retry(void)
 {
-    int64_t now;
-    if (g_stop_hold >= 0 || g_stop.phase != ZK_STOP_QUEUED || g_stop.inflight) {
+    if (g_stop_hold >= 0) {
         return;
     }
-    now = zk_platform_mono_ms();
-    if (g_last_retry_set && now >= g_last_retry && now - g_last_retry < 2000) {
+    if (!zk_stop_retry_due(&g_stop, zk_platform_mono_ms())) {
         return;
     }
     if (!zk_stop_retry(&g_stop)) {
@@ -1518,7 +1897,21 @@ static void apply_hero(void)
             head_w = need;
         }
     }
-    clamped = fit_wrapped(broken, sizeof broken, h->headline, hf, head_w, head_w, 3, NULL);
+    clamped = 0;
+    broken[0] = 0;
+    if (protected_label(h->headline)) {
+        static const lv_font_t *faces[] = {&zk_font_lit_48, &zk_font_lit_40, &zk_font_lit_32};
+        name_fit_t fit;
+        memset(&fit, 0, sizeof fit);
+        if (!choose_name(&fit, h->headline, faces, 3, 0, head_w, 0, 3, 3, 0, head_w, 1)) {
+            fit.font = &zk_font_lit_32;
+            copy_cap(fit.text, sizeof fit.text, h->headline);
+        }
+        hf = fit.font ? fit.font : &zk_font_lit_48;
+        copy_cap(broken, sizeof broken, fit.text);
+    } else {
+        clamped = fit_wrapped(broken, sizeof broken, h->headline, hf, head_w, head_w, 3, NULL);
+    }
     head_txt = broken[0] ? broken : (h->headline[0] ? h->headline : "");
     use_font(g_w.h_head, hf, 0);
     text_color(g_w.h_head, hc);
@@ -1716,7 +2109,9 @@ static void apply_tiles(const zk_layout_rects *L)
     for (i = 0; i < ZK_MAX_SHOWN; i++) {
         const zk_tile_copy_t *c;
         int title_w;
+        int title_x = 14;
         int pad;
+        int fitted = 0;
         int th;
         int y0;
         int lh;
@@ -1725,7 +2120,7 @@ static void apply_tiles(const zk_layout_rects *L)
         int un;
         char wrapped[256];
         int clamped;
-        int nlines;
+        int nlines = 1;
         int slot_x;
         int slot_y;
         int slot_w;
@@ -1756,6 +2151,60 @@ static void apply_tiles(const zk_layout_rects *L)
         }
         /* Drop is inline on line 1 only (22 px + 6 px gap). Later lines use the full width. */
         pad = on ? 28 : 0;
+        {
+            int spec_lines = lines;
+            int protected = protected_name(c->name);
+            name_fit_t fit;
+            const lv_font_t *faces[3];
+            int nfaces;
+            memset(&fit, 0, sizeof fit);
+            wrapped[0] = 0;
+            title_x = 14;
+            fitted = 0;
+            if (six) {
+                faces[0] = &zk_font_lit_20;
+                faces[1] = &zk_font_lit_18;
+                nfaces = 2;
+            } else {
+                faces[0] = &zk_font_lit_26;
+                faces[1] = &zk_font_lit_20;
+                faces[2] = &zk_font_lit_18;
+                nfaces = 3;
+            }
+            nf = faces[0];
+            nlines = 1;
+            clamped = 0;
+            if (protected) {
+                int lh_small = (int)lv_font_get_line_height(faces[nfaces - 1]);
+                int inner_h = L->tiles[i].h - 4;
+                int slot_lim = inner_h - ZK_SLOT_H - 4;
+                int room = slot_lim - 2 - 2;
+                int max_lines = lh_small > 0 ? room / lh_small : spec_lines;
+                int content_r = L->tiles[i].w - 4;
+                if (max_lines < spec_lines) {
+                    max_lines = spec_lines;
+                }
+                if (max_lines > 6) {
+                    max_lines = 6;
+                }
+                if (!choose_name(&fit, c->name, faces, nfaces, title_x, title_w, pad, spec_lines, max_lines, 4,
+                                 content_r, 1)) {
+                    fit.font = faces[nfaces - 1];
+                    fit.x = title_x;
+                    fit.w = title_w;
+                    fit.pad = pad;
+                    fit.nlines = 1;
+                    copy_cap(fit.text, sizeof fit.text, c->name);
+                }
+                nf = fit.font;
+                title_x = fit.x;
+                title_w = fit.w;
+                pad = fit.pad;
+                nlines = fit.nlines > 0 ? fit.nlines : 1;
+                copy_cap(wrapped, sizeof wrapped, fit.text);
+                fitted = 1;
+            }
+        }
         use_font(g_w.title[i], nf, 0);
         use_font(g_w.title_ln[i], nf, 0);
         use_font(g_w.title_rest[i], nf, 0);
@@ -1790,13 +2239,28 @@ static void apply_tiles(const zk_layout_rects *L)
         {
             int first_w = title_w - pad;
             int rest_w = title_w;
-            int name_bottom = slot_y - gap;
+            int name_gap = gap;
+            int name_bottom;
             int max_fit;
             int hang;
+            int top_min = 6;
             const char *nl;
-            if (first_w < 40) {
+            if (!fitted && first_w < 40) {
                 first_w = 40;
             }
+            if (first_w < 8) {
+                first_w = title_w;
+            }
+            /* A protected name that needed more than the spec clamp still has to
+             * clear the slot. Tighten only that gap; soil on/off does not. */
+            if (fitted && nlines > lines) {
+                int raw = (slot_y - name_gap) - lh * nlines;
+                if (raw < top_min) {
+                    top_min = 2;
+                    name_gap = 2;
+                }
+            }
+            name_bottom = slot_y - name_gap;
             if (name_bottom < lh) {
                 name_bottom = lh;
             }
@@ -1805,23 +2269,26 @@ static void apply_tiles(const zk_layout_rects *L)
                  * needs more lines than fit above the slot pushes the slot down,
                  * as the spec screens do, but never past the tile's inner bottom.
                  * The shift depends only on the name, so soil on/off never moves it. */
-                const int top_min = 6;
                 int inner_h = L->tiles[i].h - 4;
                 int slot_max = inner_h - slot_h - 4;
-                int room = (slot_max > slot_y ? slot_max : slot_y) - gap - top_min;
-                max_fit = room / lh;
+                int room = (slot_max > slot_y ? slot_max : slot_y) - name_gap - top_min;
+                max_fit = lh > 0 ? room / lh : 1;
                 if (max_fit < 1) {
                     max_fit = 1;
                 }
-                if (max_fit > lines) {
-                    max_fit = lines;
-                }
-                clamped = fit_wrapped(wrapped, sizeof wrapped, c->name, nf, first_w, rest_w, max_fit, &nlines);
-                if (nlines < 1) {
+                if (!fitted) {
+                    if (max_fit > lines) {
+                        max_fit = lines;
+                    }
+                    clamped = fit_wrapped(wrapped, sizeof wrapped, c->name, nf, first_w, rest_w, max_fit, &nlines);
+                    if (nlines < 1) {
+                        nlines = 1;
+                    }
+                    if (nlines > max_fit) {
+                        nlines = max_fit;
+                    }
+                } else if (nlines < 1) {
                     nlines = 1;
-                }
-                if (nlines > max_fit) {
-                    nlines = max_fit;
                 }
                 th = lh * nlines;
                 /* Bottom-align against the fixed slot so a one-line name stays put. */
@@ -1840,15 +2307,15 @@ static void apply_tiles(const zk_layout_rects *L)
             hang = on && nl && nl[1];
             lv_obj_set_style_pad_left(g_w.title[i], hang ? 0 : pad, 0);
             lv_label_set_long_mode(g_w.title[i], LV_LABEL_LONG_WRAP);
-            place(g_w.title[i], 14, y0, title_w, th);
+            place(g_w.title[i], title_x, y0, title_w, th);
             show(g_w.title[i], hang ? 0 : 1);
             if (hang) {
                 char line1[ZK_TITLE_MAX];
                 copy_span(line1, sizeof line1, wrapped, (uint32_t)(nl - wrapped));
                 set_tracked(g_w.title_ln[i], line1[0] ? line1 : " ", 0);
                 set_tracked(g_w.title_rest[i], nl + 1, clamped);
-                place(g_w.title_ln[i], 14 + pad, y0, first_w, lh);
-                place(g_w.title_rest[i], 14, y0 + lh, rest_w, th > lh ? th - lh : lh);
+                place(g_w.title_ln[i], title_x + pad, y0, first_w, lh);
+                place(g_w.title_rest[i], title_x, y0 + lh, rest_w, th > lh ? th - lh : lh);
                 show(g_w.title_ln[i], 1);
                 show(g_w.title_rest[i], 1);
             } else {
@@ -1929,6 +2396,7 @@ static void apply_tiles(const zk_layout_rects *L)
 static void apply_bar(const zk_layout_rects *L)
 {
     int full = sheet_kind_of(g_screen) == ZK_SHEET_STOP_ALL;
+    int station = sheet_kind_of(g_screen) == ZK_SHEET_STOP_STATION;
     int resume = g_view.bar_is_resume;
     int dis = g_view.bar_disabled;
     uint32_t bg;
@@ -1946,7 +2414,7 @@ static void apply_bar(const zk_layout_rects *L)
     }
     place(g_w.pause, L->pause.x, L->pause.y, L->pause.w, L->pause.h);
     place(g_w.stop, L->stop.x, L->stop.y, L->stop.w, L->stop.h);
-    if (dis) {
+    if (dis || (station && !listed(resume ? ZK_TARGET_RESUME : ZK_TARGET_PAUSE))) {
         bg = COL_DIM;
         fg = COL_MUTED;
         bd = COL_DIM;
@@ -1996,7 +2464,8 @@ static void apply_bar(const zk_layout_rects *L)
 
     {
         int on_list = g_screen == ZK_SCREEN_SCHEDULES;
-        int dim = g_lin.offline && !g_lin.sched_cached && !on_list;
+        int dim = (g_lin.offline && !g_lin.sched_cached && !on_list) ||
+                  (station && !listed(on_list ? ZK_TARGET_HOME : ZK_TARGET_SCHEDULES));
         const char *word = on_list ? ZK_WORD_HOME : ZK_WORD_SCHEDULES;
         const void *icon = on_list ? (const void *)&g_back28_dsc : (const void *)&g_cal28_dsc;
         place(g_w.sched_btn, L->sched.x, L->sched.y, L->sched.w, L->sched.h);
@@ -2082,8 +2551,25 @@ static void apply_sheet(const zk_layout_rects *L)
         text_color(g_w.s_label, lc);
         set_tracked(g_w.s_label, g_view.sheet.label, 0);
         sheet_at(&L->sheet, 36, 34, 728, 22, g_w.s_label);
-        ell = fit_wrapped(fitted, sizeof fitted, g_view.sheet.title, &zk_font_lit_32, 728, 728, 2, &nlines);
-        use_font(g_w.s_title, &zk_font_lit_32, 0);
+        {
+            static const lv_font_t *faces[] = {&zk_font_lit_32, &zk_font_lit_26};
+            name_fit_t fit;
+            const lv_font_t *sfnt = &zk_font_lit_32;
+            memset(&fit, 0, sizeof fit);
+            if (protected_label(g_view.sheet.title) &&
+                choose_name(&fit, g_view.sheet.title, faces, 2, 0, 728, 0, 2, 2, 0, 728, 1)) {
+                sfnt = fit.font ? fit.font : sfnt;
+                copy_cap(fitted, sizeof fitted, fit.text);
+                ell = 0;
+            } else if (protected_label(g_view.sheet.title)) {
+                sfnt = &zk_font_lit_26;
+                copy_cap(fitted, sizeof fitted, g_view.sheet.title);
+                ell = 0;
+            } else {
+                ell = fit_wrapped(fitted, sizeof fitted, g_view.sheet.title, &zk_font_lit_32, 728, 728, 2, &nlines);
+            }
+            use_font(g_w.s_title, sfnt, 0);
+        }
         text_color(g_w.s_title, COL_INK);
         set_tracked(g_w.s_title, fitted[0] ? fitted : g_view.sheet.title, ell);
         sheet_at(&L->sheet, 36, 62, 728, 80, g_w.s_title);
@@ -2332,8 +2818,12 @@ static void build_tree(lv_obj_t *scr)
         listen(g_w.tile[i]);
         mark_lab_n("tile_title", i, 0);
         g_w.title[i] = make_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
+        mark_lab_n("tile_ln", i, 0);
         g_w.title_ln[i] = make_quiet_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
+        remember(g_w.title_ln[i]);
+        mark_lab_n("tile_rest", i, 0);
         g_w.title_rest[i] = make_quiet_label(g_w.tile[i], &zk_font_lit_26, COL_INK);
+        remember(g_w.title_rest[i]);
         g_w.drop[i] = make_icon(g_w.tile[i], &g_drop22_dsc);
         g_w.slot[i] = make_box(g_w.tile[i]);
         lv_obj_set_style_bg_opa(g_w.slot[i], LV_OPA_TRANSP, 0);
@@ -2584,6 +3074,9 @@ int zk_ui_debug_label_boxes(zk_ui_label_box_t *out, int cap)
         }
         t = lv_label_get_text(o);
         copy_cap(b->text, sizeof b->text, t);
+        b->font = lv_obj_get_style_text_font(o, LV_PART_MAIN);
+        b->line_space = (int)lv_obj_get_style_text_line_space(o, LV_PART_MAIN);
+        b->rgb = lv_color_to_u32(lv_obj_get_style_text_color(o, LV_PART_MAIN)) & 0xFFFFFFu;
     }
     return g_nlabs;
 }
