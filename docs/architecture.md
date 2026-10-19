@@ -91,7 +91,7 @@ One run-queue globally. Never two programs on GPIO at once.
 | Second schedule fires while one is running | **Skip + log** (D13). Do not interleave itineraries. Optional single-slot queue later if we miss programs. |
 | Manual run while a schedule is watering | Warning dialog, then abort remaining itinerary and start the manual run. |
 | Config write (pin map / station / schedule) while watering | **Reject or defer** until Idle; clear error to client. Reads OK. |
-| STOP | Immediate all-off + PSU off. No confirm if already watering. |
+| STOP | Asks "Stop all watering?" on every surface, then immediate all-off + PSU off. The API endpoint itself has no confirm. |
 | Fault | All stations off, then PSU off (invariant 5). |
 
 ## Store

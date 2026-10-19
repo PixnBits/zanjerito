@@ -63,8 +63,8 @@ Shipped work below is on `main`. Pull-request numbers are the merge record. Cuto
 - Fail-off GPIO: the real gpiocdev driver, with every relay inactive on release (#15, #17).
 - Seasonal date-window programs and a schedule editor in the web UI (#19).
 - Style A UI (#20, #21).
-- Pause and delay for rain, with durations (#22, #25). STOP stays an instant kill.
-- Run history, `GET /api/history`, and a Recent runs card (#28). A record is written after outputs are off and the run is no longer busy, so STOP stays instant.
+- Pause and delay for rain, with durations (#22, #25). STOP asks "Stop all watering?" first, then immediate all-off.
+- Run history, `GET /api/history`, and a Recent runs card (#28). A record is written after outputs are off and the run is no longer busy, so the all-off after confirm is immediate.
 - Automatic rain pause (#30), the first slice of #26. The poller retries after a failed fetch, capped at the normal interval (#41). Schedules still run when the feed is absent.
 - Display-only soil estimate and a rain strip on Home (#31, #33, #34). The estimate does not decide to water.
 - Native C/LVGL framebuffer kiosk at boot, with one-line rollback, a `GET /api/kiosk` snapshot, display dim and off with a wake-tap guard, backlight auto-detect, RGB565 support, and framebuffer hardening with exit-78 recovery (#35–#39, #42–#46, #48, #50). See [native-kiosk-boot.md](./native-kiosk-boot.md).
@@ -144,7 +144,7 @@ Default sequencing is a 2-second overlap so the next station opens before the pr
 | Capability | MVP | v1 | Status |
 |---|---|---|---|
 | List stations | ✓ | ✓ | Shipped |
-| Manual run, cancel, and STOP | ✓ | ✓ | Shipped. STOP stays instant |
+| Manual run, cancel, and STOP | ✓ | ✓ | Shipped. Confirm, then immediate all-off |
 | Manual preempt of a schedule, with a warning | ✓ | ✓ | Shipped |
 | Schedules (clock, weekdays, minute itinerary) | ✓ | ✓ | Shipped |
 | Several programs, enable and disable | ✓ | ✓ | Shipped |
@@ -177,7 +177,7 @@ Default sequencing is a 2-second overlap so the next station opens before the pr
 
 ## 10. UI
 
-The phone UI on `main` is Style A: status first, station chips, and a STOP control that stays on screen. A manual run may preempt a schedule after an explicit warning. STOP needs no second confirm while water is on.
+The phone UI on `main` is Style A: status first, station chips, and a STOP control that stays on screen. A manual run may preempt a schedule after an explicit warning. STOP asks "Stop all watering?" first, then turns every valve off immediately.
 
 The wall panel is the native framebuffer client in [native-kiosk-boot.md](./native-kiosk-boot.md). It is a client of the daemon. Schedules, pause, and valves stay in the Go process. If the API is down, the panel says it cannot reach the controller. Rollback to the desktop is one command. Writes from the panel are opt-in.
 
