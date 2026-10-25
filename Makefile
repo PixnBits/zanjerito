@@ -18,7 +18,7 @@ ifeq ($(GOARCH),)
   endif
 endif
 
-.PHONY: build test install
+.PHONY: build test install build-mqtt build-mqtt-arm build-mqtt-arm64
 
 build:
 	CGO_ENABLED=$(CGO) GOOS=linux GOARCH=$(GOARCH) $(if $(GOARM),GOARM=$(GOARM),) $(GO) build -trimpath -buildvcs=false -ldflags='-s -w' -o $(BIN) ./cmd/zanjerito
@@ -28,3 +28,14 @@ test:
 
 install: build
 	./deploy/install.sh
+
+build-mqtt:
+	CGO_ENABLED=$(CGO) GOOS=linux GOARCH=$(GOARCH) $(if $(GOARM),GOARM=$(GOARM),) $(GO) build -trimpath -buildvcs=false -ldflags='-s -w' -o zanjerito-mqtt ./cmd/zanjerito-mqtt
+
+build-mqtt-arm:
+	mkdir -p dist
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 $(GO) build -trimpath -buildvcs=false -ldflags='-s -w' -o dist/zanjerito-mqtt-linux-armv7 ./cmd/zanjerito-mqtt
+
+build-mqtt-arm64:
+	mkdir -p dist
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -buildvcs=false -ldflags='-s -w' -o dist/zanjerito-mqtt-linux-arm64 ./cmd/zanjerito-mqtt
