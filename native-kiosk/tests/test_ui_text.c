@@ -3033,7 +3033,6 @@ static void assert_rain_theme(const char *fix, int dark, int expect_visible)
     const zk_ui_label_box_t *tx;
     const zk_ui_label_box_t *z;
     const zk_ui_label_box_t *one;
-    const zk_ui_label_box_t *sub;
     TCHECK(load_fix(fix, ZK_SCREEN_HOME) == 0, "load %s", fix);
     n = grab(b, 96);
     if (n < 0) {
@@ -3043,7 +3042,6 @@ static void assert_rain_theme(const char *fix, int dark, int expect_visible)
     tx = find_box(b, n, "rain_text");
     z = find_box(b, n, "rain_0");
     one = find_box(b, n, "rain_1");
-    sub = find_box(b, n, "hero_secondary");
     TCHECK(tx && z && one && meter.present, "%s rain parts", fix);
     if (!tx || !z || !one || !meter.present) {
         return;
@@ -3053,25 +3051,36 @@ static void assert_rain_theme(const char *fix, int dark, int expect_visible)
         TEQ_I(z->visible, expect_visible);
         TEQ_I(one->visible, expect_visible);
     }
-    TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+    TEQ_I(meter.border_w, 2);
+    TEQ_I(meter.border_opa, LV_OPA_COVER);
+    TEQ_I(meter.fill_opa, LV_OPA_COVER);
+    TEQ_I(meter.text_opa, LV_OPA_COVER);
     if (dark) {
-        TEQ_I((int)tx->rgb, 0xD9CFE6);
-        if (sub && sub->visible) {
-            TEQ_I((int)tx->rgb, (int)sub->rgb);
-        }
+        TEQ_I((int)tx->rgb, 0xF3EEF8);
         TEQ_I((int)z->rgb, 0xC4B6D4);
         TEQ_I((int)one->rgb, 0xC4B6D4);
-        TEQ_I((int)meter.track_rgb, 0xF3EEF8);
-        TEQ_I(meter.track_opa, LV_OPA_40);
-        TEQ_I((int)meter.border_rgb, 0xF3EEF8);
-        TEQ_I(meter.border_opa, LV_OPA_40);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.border_rgb, 0xC4B6D4);
+        TEQ_I((int)meter.fill_rgb, 0xBFEDE6);
     } else {
         TEQ_I((int)tx->rgb, 0x3A2A1F);
         TEQ_I((int)z->rgb, 0x6E5A45);
         TEQ_I((int)one->rgb, 0x6E5A45);
         TEQ_I(meter.track_opa, LV_OPA_TRANSP);
         TEQ_I((int)meter.border_rgb, 0x1F6A64);
-        TEQ_I(meter.border_opa, LV_OPA_COVER);
+        TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+    }
+    if (tx->visible) {
+        /* Same horizontal inset on every hero: border width plus place x of 2. */
+        TEQ_I(meter.fill_x, meter.meter_x + 4);
+        TEQ_I(meter.fill_h, 6);
+        if (dark) {
+            TEQ_I(meter.fill_y, 292);
+            TEQ_I(meter.fill_y + meter.fill_h - 1, 297);
+        } else {
+            TEQ_I(meter.fill_y, 294);
+            TEQ_I(meter.fill_y + meter.fill_h - 1, 299);
+        }
     }
 }
 
