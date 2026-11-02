@@ -42,6 +42,8 @@ enum {
     COL_PLUM = 0x4E3F63,
     COL_PLUM_INK = 0xF3EEF8,
     COL_PLUM_MUT = 0xD9CFE6,
+    /* Scale ticks on the plum hero. Dimmer than COL_PLUM_MUT, still light on plum. */
+    COL_PLUM_DIM = 0xC4B6D4,
     COL_STOP = 0xB5361A,
     COL_BAND = 0x7C2411,
     COL_WHITE = 0xFFFFFF,
@@ -1739,6 +1741,25 @@ static int text_block_h(const char *text, const lv_font_t *font, int letter_sp, 
     return (int)sz.y;
 }
 
+/* Light heroes keep the cream-card gauge. The paused hero is plum, so the
+ * label uses that theme's secondary color, the scale is a dimmer light, and
+ * the track is a light translucent bed. The fill stays teal on every hero. */
+static void apply_rain_chrome(int dark, uint32_t secondary)
+{
+    lv_opa_t track_opa = dark ? LV_OPA_40 : LV_OPA_TRANSP;
+    uint32_t track = dark ? COL_PLUM_INK : COL_CREAM;
+    uint32_t edge = dark ? COL_PLUM_INK : COL_TEAL_INK;
+    text_color(g_w.rain_tx, dark ? secondary : COL_TEXT);
+    text_color(g_w.rain_0, dark ? COL_PLUM_DIM : COL_MUTED);
+    text_color(g_w.rain_1, dark ? COL_PLUM_DIM : COL_MUTED);
+    paint_box(g_w.rain_meter, track, edge, 2, 5, LV_BORDER_SIDE_FULL);
+    lv_obj_set_style_bg_opa(g_w.rain_meter, track_opa, 0);
+    lv_obj_set_style_bg_opa(g_w.rain_meter, track_opa, LV_STATE_PRESSED);
+    lv_obj_set_style_border_opa(g_w.rain_meter, dark ? (lv_opa_t)LV_OPA_40 : (lv_opa_t)LV_OPA_COVER, 0);
+    lv_obj_set_style_border_opa(g_w.rain_meter, dark ? (lv_opa_t)LV_OPA_40 : (lv_opa_t)LV_OPA_COVER, LV_STATE_PRESSED);
+    paint_box(g_w.rain_fill, COL_TEAL_INK, COL_TEAL_INK, 0, 2, LV_BORDER_SIDE_NONE);
+}
+
 static void apply_hero(void)
 {
     const zk_hero_copy_t *h = &g_view.hero;
@@ -1806,6 +1827,8 @@ static void apply_hero(void)
     default:
         break;
     }
+    /* secondary is the "Tap a station…" color on the paused hero. */
+    apply_rain_chrome(h->style == ZK_HERO_PAUSED, sc);
     show(g_w.hero, !top_covered());
     paint_box(g_w.hero, bg, edge, 2, 16, LV_BORDER_SIDE_FULL);
     /* CSS label tracking is 1.4 px. 2 px is what wraps "WEEKDAYS AM" onto
@@ -3227,6 +3250,28 @@ static void fill_glyph(lv_obj_t *o, zk_ui_glyph_dbg_t *out)
     out->h = (int)lv_area_get_height(&a);
     c = lv_obj_get_style_bg_color(o, LV_PART_MAIN);
     out->color = lv_color_to_u32(c) & 0xFFFFFFu;
+}
+
+int zk_ui_debug_rain(zk_ui_rain_dbg_t *out)
+{
+    lv_color_t c;
+    if (!out) {
+        return 0;
+    }
+    memset(out, 0, sizeof *out);
+    if (!g_w.rain_meter || !g_w.rain_fill) {
+        return 0;
+    }
+    out->present = 1;
+    c = lv_obj_get_style_bg_color(g_w.rain_meter, LV_PART_MAIN);
+    out->track_rgb = lv_color_to_u32(c) & 0xFFFFFFu;
+    out->track_opa = (int)lv_obj_get_style_bg_opa(g_w.rain_meter, LV_PART_MAIN);
+    c = lv_obj_get_style_border_color(g_w.rain_meter, LV_PART_MAIN);
+    out->border_rgb = lv_color_to_u32(c) & 0xFFFFFFu;
+    out->border_opa = (int)lv_obj_get_style_border_opa(g_w.rain_meter, LV_PART_MAIN);
+    c = lv_obj_get_style_bg_color(g_w.rain_fill, LV_PART_MAIN);
+    out->fill_rgb = lv_color_to_u32(c) & 0xFFFFFFu;
+    return 1;
 }
 
 int zk_ui_debug_glyphs(zk_ui_glyph_dbg_t *minus, zk_ui_glyph_dbg_t *plus_h, zk_ui_glyph_dbg_t *plus_v)

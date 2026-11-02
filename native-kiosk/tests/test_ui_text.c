@@ -3024,6 +3024,121 @@ static void test_glyphs(void)
     free(view);
 }
 
+/* expect_visible: 1 shown, 0 hidden, -1 either. dark is the paused plum hero. */
+static void assert_rain_theme(const char *fix, int dark, int expect_visible)
+{
+    zk_ui_label_box_t b[96];
+    zk_ui_rain_dbg_t meter;
+    int n;
+    const zk_ui_label_box_t *tx;
+    const zk_ui_label_box_t *z;
+    const zk_ui_label_box_t *one;
+    const zk_ui_label_box_t *sub;
+    TCHECK(load_fix(fix, ZK_SCREEN_HOME) == 0, "load %s", fix);
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "%s rain meter", fix);
+    tx = find_box(b, n, "rain_text");
+    z = find_box(b, n, "rain_0");
+    one = find_box(b, n, "rain_1");
+    sub = find_box(b, n, "hero_secondary");
+    TCHECK(tx && z && one && meter.present, "%s rain parts", fix);
+    if (!tx || !z || !one || !meter.present) {
+        return;
+    }
+    if (expect_visible >= 0) {
+        TEQ_I(tx->visible, expect_visible);
+        TEQ_I(z->visible, expect_visible);
+        TEQ_I(one->visible, expect_visible);
+    }
+    TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+    if (dark) {
+        TEQ_I((int)tx->rgb, 0xD9CFE6);
+        if (sub && sub->visible) {
+            TEQ_I((int)tx->rgb, (int)sub->rgb);
+        }
+        TEQ_I((int)z->rgb, 0xC4B6D4);
+        TEQ_I((int)one->rgb, 0xC4B6D4);
+        TEQ_I((int)meter.track_rgb, 0xF3EEF8);
+        TEQ_I(meter.track_opa, LV_OPA_40);
+        TEQ_I((int)meter.border_rgb, 0xF3EEF8);
+        TEQ_I(meter.border_opa, LV_OPA_40);
+    } else {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I((int)z->rgb, 0x6E5A45);
+        TEQ_I((int)one->rgb, 0x6E5A45);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.border_rgb, 0x1F6A64);
+        TEQ_I(meter.border_opa, LV_OPA_COVER);
+    }
+}
+
+/* Gauge chrome follows the hero. Pause is the only dark hero. A qualifying
+ * total is drawn on the first refresh of that snapshot; a paused snapshot
+ * with no total stays hidden. */
+static void test_rain_theme(void)
+{
+    zk_ui_label_box_t b[96];
+    zk_ui_rain_dbg_t meter;
+    int n;
+    const zk_ui_label_box_t *tx;
+
+    assert_rain_theme("paused-rain", 1, 1);
+    assert_rain_theme("home-rain", 0, 1);
+    assert_rain_theme("paused-manual", 1, 1);
+    assert_rain_theme("paused-long", 1, 1);
+    assert_rain_theme("running", 0, 1);
+    assert_rain_theme("dc-manual-4", 0, 1);
+    assert_rain_theme("dc-soil-4", 0, 1);
+    assert_rain_theme("dc-soil-6", 0, 1);
+    assert_rain_theme("dc-soil-watering-6", 0, -1);
+    assert_rain_theme("home-fault", 0, 1);
+    assert_rain_theme("home-stale", 0, -1);
+    assert_rain_theme("home-onoff", 0, -1);
+    assert_rain_theme("running-long", 0, -1);
+    assert_rain_theme("dc-watering-4-longname", 0, -1);
+    assert_rain_theme("home-norain", 0, 0);
+    assert_rain_theme("dc-paused-6", 1, 0);
+
+    /* Same rain snapshot, other light heroes. Stop and offline do not recolor it. */
+    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load home-rain for stop");
+    zk_ui_debug_set_stop(ZK_STOP_WAIT);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    tx = n > 0 ? find_box(b, n, "rain_text") : NULL;
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "pending rain meter");
+    if (tx && meter.present) {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+        TEQ_I((int)meter.border_rgb, 0x1F6A64);
+    }
+    zk_ui_debug_set_stop(ZK_STOP_CONFIRMED);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    tx = n > 0 ? find_box(b, n, "rain_text") : NULL;
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "confirmed rain meter");
+    if (tx && meter.present) {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I(meter.border_opa, LV_OPA_COVER);
+    }
+    zk_ui_debug_set_stop(-1);
+    zk_data_debug_force_stale(1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    tx = n > 0 ? find_box(b, n, "rain_text") : NULL;
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "offline rain meter");
+    if (tx && meter.present) {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+    }
+    zk_data_debug_force_stale(0);
+    zk_ui_refresh();
+}
+
 int main(void)
 {
     zk_platform_opts_t opts;
@@ -3059,6 +3174,7 @@ int main(void)
     test_wide_words();
     test_running_icon();
     test_glyphs();
+    test_rain_theme();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");
