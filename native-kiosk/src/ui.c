@@ -2086,7 +2086,8 @@ static void apply_rain(void)
         return;
     }
     set_tracked(g_w.rain_tx, g_view.hero.rain_text, 0);
-    inner = ZK_RAIN_TRACK - 4;
+    /* Plum: 2 px border + 2 px gap on both sides (screen x 44..363). Light keeps its old cap. */
+    inner = ZK_RAIN_TRACK - (g_view.hero.style == ZK_HERO_PAUSED ? 8 : 4);
     if (inner < 1) {
         inner = 1;
     }

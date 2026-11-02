@@ -3084,6 +3084,122 @@ static void assert_rain_theme(const char *fix, int dark, int expect_visible)
     }
 }
 
+/* Copy fixture NAME to a temp dir with the 72 h total set to INCHES, load it on Home. */
+static int load_fix_rain(const char *name, double inches, char *tmp, size_t cap)
+{
+    const char *files[] = {"kiosk.json", "schedules.json", "history.json", NULL};
+    const char *roots[] = {"tests/fixtures", "native-kiosk/tests/fixtures", NULL};
+    char src[512], dst[600], buf[65536];
+    int i, r;
+    snprintf(tmp, cap, "/tmp/zk-rain-XXXXXX");
+    if (!mkdtemp(tmp)) {
+        return -1;
+    }
+    for (r = 0; roots[r]; r++) {
+        struct stat st;
+        snprintf(src, sizeof src, "%s/%s", roots[r], name);
+        if (stat(src, &st) == 0 && S_ISDIR(st.st_mode)) {
+            break;
+        }
+    }
+    if (!roots[r]) {
+        return -1;
+    }
+    for (i = 0; files[i]; i++) {
+        FILE *in, *out;
+        size_t n;
+        char *at;
+        snprintf(src, sizeof src, "%s/%s/%s", roots[r], name, files[i]);
+        in = fopen(src, "rb");
+        if (!in) {
+            continue;
+        }
+        n = fread(buf, 1, sizeof buf - 1, in);
+        fclose(in);
+        buf[n] = 0;
+        snprintf(dst, sizeof dst, "%s/%s", tmp, files[i]);
+        out = fopen(dst, "wb");
+        if (!out) {
+            return -1;
+        }
+        at = strcmp(files[i], "kiosk.json") == 0 ? strstr(buf, "\"total_72h_inches\":") : NULL;
+        if (at) {
+            char *end = at + strlen("\"total_72h_inches\":");
+            while (*end == ' ' || (*end >= '0' && *end <= '9') || *end == '.') {
+                end++;
+            }
+            fwrite(buf, 1, (size_t)(at - buf), out);
+            fprintf(out, "\"total_72h_inches\": %.2f", inches);
+            fputs(end, out);
+        } else {
+            fputs(buf, out);
+        }
+        fclose(out);
+    }
+    zk_data_stop();
+    {
+        zk_app_t app;
+        memset(&app, 0, sizeof app);
+        app.fixture_dir = tmp;
+        app.live_clock = 0;
+        zk_ui_set_fixture(tmp);
+        if (zk_data_start(&app) != 0) {
+            return -1;
+        }
+    }
+    zk_data_debug_force_stale(0);
+    zk_data_debug_force_needs_update(0);
+    zk_ui_debug_set_stop(-1);
+    zk_ui_debug_set_view(ZK_SCREEN_HOME, 0, -1);
+    zk_ui_refresh();
+    return 0;
+}
+
+static void rm_fix_tmp(const char *tmp)
+{
+    const char *files[] = {"kiosk.json", "schedules.json", "history.json", NULL};
+    char p[600];
+    int i;
+    for (i = 0; files[i]; i++) {
+        snprintf(p, sizeof p, "%s/%s", tmp, files[i]);
+        unlink(p);
+    }
+    rmdir(tmp);
+}
+
+/* Full-scale fills: on plum the fill keeps a 2 px gap inside the right outline,
+ * matching the left. Light heroes keep their old extent. */
+static void test_rain_fill_right(void)
+{
+    const double vals[] = {0.99, 1.0, 1.5};
+    const char *fix[] = {"paused-rain", "paused-manual", "home-rain"};
+    int v, f;
+    for (f = 0; f < 3; f++) {
+        int dark = strncmp(fix[f], "paused", 6) == 0;
+        for (v = 0; v < 3; v++) {
+            char tmp[64];
+            zk_ui_rain_dbg_t m;
+            int right, inner_right;
+            TCHECK(load_fix_rain(fix[f], vals[v], tmp, sizeof tmp) == 0, "load %s %.2f", fix[f], vals[v]);
+            TCHECK(zk_ui_debug_rain(&m) == 1, "%s %.2f meter", fix[f], vals[v]);
+            right = m.fill_x + m.fill_w - 1;
+            inner_right = m.meter_x + m.meter_w - 1 - m.border_w;
+            if (dark) {
+                TEQ_I(m.fill_x - m.meter_x - m.border_w, 2);
+                TCHECK(right <= inner_right - 2, "%s %.2f fill right %d > %d", fix[f], vals[v], right, inner_right - 2);
+                if (vals[v] >= 1.0) {
+                    TEQ_I(right, inner_right - 2);
+                } else {
+                    TCHECK(right < inner_right - 2, "%s %.2f below full %d", fix[f], vals[v], right);
+                }
+            } else {
+                TCHECK(right <= m.meter_x + m.meter_w - 1, "%s %.2f fill past meter %d", fix[f], vals[v], right);
+            }
+            rm_fix_tmp(tmp);
+        }
+    }
+}
+
 /* Gauge chrome follows the hero. Pause is the only dark hero. A qualifying
  * total is drawn on the first refresh of that snapshot; a paused snapshot
  * with no total stays hidden. */
@@ -3184,6 +3300,7 @@ int main(void)
     test_running_icon();
     test_glyphs();
     test_rain_theme();
+    test_rain_fill_right();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");
