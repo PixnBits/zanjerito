@@ -42,6 +42,8 @@ enum {
     COL_PLUM = 0x4E3F63,
     COL_PLUM_INK = 0xF3EEF8,
     COL_PLUM_MUT = 0xD9CFE6,
+    /* Scale ticks on the plum hero. Dimmer than COL_PLUM_MUT, still light on plum. */
+    COL_PLUM_DIM = 0xC4B6D4,
     COL_STOP = 0xB5361A,
     COL_BAND = 0x7C2411,
     COL_WHITE = 0xFFFFFF,
@@ -1739,6 +1741,27 @@ static int text_block_h(const char *text, const lv_font_t *font, int letter_sp, 
     return (int)sz.y;
 }
 
+/* Light heroes keep the cream-card gauge: no track tint, teal outline, teal
+ * fill. The paused hero is plum. Its label is plum ink, the outline and the
+ * scale are plum dim, the track is empty so the plum card shows through, and
+ * the fill is the running-tile mint. Every one of those is opaque. */
+static void apply_rain_chrome(int dark)
+{
+    uint32_t track = dark ? COL_PLUM : COL_CREAM;
+    uint32_t edge = dark ? COL_PLUM_DIM : COL_TEAL_INK;
+    uint32_t fill = dark ? COL_ON_FILL : COL_TEAL_INK;
+    text_color(g_w.rain_tx, dark ? COL_PLUM_INK : COL_TEXT);
+    text_color(g_w.rain_0, dark ? COL_PLUM_DIM : COL_MUTED);
+    text_color(g_w.rain_1, dark ? COL_PLUM_DIM : COL_MUTED);
+    paint_box(g_w.rain_meter, track, edge, 2, 5, LV_BORDER_SIDE_FULL);
+    /* No bed. TRANSP is empty, not a scrim. The card behind the bar shows through. */
+    lv_obj_set_style_bg_opa(g_w.rain_meter, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(g_w.rain_meter, LV_OPA_TRANSP, LV_STATE_PRESSED);
+    lv_obj_set_style_border_opa(g_w.rain_meter, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_opa(g_w.rain_meter, LV_OPA_COVER, LV_STATE_PRESSED);
+    paint_box(g_w.rain_fill, fill, fill, 0, 2, LV_BORDER_SIDE_NONE);
+}
+
 static void apply_hero(void)
 {
     const zk_hero_copy_t *h = &g_view.hero;
@@ -1806,6 +1829,7 @@ static void apply_hero(void)
     default:
         break;
     }
+    apply_rain_chrome(h->style == ZK_HERO_PAUSED);
     show(g_w.hero, !top_covered());
     paint_box(g_w.hero, bg, edge, 2, 16, LV_BORDER_SIDE_FULL);
     /* CSS label tracking is 1.4 px. 2 px is what wraps "WEEKDAYS AM" onto
@@ -2062,7 +2086,8 @@ static void apply_rain(void)
         return;
     }
     set_tracked(g_w.rain_tx, g_view.hero.rain_text, 0);
-    inner = ZK_RAIN_TRACK - 4;
+    /* Plum: 2 px border + 2 px gap on both sides (screen x 44..363). Light keeps its old cap. */
+    inner = ZK_RAIN_TRACK - (g_view.hero.style == ZK_HERO_PAUSED ? 8 : 4);
     if (inner < 1) {
         inner = 1;
     }
@@ -2073,7 +2098,14 @@ static void apply_rain(void)
     if (fw > inner) {
         fw = inner;
     }
-    place(g_w.rain_fill, 2, 2, fw > 0 ? fw : 1, 6);
+    /* Child y is added to the parent's content origin, and that origin already
+     * includes the border width (lv_obj_get_style_space_top = pad + border).
+     * Border opacity is not part of the sum. y = 2 is therefore 4 px down and
+     * the 6 px fill covers the bottom outline. Light heroes keep y = 2: the
+     * fill and the outline are the same teal, so that overlap does not show.
+     * The plum hero uses y = 0, which is the inner band (screen y 292..297).
+     * x stays 2 on both, so the horizontal inset does not change. */
+    place(g_w.rain_fill, 2, g_view.hero.style == ZK_HERO_PAUSED ? 0 : 2, fw > 0 ? fw : 1, 6);
     show(g_w.rain_fill, fw > 0);
 }
 
@@ -3227,6 +3259,47 @@ static void fill_glyph(lv_obj_t *o, zk_ui_glyph_dbg_t *out)
     out->h = (int)lv_area_get_height(&a);
     c = lv_obj_get_style_bg_color(o, LV_PART_MAIN);
     out->color = lv_color_to_u32(c) & 0xFFFFFFu;
+}
+
+int zk_ui_debug_rain(zk_ui_rain_dbg_t *out)
+{
+    lv_color_t c;
+    lv_area_t a;
+    lv_obj_t *scr;
+    if (!out) {
+        return 0;
+    }
+    memset(out, 0, sizeof *out);
+    if (!g_w.rain_meter || !g_w.rain_fill) {
+        return 0;
+    }
+    scr = lv_screen_active();
+    if (scr) {
+        lv_obj_update_layout(scr);
+    }
+    out->present = 1;
+    c = lv_obj_get_style_bg_color(g_w.rain_meter, LV_PART_MAIN);
+    out->track_rgb = lv_color_to_u32(c) & 0xFFFFFFu;
+    out->track_opa = (int)lv_obj_get_style_bg_opa(g_w.rain_meter, LV_PART_MAIN);
+    c = lv_obj_get_style_border_color(g_w.rain_meter, LV_PART_MAIN);
+    out->border_rgb = lv_color_to_u32(c) & 0xFFFFFFu;
+    out->border_opa = (int)lv_obj_get_style_border_opa(g_w.rain_meter, LV_PART_MAIN);
+    out->border_w = (int)lv_obj_get_style_border_width(g_w.rain_meter, LV_PART_MAIN);
+    c = lv_obj_get_style_bg_color(g_w.rain_fill, LV_PART_MAIN);
+    out->fill_rgb = lv_color_to_u32(c) & 0xFFFFFFu;
+    out->fill_opa = (int)lv_obj_get_style_bg_opa(g_w.rain_fill, LV_PART_MAIN);
+    out->text_opa = g_w.rain_tx ? (int)lv_obj_get_style_text_opa(g_w.rain_tx, LV_PART_MAIN) : 0;
+    lv_obj_get_coords(g_w.rain_meter, &a);
+    out->meter_x = (int)a.x1;
+    out->meter_y = (int)a.y1;
+    out->meter_w = (int)lv_area_get_width(&a);
+    out->meter_h = (int)lv_area_get_height(&a);
+    lv_obj_get_coords(g_w.rain_fill, &a);
+    out->fill_x = (int)a.x1;
+    out->fill_y = (int)a.y1;
+    out->fill_w = (int)lv_area_get_width(&a);
+    out->fill_h = (int)lv_area_get_height(&a);
+    return 1;
 }
 
 int zk_ui_debug_glyphs(zk_ui_glyph_dbg_t *minus, zk_ui_glyph_dbg_t *plus_h, zk_ui_glyph_dbg_t *plus_v)

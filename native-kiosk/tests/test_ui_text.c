@@ -3024,6 +3024,246 @@ static void test_glyphs(void)
     free(view);
 }
 
+/* expect_visible: 1 shown, 0 hidden, -1 either. dark is the paused plum hero. */
+static void assert_rain_theme(const char *fix, int dark, int expect_visible)
+{
+    zk_ui_label_box_t b[96];
+    zk_ui_rain_dbg_t meter;
+    int n;
+    const zk_ui_label_box_t *tx;
+    const zk_ui_label_box_t *z;
+    const zk_ui_label_box_t *one;
+    TCHECK(load_fix(fix, ZK_SCREEN_HOME) == 0, "load %s", fix);
+    n = grab(b, 96);
+    if (n < 0) {
+        return;
+    }
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "%s rain meter", fix);
+    tx = find_box(b, n, "rain_text");
+    z = find_box(b, n, "rain_0");
+    one = find_box(b, n, "rain_1");
+    TCHECK(tx && z && one && meter.present, "%s rain parts", fix);
+    if (!tx || !z || !one || !meter.present) {
+        return;
+    }
+    if (expect_visible >= 0) {
+        TEQ_I(tx->visible, expect_visible);
+        TEQ_I(z->visible, expect_visible);
+        TEQ_I(one->visible, expect_visible);
+    }
+    TEQ_I(meter.border_w, 2);
+    TEQ_I(meter.border_opa, LV_OPA_COVER);
+    TEQ_I(meter.fill_opa, LV_OPA_COVER);
+    TEQ_I(meter.text_opa, LV_OPA_COVER);
+    if (dark) {
+        TEQ_I((int)tx->rgb, 0xF3EEF8);
+        TEQ_I((int)z->rgb, 0xC4B6D4);
+        TEQ_I((int)one->rgb, 0xC4B6D4);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.border_rgb, 0xC4B6D4);
+        TEQ_I((int)meter.fill_rgb, 0xBFEDE6);
+    } else {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I((int)z->rgb, 0x6E5A45);
+        TEQ_I((int)one->rgb, 0x6E5A45);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.border_rgb, 0x1F6A64);
+        TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+    }
+    if (tx->visible) {
+        /* Same horizontal inset on every hero: border width plus place x of 2. */
+        TEQ_I(meter.fill_x, meter.meter_x + 4);
+        TEQ_I(meter.fill_h, 6);
+        if (dark) {
+            TEQ_I(meter.fill_y, 292);
+            TEQ_I(meter.fill_y + meter.fill_h - 1, 297);
+        } else {
+            TEQ_I(meter.fill_y, 294);
+            TEQ_I(meter.fill_y + meter.fill_h - 1, 299);
+        }
+    }
+}
+
+/* Copy fixture NAME to a temp dir with the 72 h total set to INCHES, load it on Home. */
+static int load_fix_rain(const char *name, double inches, char *tmp, size_t cap)
+{
+    const char *files[] = {"kiosk.json", "schedules.json", "history.json", NULL};
+    const char *roots[] = {"tests/fixtures", "native-kiosk/tests/fixtures", NULL};
+    char src[512], dst[600], buf[65536];
+    int i, r;
+    snprintf(tmp, cap, "/tmp/zk-rain-XXXXXX");
+    if (!mkdtemp(tmp)) {
+        return -1;
+    }
+    for (r = 0; roots[r]; r++) {
+        struct stat st;
+        snprintf(src, sizeof src, "%s/%s", roots[r], name);
+        if (stat(src, &st) == 0 && S_ISDIR(st.st_mode)) {
+            break;
+        }
+    }
+    if (!roots[r]) {
+        return -1;
+    }
+    for (i = 0; files[i]; i++) {
+        FILE *in, *out;
+        size_t n;
+        char *at;
+        snprintf(src, sizeof src, "%s/%s/%s", roots[r], name, files[i]);
+        in = fopen(src, "rb");
+        if (!in) {
+            continue;
+        }
+        n = fread(buf, 1, sizeof buf - 1, in);
+        fclose(in);
+        buf[n] = 0;
+        snprintf(dst, sizeof dst, "%s/%s", tmp, files[i]);
+        out = fopen(dst, "wb");
+        if (!out) {
+            return -1;
+        }
+        at = strcmp(files[i], "kiosk.json") == 0 ? strstr(buf, "\"total_72h_inches\":") : NULL;
+        if (at) {
+            char *end = at + strlen("\"total_72h_inches\":");
+            while (*end == ' ' || (*end >= '0' && *end <= '9') || *end == '.') {
+                end++;
+            }
+            fwrite(buf, 1, (size_t)(at - buf), out);
+            fprintf(out, "\"total_72h_inches\": %.2f", inches);
+            fputs(end, out);
+        } else {
+            fputs(buf, out);
+        }
+        fclose(out);
+    }
+    zk_data_stop();
+    {
+        zk_app_t app;
+        memset(&app, 0, sizeof app);
+        app.fixture_dir = tmp;
+        app.live_clock = 0;
+        zk_ui_set_fixture(tmp);
+        if (zk_data_start(&app) != 0) {
+            return -1;
+        }
+    }
+    zk_data_debug_force_stale(0);
+    zk_data_debug_force_needs_update(0);
+    zk_ui_debug_set_stop(-1);
+    zk_ui_debug_set_view(ZK_SCREEN_HOME, 0, -1);
+    zk_ui_refresh();
+    return 0;
+}
+
+static void rm_fix_tmp(const char *tmp)
+{
+    const char *files[] = {"kiosk.json", "schedules.json", "history.json", NULL};
+    char p[600];
+    int i;
+    for (i = 0; files[i]; i++) {
+        snprintf(p, sizeof p, "%s/%s", tmp, files[i]);
+        unlink(p);
+    }
+    rmdir(tmp);
+}
+
+/* Full-scale fills: on plum the fill keeps a 2 px gap inside the right outline,
+ * matching the left. Light heroes keep their old extent. */
+static void test_rain_fill_right(void)
+{
+    const double vals[] = {0.99, 1.0, 1.5};
+    const char *fix[] = {"paused-rain", "paused-manual", "home-rain"};
+    int v, f;
+    for (f = 0; f < 3; f++) {
+        int dark = strncmp(fix[f], "paused", 6) == 0;
+        for (v = 0; v < 3; v++) {
+            char tmp[64];
+            zk_ui_rain_dbg_t m;
+            int right, inner_right;
+            TCHECK(load_fix_rain(fix[f], vals[v], tmp, sizeof tmp) == 0, "load %s %.2f", fix[f], vals[v]);
+            TCHECK(zk_ui_debug_rain(&m) == 1, "%s %.2f meter", fix[f], vals[v]);
+            right = m.fill_x + m.fill_w - 1;
+            inner_right = m.meter_x + m.meter_w - 1 - m.border_w;
+            if (dark) {
+                TEQ_I(m.fill_x - m.meter_x - m.border_w, 2);
+                TCHECK(right <= inner_right - 2, "%s %.2f fill right %d > %d", fix[f], vals[v], right, inner_right - 2);
+                if (vals[v] >= 1.0) {
+                    TEQ_I(right, inner_right - 2);
+                } else {
+                    TCHECK(right < inner_right - 2, "%s %.2f below full %d", fix[f], vals[v], right);
+                }
+            } else {
+                TCHECK(right <= m.meter_x + m.meter_w - 1, "%s %.2f fill past meter %d", fix[f], vals[v], right);
+            }
+            rm_fix_tmp(tmp);
+        }
+    }
+}
+
+/* Gauge chrome follows the hero. Pause is the only dark hero. A qualifying
+ * total is drawn on the first refresh of that snapshot; a paused snapshot
+ * with no total stays hidden. */
+static void test_rain_theme(void)
+{
+    zk_ui_label_box_t b[96];
+    zk_ui_rain_dbg_t meter;
+    int n;
+    const zk_ui_label_box_t *tx;
+
+    assert_rain_theme("paused-rain", 1, 1);
+    assert_rain_theme("home-rain", 0, 1);
+    assert_rain_theme("paused-manual", 1, 1);
+    assert_rain_theme("paused-long", 1, 1);
+    assert_rain_theme("running", 0, 1);
+    assert_rain_theme("dc-manual-4", 0, 1);
+    assert_rain_theme("dc-soil-4", 0, 1);
+    assert_rain_theme("dc-soil-6", 0, 1);
+    assert_rain_theme("dc-soil-watering-6", 0, -1);
+    assert_rain_theme("home-fault", 0, 1);
+    assert_rain_theme("home-stale", 0, -1);
+    assert_rain_theme("home-onoff", 0, -1);
+    assert_rain_theme("running-long", 0, -1);
+    assert_rain_theme("dc-watering-4-longname", 0, -1);
+    assert_rain_theme("home-norain", 0, 0);
+    assert_rain_theme("dc-paused-6", 1, 0);
+
+    /* Same rain snapshot, other light heroes. Stop and offline do not recolor it. */
+    TCHECK(load_fix("home-rain", ZK_SCREEN_HOME) == 0, "load home-rain for stop");
+    zk_ui_debug_set_stop(ZK_STOP_WAIT);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    tx = n > 0 ? find_box(b, n, "rain_text") : NULL;
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "pending rain meter");
+    if (tx && meter.present) {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+        TEQ_I((int)meter.border_rgb, 0x1F6A64);
+    }
+    zk_ui_debug_set_stop(ZK_STOP_CONFIRMED);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    tx = n > 0 ? find_box(b, n, "rain_text") : NULL;
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "confirmed rain meter");
+    if (tx && meter.present) {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I(meter.border_opa, LV_OPA_COVER);
+    }
+    zk_ui_debug_set_stop(-1);
+    zk_data_debug_force_stale(1);
+    zk_ui_refresh();
+    n = grab(b, 96);
+    tx = n > 0 ? find_box(b, n, "rain_text") : NULL;
+    TCHECK(zk_ui_debug_rain(&meter) == 1, "offline rain meter");
+    if (tx && meter.present) {
+        TEQ_I((int)tx->rgb, 0x3A2A1F);
+        TEQ_I(meter.track_opa, LV_OPA_TRANSP);
+        TEQ_I((int)meter.fill_rgb, 0x1F6A64);
+    }
+    zk_data_debug_force_stale(0);
+    zk_ui_refresh();
+}
+
 int main(void)
 {
     zk_platform_opts_t opts;
@@ -3059,6 +3299,8 @@ int main(void)
     test_wide_words();
     test_running_icon();
     test_glyphs();
+    test_rain_theme();
+    test_rain_fill_right();
     zk_data_stop();
     lv_deinit();
     rc = zk_test_report("test_ui_text");

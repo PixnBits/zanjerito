@@ -80,4 +80,24 @@ typedef struct {
 /* Stepper bars after layout. NULL outs are skipped. */
 int zk_ui_debug_glyphs(zk_ui_glyph_dbg_t *minus, zk_ui_glyph_dbg_t *plus_h, zk_ui_glyph_dbg_t *plus_v);
 
+/* Rain meter after the current paint. Colors are 0xRRGGBB. Opacities are LV_OPA_*.
+ * text_opa is the rain sentence. fill_* and meter_* are absolute pixels from
+ * lv_obj_get_coords; w/h are exclusive extents (y + h - 1 is the last row). */
+typedef struct {
+    int present;
+    uint32_t track_rgb;
+    int track_opa;
+    uint32_t border_rgb;
+    int border_opa;
+    int border_w;
+    uint32_t fill_rgb;
+    int fill_opa;
+    int text_opa;
+    int fill_x, fill_y, fill_w, fill_h;
+    int meter_x, meter_y, meter_w, meter_h;
+} zk_ui_rain_dbg_t;
+
+/* 1 when the rain meter exists. */
+int zk_ui_debug_rain(zk_ui_rain_dbg_t *out);
+
 #endif
