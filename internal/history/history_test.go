@@ -268,7 +268,7 @@ func TestRecordNonBlockingWhenBufferFull(t *testing.T) {
 
 func TestRecordPersistsViaWriter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.json")
-	at := time.Date(2026, 9, 22, 8, 23, 0, 0, time.UTC)
+	at := time.Now().UTC().Add(-time.Hour)
 	l, err := Open(path, func() time.Time { return at })
 	if err != nil {
 		t.Fatal(err)
