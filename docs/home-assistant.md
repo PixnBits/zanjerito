@@ -6,6 +6,8 @@ The route is read-only and unauthenticated. Keep the controller's HTTP port on a
 
 The daemon never dials Home Assistant. If Home Assistant is down, slow, or not installed, schedules and valves are unchanged. Home Assistant polls; this process has no dependency on it.
 
+A separate read-only MQTT discovery sidecar is documented in [mqtt.md](./mqtt.md).
+
 Phase 2 is not this endpoint. Stop, pause, manual run, and authentication stay out of scope until a later change. Watering writes remain on their existing routes.
 
 ## Request

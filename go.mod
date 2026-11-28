@@ -2,9 +2,17 @@ module github.com/PixnBits/zanjerito
 
 go 1.24.0
 
-require github.com/warthog618/go-gpiocdev v0.9.1
+require (
+	github.com/eclipse/paho.mqtt.golang v1.5.1
+	github.com/warthog618/go-gpiocdev v0.9.1
+)
 
-require golang.org/x/sys v0.41.0 // indirect
+require (
+	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4 // indirect
+	golang.org/x/net v0.44.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
+)
 
 godebug (
 	multipathtcp=0
