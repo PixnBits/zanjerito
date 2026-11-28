@@ -1,6 +1,8 @@
 package hamqtt
 
 import (
+	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -162,5 +164,90 @@ func TestLoadConfigRequiresHAURL(t *testing.T) {
 func TestLoadConfigNilGetenv(t *testing.T) {
 	if _, err := LoadConfig(nil); err == nil {
 		t.Fatal("nil getenv: want error")
+	}
+}
+
+func TestLoadConfigCredentialCaps(t *testing.T) {
+	if MaxMQTTClientIDLen != 64 || MaxMQTTUserLen != 256 || MaxMQTTPassLen != 256 {
+		t.Fatalf("caps client=%d user=%d pass=%d", MaxMQTTClientIDLen, MaxMQTTUserLen, MaxMQTTPassLen)
+	}
+	cases := []struct {
+		key   string
+		limit int
+		fill  byte
+	}{
+		{"MQTT_CLIENT_ID", MaxMQTTClientIDLen, 'c'},
+		{"MQTT_USER", MaxMQTTUserLen, 'u'},
+		{"MQTT_PASS", MaxMQTTPassLen, 'p'},
+	}
+	for _, tc := range cases {
+		okVal := cappedValue(tc.limit, tc.fill, tc.key == "MQTT_PASS")
+		over := cappedValue(tc.limit+1, tc.fill, tc.key == "MQTT_PASS")
+		cfg, err := LoadConfig(credEnv(tc.key, okVal))
+		if err != nil {
+			t.Fatalf("%s at cap: %v", tc.key, err)
+		}
+		got := cfgField(cfg, tc.key)
+		if got != okVal {
+			t.Fatalf("%s at cap: value changed (len %d)", tc.key, len(got))
+		}
+		_, err = LoadConfig(credEnv(tc.key, over))
+		if err == nil {
+			t.Fatalf("%s cap+1: got nil error", tc.key)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, tc.key) || !strings.Contains(msg, strconv.Itoa(tc.limit)) {
+			t.Fatalf("%s cap+1: error %q", tc.key, msg)
+		}
+		if strings.Contains(msg, "ZQMARK") || strings.Contains(msg, over) {
+			t.Fatalf("%s cap+1: error contains the value", tc.key)
+		}
+	}
+	// 32 × U+00E1 is 64 bytes; 33 × is 66 bytes (still under a 64-rune cap).
+	at := strings.Repeat("á", MaxMQTTClientIDLen/2)
+	over := strings.Repeat("á", MaxMQTTClientIDLen/2+1)
+	if len(at) != MaxMQTTClientIDLen || len(over) <= MaxMQTTClientIDLen {
+		t.Fatalf("byte lengths at=%d over=%d", len(at), len(over))
+	}
+	if _, err := LoadConfig(credEnv("MQTT_CLIENT_ID", at)); err != nil {
+		t.Fatalf("64-byte client id: %v", err)
+	}
+	if _, err := LoadConfig(credEnv("MQTT_CLIENT_ID", over)); err == nil {
+		t.Fatal("66-byte client id: got nil error")
+	}
+}
+
+func credEnv(key, val string) func(string) string {
+	m := map[string]string{
+		"MQTT_URL":         "tcp://127.0.0.1:1883",
+		"ZANJERITO_HA_URL": "http://127.0.0.1:8080/api/ha",
+		key:                val,
+	}
+	return envMap(m)
+}
+
+func cappedValue(n int, fill byte, pad bool) string {
+	b := bytes.Repeat([]byte{fill}, n)
+	marker := []byte("ZQMARK")
+	if n >= len(marker) {
+		copy(b[n/2:], marker)
+	}
+	if pad && n >= 2 {
+		b[0] = ' '
+		b[n-1] = ' '
+	}
+	return string(b)
+}
+
+func cfgField(cfg Config, key string) string {
+	switch key {
+	case "MQTT_CLIENT_ID":
+		return cfg.ClientID
+	case "MQTT_USER":
+		return cfg.User
+	case "MQTT_PASS":
+		return cfg.Pass
+	default:
+		return ""
 	}
 }

@@ -30,9 +30,24 @@ func ParseState(body []byte) (zoneIDs []string, ok bool) {
 			continue
 		}
 		id, _ := zm["id"].(string)
-		if id != "" {
+		if validZoneID(id) {
 			zoneIDs = append(zoneIDs, id)
 		}
 	}
 	return zoneIDs, true
+}
+
+// validZoneID is "zone_" plus one or more ASCII digits.
+// Discovery pastes the id into a Jinja template.
+func validZoneID(id string) bool {
+	const prefix = "zone_"
+	if len(id) <= len(prefix) || id[:len(prefix)] != prefix {
+		return false
+	}
+	for i := len(prefix); i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

@@ -17,7 +17,11 @@ func NewHTTPFetcher(url string, timeout time.Duration) func(context.Context) ([]
 	return func(ctx context.Context) ([]byte, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
-			return nil, err
+			// A nil context has no URL in the error. A parse error quotes the raw URL.
+			if ctx == nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("invalid URL")
 		}
 		req.Header.Set("Accept", "application/json")
 		resp, err := c.Do(req)

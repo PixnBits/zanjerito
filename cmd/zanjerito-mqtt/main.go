@@ -102,8 +102,7 @@ func main() {
 	})
 	opts.SetOnConnectHandler(func(c mqtt.Client) {
 		tok := c.Subscribe(hamqtt.TopicHAStatus, 1, func(_ mqtt.Client, msg mqtt.Message) {
-			payload := append([]byte(nil), msg.Payload()...)
-			go bridge.OnHAStatus(payload)
+			dispatchHAStatus(msg.Payload(), bridge.OnHAStatus)
 		})
 		if !tok.WaitTimeout(opTimeout) {
 			log.Printf("subscribe %s: timeout", hamqtt.TopicHAStatus)
@@ -152,8 +151,22 @@ func main() {
 	}
 }
 
+const maxHAStatusPayload = 64
+
+// dispatchHAStatus copies payload and runs on in a goroutine.
+// Payloads longer than maxHAStatusPayload are dropped.
+func dispatchHAStatus(payload []byte, on func([]byte)) bool {
+	if len(payload) > maxHAStatusPayload {
+		return false
+	}
+	cp := append([]byte(nil), payload...)
+	go on(cp)
+	return true
+}
+
 func redactText(cfg hamqtt.Config, s string) string {
 	secrets := append([]string{cfg.Pass}, hamqtt.URLPasswords(cfg.URL)...)
+	secrets = append(secrets, hamqtt.URLPasswords(cfg.HAURL)...)
 	return hamqtt.Redact(s, secrets...)
 }
 

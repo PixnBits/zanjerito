@@ -1,6 +1,7 @@
 package hamqtt
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -76,5 +77,29 @@ func TestParseStateSkipsBadZoneEntries(t *testing.T) {
 	}
 	if !reflect.DeepEqual(ids, []string{"zone_1", "zone_2"}) {
 		t.Fatalf("zoneIDs %v", ids)
+	}
+}
+
+func TestParseStateAcceptsOnlyZoneN(t *testing.T) {
+	zones := []map[string]string{
+		{"id": "zone_1"},
+		{"id": "zone_12"},
+		{"id": "zone_"},
+		{"id": "zone_x"},
+		{"id": "front'}}{{"},
+		{"id": "zone_1 "},
+		{"id": "ZONE_1"},
+		{"id": "zone_١"},
+	}
+	body, err := json.Marshal(map[string]any{"phase": "Idle", "zones": zones})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, ok := ParseState(body)
+	if !ok {
+		t.Fatal("want ok")
+	}
+	if !reflect.DeepEqual(ids, []string{"zone_1", "zone_12"}) {
+		t.Fatalf("zoneIDs %q", ids)
 	}
 }

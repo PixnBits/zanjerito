@@ -312,3 +312,18 @@ func TestDiscoveryPauseSourceEmptyVsNull(t *testing.T) {
 		t.Fatalf("active_zone should guard JSON null, got %q", az)
 	}
 }
+
+func TestDiscoverySkipsHostileZoneID(t *testing.T) {
+	const hostile = "zone_1'}}{{ 7*7 }}"
+	raw, err := Discovery("v", []string{"zone_1", hostile}, []string{hostile, "zone_3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if strings.Contains(s, hostile) {
+		t.Fatal("hostile zone id emitted")
+	}
+	if !strings.Contains(s, `"zone_1"`) || !strings.Contains(s, `"zone_3"`) {
+		t.Fatal("valid zone id missing")
+	}
+}

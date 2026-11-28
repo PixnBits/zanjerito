@@ -16,6 +16,11 @@ const (
 	maxPoll         = 10 * time.Second
 
 	haURLRequired = "ZANJERITO_HA_URL is required (set it to the daemon LISTEN address, e.g. http://<controller-host>:8080/api/ha)"
+
+	// Byte caps on the value LoadConfig keeps (MQTT_PASS is not trimmed).
+	MaxMQTTClientIDLen = 64
+	MaxMQTTUserLen     = 256
+	MaxMQTTPassLen     = 256
 )
 
 // Config is the sidecar process settings. Topics are fixed.
@@ -64,6 +69,15 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	if cfg.ClientID == "" {
 		cfg.ClientID = defaultClientID
+	}
+	if len(cfg.ClientID) > MaxMQTTClientIDLen {
+		return Config{}, fmt.Errorf("MQTT_CLIENT_ID exceeds %d bytes", MaxMQTTClientIDLen)
+	}
+	if len(cfg.User) > MaxMQTTUserLen {
+		return Config{}, fmt.Errorf("MQTT_USER exceeds %d bytes", MaxMQTTUserLen)
+	}
+	if len(cfg.Pass) > MaxMQTTPassLen {
+		return Config{}, fmt.Errorf("MQTT_PASS exceeds %d bytes", MaxMQTTPassLen)
 	}
 	if err := validateHAURL(cfg.HAURL); err != nil {
 		return Config{}, err

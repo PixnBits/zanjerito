@@ -54,9 +54,15 @@ func Discovery(version string, zoneIDs []string, removed []string) ([]byte, erro
 	add("rain_unavailable", "binary_sensor", "Rain feed unavailable", onOff("rain_unavailable"), map[string]any{"dev_cla": "problem"})
 
 	for _, id := range zoneIDs {
+		if !validZoneID(id) {
+			continue
+		}
 		add(id, "binary_sensor", zoneName(id), zoneOnOff(id), map[string]any{"dev_cla": "running"})
 	}
 	for _, id := range removed {
+		if !validZoneID(id) {
+			continue
+		}
 		cmps[id] = map[string]any{"p": "binary_sensor"}
 	}
 

@@ -6,10 +6,10 @@ The sidecar is read-only. There are no command topics. Stop, pause, and manual r
 
 ## Setup
 
-The install script does not install this sidecar. Cross-compile on a workstation whose Go satisfies this module's `go 1.22` directive, copy the binary to the controller, then install the unit. Do not build on the Pi. Debian Bookworm's apt Go is 1.19, which is too old for this module.
+The install script does not install this sidecar. Cross-compile on a workstation whose Go satisfies this module's `go 1.24` directive, copy the binary to the controller, then install the unit. Do not build on the Pi. Debian Bookworm's apt Go is 1.19, which is too old for this module.
 
 ```sh
-# Workstation (Go that satisfies `go 1.22`):
+# Workstation (Go that satisfies `go 1.24`):
 make build-mqtt-arm       # 32-bit Pi OS -> dist/zanjerito-mqtt-linux-armv7
 # make build-mqtt-arm64   # 64-bit Pi OS -> dist/zanjerito-mqtt-linux-arm64
 # Copy that binary to the controller as /opt/zanjerito/zanjerito-mqtt (mode 0755).
@@ -47,6 +47,10 @@ Real file: `/opt/zanjerito/zanjerito-mqtt.env`, owner `root:root`, mode `0600`, 
 | `ZANJERITO_HA_URL` | (required) | `http` or `https` URL of `GET /api/ha`; must match daemon `LISTEN` |
 | `MQTT_POLL_INTERVAL` | `2s` | Poll period (Go duration). Rejected below `500ms` or above `10s` |
 | `MQTT_REFRESH_INTERVAL` | `5m` | Re-publish state even if unchanged |
+
+`MQTT_URL` is passed straight to Eclipse Paho v1.5.1. Paho accepts schemes such as `tcp://`, `ssl://`, `tls://`, `mqtt://`, `mqtts://`, `ws://`, and `wss://`. For a TLS broker use `ssl://` or `mqtts://`, with a broker certificate that chains to the system roots. This sidecar sets no TLS config, so there is no option for a custom CA or for skipping certificate verification. A `tcp://` URL sends the username and password in clear text; use it only on a trusted LAN.
+
+Paho dials `tcp://` and `mqtt://` through `golang.org/x/net/proxy.FromEnvironmentUsing`. `ALL_PROXY` or `all_proxy` set to a `socks5` or `socks5h` URL sends that dial via the proxy. For `ssl://`, `tls://`, and `mqtts://`, Paho dials directly unless `all_proxy` is set, in which case it uses `proxy.FromEnvironment`. `HTTP_PROXY` and `HTTPS_PROXY` are not read for these schemes. `ws://` and `wss://` are the exception: the websocket dialer uses `http.ProxyFromEnvironment`, which reads `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`. The unit does not set a proxy variable; leave `ALL_PROXY` and `all_proxy` unset for this service.
 
 ## Topics
 
